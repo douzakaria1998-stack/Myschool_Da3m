@@ -51,9 +51,6 @@ export default function DashboardPage() {
   const { data, getCenterStats, getGroupStats, setSelectedGroup, lang } = useApp();
   const stats = getCenterStats();
 
-  // Top view switcher: 'both' | 'groups' | 'students'
-  const [dashboardTab, setDashboardTab] = useState<'both' | 'groups' | 'students'>('both');
-
   // Groups state
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'active' | 'inactive' | 'today' | 'regular' | 'vip'>('all');
@@ -407,94 +404,8 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* View Mode Selector (Groups vs Students vs Both) */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '12px',
-          padding: '10px 16px',
-          backgroundColor: 'var(--md-sys-color-surface-container-low)',
-          borderRadius: 'var(--md-shape-sm)',
-          border: '1px solid var(--md-sys-color-outline-variant)'
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          <span style={{ fontWeight: 800, fontSize: '0.88rem', color: 'var(--md-sys-color-on-surface)' }}>
-            طريقة العرض:
-          </span>
-          <div
-            style={{
-              display: 'inline-flex',
-              backgroundColor: 'var(--md-sys-color-surface-container)',
-              borderRadius: 'var(--md-shape-full)',
-              padding: '3px'
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => setDashboardTab('both')}
-              style={{
-                padding: '6px 14px',
-                borderRadius: 'var(--md-shape-full)',
-                border: 'none',
-                backgroundColor: dashboardTab === 'both' ? 'var(--md-sys-color-primary)' : 'transparent',
-                color: dashboardTab === 'both' ? 'var(--md-sys-color-on-primary)' : 'var(--md-sys-color-on-surface-variant)',
-                fontWeight: 700,
-                fontSize: '0.8rem',
-                cursor: 'pointer',
-                transition: 'var(--transition-standard)'
-              }}
-            >
-              عرض الكل (الأفواج + الطلبة)
-            </button>
-            <button
-              type="button"
-              onClick={() => setDashboardTab('groups')}
-              style={{
-                padding: '6px 14px',
-                borderRadius: 'var(--md-shape-full)',
-                border: 'none',
-                backgroundColor: dashboardTab === 'groups' ? 'var(--md-sys-color-primary)' : 'transparent',
-                color: dashboardTab === 'groups' ? 'var(--md-sys-color-on-primary)' : 'var(--md-sys-color-on-surface-variant)',
-                fontWeight: 700,
-                fontSize: '0.8rem',
-                cursor: 'pointer',
-                transition: 'var(--transition-standard)'
-              }}
-            >
-              الأفواج الدراسية 📚 ({data.groups.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setDashboardTab('students')}
-              style={{
-                padding: '6px 14px',
-                borderRadius: 'var(--md-shape-full)',
-                border: 'none',
-                backgroundColor: dashboardTab === 'students' ? 'var(--md-sys-color-primary)' : 'transparent',
-                color: dashboardTab === 'students' ? 'var(--md-sys-color-on-primary)' : 'var(--md-sys-color-on-surface-variant)',
-                fontWeight: 700,
-                fontSize: '0.8rem',
-                cursor: 'pointer',
-                transition: 'var(--transition-standard)'
-              }}
-            >
-              سجل وبيانات جميع التلاميذ 👨‍🎓 ({allStudents.length})
-            </button>
-          </div>
-        </div>
-
-        <div style={{ fontSize: '0.8rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
-          إجمالي المسجلين: <strong style={{ color: 'var(--md-sys-color-primary)' }}>{allStudents.length}</strong> تلميذ عبر <strong>{data.groups.length}</strong> فوج
-        </div>
-      </div>
-
       {/* Group Directory & Quick Jump */}
-      {(dashboardTab === 'both' || dashboardTab === 'groups') && (
-        <div className="m3-card" style={{ padding: '24px' }}>
+      <div className="m3-card" style={{ padding: '24px' }}>
         {/* Filter bar */}
         <div
           style={{
@@ -943,11 +854,9 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
-      )}
 
       {/* Comprehensive Student Data Section */}
-      {(dashboardTab === 'both' || dashboardTab === 'students') && (
-        <div className="m3-card" style={{ padding: '24px' }}>
+      <div className="m3-card" style={{ padding: '24px', marginTop: '24px' }}>
           {/* Header & Controls */}
           <div
             style={{
@@ -1368,7 +1277,6 @@ export default function DashboardPage() {
             )}
           </div>
         </div>
-      )}
 
       {isAddGroupOpen && <AddGroupModal onClose={() => setIsAddGroupOpen(false)} />}
       <MultiGroupStudentEnrollModal isOpen={isEnrollModalOpen} onClose={() => setIsEnrollModalOpen(false)} />
