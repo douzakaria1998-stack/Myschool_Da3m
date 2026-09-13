@@ -279,18 +279,18 @@ export default function StudentsPage() {
         <table className="m3-table">
           <thead>
             <tr>
-              <th style={{ width: '40px', textAlign: 'center' }}>#</th>
-              <th>اسم ولقب التلميذ</th>
-              <th>رقم الهاتف</th>
-              <th>الفوج</th>
-              <th>المادة والأستاذ</th>
-              <th style={{ textAlign: 'center' }}>نوع التسجيل</th>
-              <th style={{ textAlign: 'center' }}>المطلوب</th>
-              <th style={{ textAlign: 'center' }}>المسدد</th>
-              <th style={{ textAlign: 'center' }}>الدين المتبقي</th>
-              <th style={{ textAlign: 'center' }}>سجل الحصص</th>
-              <th style={{ textAlign: 'center' }}>نسبة الحضور</th>
-              <th style={{ textAlign: 'center', width: '130px' }}>الإجراءات</th>
+              <th style={{ width: '40px', textAlign: 'center', whiteSpace: 'nowrap', padding: '10px 6px' }}>#</th>
+              <th style={{ minWidth: '150px', whiteSpace: 'nowrap', padding: '10px 12px' }}>اسم ولقب التلميذ</th>
+              <th style={{ minWidth: '110px', textAlign: 'center', whiteSpace: 'nowrap', padding: '10px 10px' }}>رقم الهاتف</th>
+              <th style={{ minWidth: '95px', textAlign: 'center', whiteSpace: 'nowrap', padding: '10px 10px' }}>الفوج</th>
+              <th style={{ minWidth: '170px', whiteSpace: 'nowrap', padding: '10px 12px' }}>المادة والأستاذ</th>
+              <th style={{ minWidth: '90px', textAlign: 'center', whiteSpace: 'nowrap', padding: '10px 8px' }}>نوع التسجيل</th>
+              <th style={{ minWidth: '95px', textAlign: 'center', whiteSpace: 'nowrap', padding: '10px 10px' }}>المطلوب</th>
+              <th style={{ minWidth: '95px', textAlign: 'center', whiteSpace: 'nowrap', padding: '10px 10px' }}>المسدد</th>
+              <th style={{ minWidth: '100px', textAlign: 'center', whiteSpace: 'nowrap', padding: '10px 10px' }}>الدين المتبقي</th>
+              <th style={{ minWidth: '115px', textAlign: 'center', whiteSpace: 'nowrap', padding: '10px 8px' }}>سجل الحصص</th>
+              <th style={{ minWidth: '85px', textAlign: 'center', whiteSpace: 'nowrap', padding: '10px 8px' }}>نسبة الحضور</th>
+              <th style={{ width: '130px', minWidth: '130px', textAlign: 'center', whiteSpace: 'nowrap', padding: '10px 10px' }}>الإجراءات</th>
             </tr>
           </thead>
           <tbody>
@@ -306,9 +306,16 @@ export default function StudentsPage() {
                 const maxSessions = item.sessionCount || 4;
 
                 return (
-                  <tr key={`${item.groupId}-${item.student.rowId}`}>
-                    <td style={{ textAlign: 'center', color: 'var(--md-sys-color-outline)' }}>{absIdx}</td>
-                    <td style={{ fontWeight: 700, color: 'var(--md-sys-color-on-surface)' }}>
+                  <tr
+                    key={`${item.groupId}-${item.student.rowId}`}
+                    style={{
+                      backgroundColor: idx % 2 === 1 ? 'var(--md-sys-color-surface-container-lowest)' : 'transparent'
+                    }}
+                  >
+                    <td style={{ textAlign: 'center', color: 'var(--md-sys-color-outline)', whiteSpace: 'nowrap', padding: '8px 6px' }}>
+                      {absIdx}
+                    </td>
+                    <td style={{ fontWeight: 700, color: 'var(--md-sys-color-on-surface)', whiteSpace: 'nowrap', padding: '8px 12px' }}>
                       <button
                         type="button"
                         onClick={() =>
@@ -324,41 +331,53 @@ export default function StudentsPage() {
                           fontWeight: 800,
                           color: 'var(--md-sys-color-primary)',
                           textAlign: 'right',
-                          cursor: 'pointer'
+                          cursor: 'pointer',
+                          whiteSpace: 'nowrap'
                         }}
                         title="عرض الملف الشامل للتلميذ"
                       >
                         {item.student.name}
                       </button>
                     </td>
-                    <td style={{ fontSize: '0.85rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
+                    <td style={{ fontSize: '0.82rem', color: 'var(--md-sys-color-on-surface-variant)', textAlign: 'center', whiteSpace: 'nowrap', padding: '8px 10px' }}>
                       {item.student.phone ? (
-                        <a href={`tel:${item.student.phone}`} style={{ color: 'inherit', textDecoration: 'none' }}>
+                        <a href={`tel:${item.student.phone}`} style={{ color: 'inherit', textDecoration: 'none', direction: 'ltr', display: 'inline-block' }}>
                           {item.student.phone}
                         </a>
                       ) : (
                         '—'
                       )}
                     </td>
-                    <td>
+                    <td style={{ textAlign: 'center', whiteSpace: 'nowrap', padding: '8px 10px' }}>
                       <span
                         style={{
-                          fontWeight: 700,
-                          color: item.isVip ? 'var(--status-vip)' : 'var(--md-sys-color-primary)'
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          fontWeight: 800,
+                          fontSize: '0.82rem',
+                          whiteSpace: 'nowrap',
+                          color: item.isVip ? 'var(--status-vip)' : 'var(--md-sys-color-primary)',
+                          backgroundColor: item.isVip ? 'var(--md-sys-color-surface-container)' : 'var(--md-sys-color-primary-container)',
+                          padding: '2px 8px',
+                          borderRadius: 'var(--md-shape-sm)'
                         }}
                       >
-                        {item.groupId} {item.isVip ? '★' : ''}
+                        {item.groupId} {item.isVip ? '★ VIP' : ''}
                       </span>
                     </td>
-                    <td style={{ fontSize: '0.85rem' }}>
-                      {item.subject} ({item.teacherName})
+                    <td style={{ fontSize: '0.84rem', whiteSpace: 'nowrap', padding: '8px 12px' }}>
+                      <span style={{ fontWeight: 700, color: 'var(--md-sys-color-on-surface)' }}>{item.subject}</span>
+                      <span style={{ color: 'var(--md-sys-color-outline)', margin: '0 5px' }}>•</span>
+                      <span style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>{item.teacherName}</span>
                     </td>
-                    <td style={{ textAlign: 'center' }}>
+                    <td style={{ textAlign: 'center', whiteSpace: 'nowrap', padding: '8px 8px' }}>
                       <span
                         style={{
                           fontSize: '0.75rem',
                           fontWeight: 700,
                           padding: '2px 8px',
+                          whiteSpace: 'nowrap',
                           borderRadius: 'var(--md-shape-sm)',
                           backgroundColor:
                             item.student.discount === '0'
@@ -383,23 +402,25 @@ export default function StudentsPage() {
                           : 'عادي'}
                       </span>
                     </td>
-                    <td style={{ textAlign: 'center', fontWeight: 700 }}>
+                    <td style={{ textAlign: 'center', fontWeight: 700, fontSize: '0.85rem', whiteSpace: 'nowrap', padding: '8px 10px' }}>
                       {item.student.fee.toLocaleString()} دج
                     </td>
-                    <td style={{ textAlign: 'center', color: 'var(--status-present)', fontWeight: 700 }}>
+                    <td style={{ textAlign: 'center', color: 'var(--status-present)', fontWeight: 700, fontSize: '0.85rem', whiteSpace: 'nowrap', padding: '8px 10px' }}>
                       {item.student.totalReceived.toLocaleString()} دج
                     </td>
-                    <td style={{ textAlign: 'center' }}>
+                    <td style={{ textAlign: 'center', whiteSpace: 'nowrap', padding: '8px 10px' }}>
                       <span
                         style={{
                           fontWeight: 800,
+                          fontSize: '0.85rem',
+                          whiteSpace: 'nowrap',
                           color: item.student.debt > 0 ? 'var(--status-absent)' : 'var(--status-present)'
                         }}
                       >
                         {item.student.debt > 0 ? `${item.student.debt.toLocaleString()} دج` : 'مسدد ✓'}
                       </span>
                     </td>
-                    <td style={{ textAlign: 'center', padding: '6px 4px' }}>
+                    <td style={{ textAlign: 'center', padding: '8px 6px', whiteSpace: 'nowrap' }}>
                       <div style={{ display: 'inline-flex', gap: '3px', alignItems: 'center' }}>
                         {Array.from({ length: Math.min(maxSessions, 4) }).map((_, sIdx) => {
                           const att = item.student.attendance?.[sIdx];
@@ -442,11 +463,11 @@ export default function StudentsPage() {
                         })}
                       </div>
                     </td>
-                    <td style={{ textAlign: 'center', fontWeight: 700 }}>
+                    <td style={{ textAlign: 'center', fontWeight: 700, fontSize: '0.85rem', whiteSpace: 'nowrap', padding: '8px 8px' }}>
                       {item.student.totalAttendance} / {item.sessionCount}
                     </td>
-                    <td style={{ textAlign: 'center' }}>
-                      <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
+                    <td style={{ textAlign: 'center', whiteSpace: 'nowrap', padding: '8px 10px' }}>
+                      <div style={{ display: 'inline-flex', gap: '5px', justifyContent: 'center', alignItems: 'center' }}>
                         <button
                           type="button"
                           onClick={() =>
@@ -456,7 +477,7 @@ export default function StudentsPage() {
                             })
                           }
                           className="m3-btn m3-btn-outlined m3-btn-sm"
-                          style={{ padding: '2px 7px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '3px' }}
+                          style={{ padding: '3px 8px', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
                           title="عرض الملف الشامل وسجل الحضور"
                         >
                           <FileText size={13} />
@@ -471,8 +492,8 @@ export default function StudentsPage() {
                             })
                           }
                           className="m3-btn m3-btn-primary m3-btn-sm"
-                          style={{ padding: '2px 7px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '3px' }}
-                          title="تسجيل دفعة أو طباعة وصل"
+                          style={{ padding: '3px 8px', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
+                          title="تسجيل دفعة أو تعديل المبالغ"
                         >
                           <Receipt size={13} />
                           <span>دفع</span>
