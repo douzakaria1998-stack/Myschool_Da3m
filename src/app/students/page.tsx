@@ -67,8 +67,6 @@ export default function StudentsPage() {
   const debtorsList = allStudents.filter((item) => item.student.debt > 0);
   const paidList = allStudents.filter((item) => item.student.debt === 0 && item.student.fee > 0);
   const exemptList = allStudents.filter((item) => item.student.discount === '0');
-  const totalDebtAmount = debtorsList.reduce((sum, item) => sum + item.student.debt, 0);
-  const totalPaidAmount = allStudents.reduce((sum, item) => sum + item.student.totalReceived, 0);
 
   // Filtered students
   const filteredStudents = useMemo(() => {
@@ -157,85 +155,7 @@ export default function StudentsPage() {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      {/* Top Header */}
-      <div
-        className="m3-card"
-        style={{
-          padding: '20px 24px',
-          backgroundColor: 'var(--md-sys-color-surface-container-low)',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '16px'
-        }}
-      >
-        <div>
-          <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--md-sys-color-on-surface)' }}>
-            سجل وبيانات جميع التلاميذ ({filteredStudents.length} / {totalStudents} تلميذ)
-          </h2>
-          <p style={{ fontSize: '0.85rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
-            يتضمن جميع بيانات التلميذ: أرقام الهواتف، الفوج والأستاذ، حضور كل حصة بالتفصيل، المبالغ المسددة، والديون
-          </p>
-        </div>
-
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-          <button
-            onClick={handleExportAllCsv}
-            className="m3-btn m3-btn-primary m3-btn-sm"
-            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-          >
-            <Download size={15} />
-            <span>تصدير جميع التلاميذ CSV</span>
-          </button>
-          <button
-            onClick={handleExportDebtsCsv}
-            className="m3-btn m3-btn-outlined m3-btn-sm"
-            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-          >
-            <Download size={15} />
-            <span>تصدير قائمة الديون CSV</span>
-          </button>
-        </div>
-      </div>
-
-      {/* KPI Cards */}
-      <div className="m3-grid-stats">
-        <div className="m3-card" style={{ padding: '16px' }}>
-          <div style={{ fontSize: '0.85rem', color: 'var(--md-sys-color-on-surface-variant)', marginBottom: '6px' }}>
-            إجمالي التلاميذ المسجلين
-          </div>
-          <div style={{ fontSize: '1.6rem', fontWeight: 800 }}>{totalStudents} تلميذ</div>
-        </div>
-
-        <div className="m3-card" style={{ padding: '16px' }}>
-          <div style={{ fontSize: '0.85rem', color: 'var(--status-present)', marginBottom: '6px' }}>
-            المبالغ المحصلة (المسدد)
-          </div>
-          <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--status-present)' }}>
-            {totalPaidAmount.toLocaleString()} دج
-          </div>
-        </div>
-
-        <div className="m3-card" style={{ padding: '16px' }}>
-          <div style={{ fontSize: '0.85rem', color: 'var(--status-absent)', marginBottom: '6px' }}>
-            إجمالي الديون المتبقية
-          </div>
-          <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--status-absent)' }}>
-            {totalDebtAmount.toLocaleString()} دج
-          </div>
-        </div>
-
-        <div className="m3-card" style={{ padding: '16px' }}>
-          <div style={{ fontSize: '0.85rem', color: 'var(--status-absent)', marginBottom: '6px' }}>
-            الطلبة المدينون (عليهم دين)
-          </div>
-          <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--status-absent)' }}>
-            {debtorsList.length} تلميذ
-          </div>
-        </div>
-      </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
 
       {/* Filter and Search Bar */}
       <div
@@ -292,44 +212,65 @@ export default function StudentsPage() {
           </select>
         </div>
 
-        {/* Status Filter Chips */}
-        <div
-          style={{
-            display: 'flex',
-            backgroundColor: 'var(--md-sys-color-surface-container)',
-            borderRadius: 'var(--md-shape-full)',
-            padding: '3px',
-            flexWrap: 'wrap',
-            gap: '4px'
-          }}
-        >
-          {[
-            { id: 'all', label: `الكل (${totalStudents})` },
-            { id: 'debt', label: `عليهم دين (${debtorsList.length})` },
-            { id: 'paid', label: `مسدد بالكامل (${paidList.length})` },
-            { id: 'exempt', label: `معفى (${exemptList.length})` },
-            { id: 'vip', label: 'أفواج VIP ★' }
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => {
-                setFilterType(tab.id as any);
-                setPage(1);
-              }}
-              style={{
-                padding: '5px 12px',
-                borderRadius: 'var(--md-shape-full)',
-                border: 'none',
-                backgroundColor: filterType === tab.id ? 'var(--md-sys-color-primary)' : 'transparent',
-                color: filterType === tab.id ? 'var(--md-sys-color-on-primary)' : 'var(--md-sys-color-on-surface-variant)',
-                fontWeight: 700,
-                fontSize: '0.8rem',
-                cursor: 'pointer'
-              }}
-            >
-              {tab.label}
-            </button>
-          ))}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          {/* Status Filter Chips */}
+          <div
+            style={{
+              display: 'flex',
+              backgroundColor: 'var(--md-sys-color-surface-container)',
+              borderRadius: 'var(--md-shape-full)',
+              padding: '3px',
+              flexWrap: 'wrap',
+              gap: '4px'
+            }}
+          >
+            {[
+              { id: 'all', label: `الكل (${totalStudents})` },
+              { id: 'debt', label: `عليهم دين (${debtorsList.length})` },
+              { id: 'paid', label: `مسدد بالكامل (${paidList.length})` },
+              { id: 'exempt', label: `معفى (${exemptList.length})` },
+              { id: 'vip', label: 'أفواج VIP ★' }
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => {
+                  setFilterType(tab.id as any);
+                  setPage(1);
+                }}
+                style={{
+                  padding: '5px 12px',
+                  borderRadius: 'var(--md-shape-full)',
+                  border: 'none',
+                  backgroundColor: filterType === tab.id ? 'var(--md-sys-color-primary)' : 'transparent',
+                  color: filterType === tab.id ? 'var(--md-sys-color-on-primary)' : 'var(--md-sys-color-on-surface-variant)',
+                  fontWeight: 700,
+                  fontSize: '0.8rem',
+                  cursor: 'pointer'
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          <button
+            onClick={handleExportAllCsv}
+            className="m3-btn m3-btn-outlined m3-btn-sm"
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', padding: '6px 12px' }}
+            title="تصدير جميع التلاميذ إلى ملف CSV"
+          >
+            <Download size={14} />
+            <span>تصدير CSV</span>
+          </button>
+          <button
+            onClick={handleExportDebtsCsv}
+            className="m3-btn m3-btn-outlined m3-btn-sm"
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', padding: '6px 12px' }}
+            title="تصدير قائمة ديون التلاميذ فقط"
+          >
+            <Download size={14} />
+            <span>تصدير الديون</span>
+          </button>
         </div>
       </div>
 
