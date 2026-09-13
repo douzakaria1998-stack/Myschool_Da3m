@@ -27,7 +27,17 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
       }}
     >
       <TopAppBar />
-      <div style={{ display: 'flex', flex: 1, minHeight: 'calc(100vh - 64px)' }}>
+      <div
+        className="main-layout-container"
+        style={{
+          display: 'flex',
+          flex: 1,
+          paddingTop: '64px',
+          paddingInlineStart: '260px',
+          minHeight: '100vh',
+          boxSizing: 'border-box'
+        }}
+      >
         <NavRail />
         <main
           style={{
@@ -36,7 +46,8 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
             maxWidth: '1600px',
             margin: '0 auto',
             width: '100%',
-            minWidth: 0
+            minWidth: 0,
+            boxSizing: 'border-box'
           }}
         >
           {children}

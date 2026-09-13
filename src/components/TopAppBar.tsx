@@ -18,9 +18,12 @@ export default function TopAppBar() {
         alignItems: 'center',
         justifyContent: 'space-between',
         padding: '0 24px',
-        position: 'sticky',
+        position: 'fixed',
         top: 0,
-        zIndex: 50
+        left: 0,
+        right: 0,
+        zIndex: 50,
+        boxSizing: 'border-box'
       }}
     >
       {/* Brand & Center Title */}

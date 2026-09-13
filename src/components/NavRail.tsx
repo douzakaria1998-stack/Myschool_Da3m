@@ -64,6 +64,8 @@ export default function NavRail() {
     }
   ];
 
+  const isRtl = lang === 'ar';
+
   return (
     <aside
       className="no-print"
@@ -75,8 +77,11 @@ export default function NavRail() {
         flexDirection: 'column',
         justifyContent: 'space-between',
         padding: '16px 12px',
-        position: 'sticky',
+        position: 'fixed',
         top: '64px',
+        bottom: 0,
+        right: isRtl ? 0 : 'auto',
+        left: isRtl ? 'auto' : 0,
         height: 'calc(100vh - 64px)',
         overflowY: 'auto',
         flexShrink: 0,

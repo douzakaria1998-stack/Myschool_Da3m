@@ -429,6 +429,11 @@ body {
     display: none !important;
   }
 
+  .main-layout-container {
+    padding-top: 0 !important;
+    padding-inline-start: 0 !important;
+  }
+
   .print-only {
     display: block !important;
   }
