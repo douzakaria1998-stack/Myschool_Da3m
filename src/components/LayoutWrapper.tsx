@@ -36,7 +36,7 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
             maxWidth: '1600px',
             margin: '0 auto',
             width: '100%',
-            overflowY: 'auto'
+            minWidth: 0
           }}
         >
           {children}

@@ -46,9 +46,9 @@ export default function NavRail() {
     },
     {
       href: '/students',
-      icon: CreditCard,
-      labelAr: 'الطلبة وسجل الديون',
-      labelEn: 'Students & Debt'
+      icon: Users,
+      labelAr: 'سجل وبيانات جميع التلاميذ',
+      labelEn: 'All Student Records'
     },
     {
       href: '/print',
@@ -70,12 +70,18 @@ export default function NavRail() {
       style={{
         width: '260px',
         backgroundColor: 'var(--md-sys-color-surface-container-low)',
-        borderLeft: '1px solid var(--md-sys-color-outline-variant)',
+        borderInlineEnd: '1px solid var(--md-sys-color-outline-variant)',
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'space-between',
         padding: '16px 12px',
-        minHeight: 'calc(100vh - 64px)'
+        position: 'sticky',
+        top: '64px',
+        height: 'calc(100vh - 64px)',
+        overflowY: 'auto',
+        flexShrink: 0,
+        zIndex: 40,
+        boxSizing: 'border-box'
       }}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
