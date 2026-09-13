@@ -1007,8 +1007,23 @@ export default function DashboardPage() {
                   <th style={{ minWidth: '95px', textAlign: 'center', padding: '10px 6px', whiteSpace: 'nowrap' }}>المسدد</th>
                   <th style={{ minWidth: '100px', textAlign: 'center', padding: '10px 6px', whiteSpace: 'nowrap' }}>الدين المتبقي</th>
                   <th style={{ minWidth: '115px', textAlign: 'center', padding: '10px 6px', whiteSpace: 'nowrap' }}>سجل الحصص</th>
-                  <th style={{ minWidth: '85px', textAlign: 'center', padding: '10px 6px', whiteSpace: 'nowrap' }}>نسبة الحضور</th>
-                  <th style={{ width: '130px', minWidth: '130px', textAlign: 'center', padding: '10px 6px', whiteSpace: 'nowrap' }}>الإجراءات</th>
+                  <th
+                    style={{
+                      width: '120px',
+                      minWidth: '120px',
+                      textAlign: 'center',
+                      padding: '8px 8px',
+                      whiteSpace: 'nowrap',
+                      position: 'sticky',
+                      left: 0,
+                      zIndex: 11,
+                      backgroundColor: 'var(--md-sys-color-surface-container)',
+                      boxShadow: '-3px 0 6px rgba(0, 0, 0, 0.08)',
+                      borderInlineStart: '1px solid var(--md-sys-color-outline-variant)'
+                    }}
+                  >
+                    الإجراءات
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -1183,8 +1198,20 @@ export default function DashboardPage() {
                         <td style={{ textAlign: 'center', fontWeight: 800, padding: '6px 4px', fontSize: '0.78rem' }}>
                           {item.student.totalAttendance || 0}/{item.sessionCount}
                         </td>
-                        <td style={{ textAlign: 'center', padding: '6px 4px' }}>
-                          <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
+                        <td
+                          style={{
+                            textAlign: 'center',
+                            padding: '6px 8px',
+                            whiteSpace: 'nowrap',
+                            position: 'sticky',
+                            left: 0,
+                            zIndex: 10,
+                            backgroundColor: idx % 2 === 1 ? 'var(--md-sys-color-surface-container-lowest)' : 'var(--md-sys-color-surface)',
+                            boxShadow: '-3px 0 6px rgba(0, 0, 0, 0.08)',
+                            borderInlineStart: '1px solid var(--md-sys-color-outline-variant)'
+                          }}
+                        >
+                          <div style={{ display: 'inline-flex', gap: '5px', justifyContent: 'center', alignItems: 'center' }}>
                             <button
                               type="button"
                               onClick={() => setSelectedStudentProfile({ student: item.student, groupId: item.groupId })}
