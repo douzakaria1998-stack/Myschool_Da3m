@@ -1041,36 +1041,26 @@ export default function DashboardPage() {
                     return (
                       <tr
                         key={`${item.groupId}-${item.student.rowId}`}
+                        onClick={() => setSelectedStudentProfile({ student: item.student, groupId: item.groupId })}
                         style={{
-                          backgroundColor: idx % 2 === 1 ? 'var(--md-sys-color-surface-container-lowest)' : 'transparent'
+                          cursor: 'pointer',
+                          backgroundColor: idx % 2 === 1 ? 'var(--md-sys-color-surface-container-lowest)' : 'transparent',
+                          transition: 'background-color 0.15s ease'
                         }}
+                        className="clickable-student-row"
+                        title="اضغط على أي مكان في السطر لفتح الملف الشامل للتلميذ"
                       >
                         <td style={{ textAlign: 'center', color: 'var(--md-sys-color-outline)', padding: '6px 4px', whiteSpace: 'nowrap' }}>
                           {absIdx}
                         </td>
-                        <td style={{ fontWeight: 700, color: 'var(--md-sys-color-on-surface)', padding: '6px 8px', whiteSpace: 'nowrap' }}>
-                          <button
-                            type="button"
-                            onClick={() => setSelectedStudentProfile({ student: item.student, groupId: item.groupId })}
-                            className="m3-btn-text"
-                            style={{
-                              padding: 0,
-                              fontSize: '0.82rem',
-                              fontWeight: 800,
-                              color: 'var(--md-sys-color-primary)',
-                              textAlign: 'right',
-                              cursor: 'pointer',
-                              whiteSpace: 'nowrap'
-                            }}
-                            title="فتح الملف الشامل للتلميذ"
-                          >
-                            {item.student.name}
-                          </button>
+                        <td style={{ fontWeight: 800, color: 'var(--md-sys-color-primary)', padding: '6px 8px', whiteSpace: 'nowrap', fontSize: '0.82rem' }}>
+                          <span>{item.student.name}</span>
                         </td>
                         <td style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: '0.75rem', textAlign: 'center', padding: '6px 8px', whiteSpace: 'nowrap' }}>
                           {item.student.phone ? (
                             <a
                               href={`tel:${item.student.phone}`}
+                              onClick={(e) => e.stopPropagation()}
                               style={{ color: 'inherit', textDecoration: 'none', direction: 'ltr', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
                             >
                               <Phone size={11} />
@@ -1210,11 +1200,15 @@ export default function DashboardPage() {
                             boxShadow: '-3px 0 6px rgba(0, 0, 0, 0.08)',
                             borderInlineStart: '1px solid var(--md-sys-color-outline-variant)'
                           }}
+                          onClick={(e) => e.stopPropagation()}
                         >
                           <div style={{ display: 'inline-flex', gap: '5px', justifyContent: 'center', alignItems: 'center' }}>
                             <button
                               type="button"
-                              onClick={() => setSelectedStudentProfile({ student: item.student, groupId: item.groupId })}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedStudentProfile({ student: item.student, groupId: item.groupId });
+                              }}
                               className="m3-btn m3-btn-outlined m3-btn-sm"
                               style={{ padding: '2px 7px', fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: '3px' }}
                               title="عرض كافة بيانات وسجل الحضور والمالية للتلميذ"
@@ -1224,7 +1218,10 @@ export default function DashboardPage() {
                             </button>
                             <button
                               type="button"
-                              onClick={() => setActivePaymentModal({ student: item.student, groupId: item.groupId })}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActivePaymentModal({ student: item.student, groupId: item.groupId });
+                              }}
                               className="m3-btn m3-btn-primary m3-btn-sm"
                               style={{ padding: '2px 7px', fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: '3px' }}
                               title="تسديد دفعة جديدة أو طباعة وصل"

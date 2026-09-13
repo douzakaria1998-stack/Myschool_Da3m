@@ -324,40 +324,33 @@ export default function StudentsPage() {
                 return (
                   <tr
                     key={`${item.groupId}-${item.student.rowId}`}
+                    onClick={() =>
+                      setSelectedProfileStudent({
+                        student: item.student,
+                        groupId: item.groupId
+                      })
+                    }
                     style={{
-                      backgroundColor: idx % 2 === 1 ? 'var(--md-sys-color-surface-container-lowest)' : 'transparent'
+                      cursor: 'pointer',
+                      backgroundColor: idx % 2 === 1 ? 'var(--md-sys-color-surface-container-lowest)' : 'transparent',
+                      transition: 'background-color 0.15s ease'
                     }}
+                    className="clickable-student-row"
+                    title="اضغط على أي مكان في السطر لفتح الملف الشامل للتلميذ"
                   >
                     <td style={{ textAlign: 'center', color: 'var(--md-sys-color-outline)', whiteSpace: 'nowrap', padding: '7px 4px', fontSize: '0.8rem' }}>
                       {absIdx}
                     </td>
-                    <td style={{ fontWeight: 700, color: 'var(--md-sys-color-on-surface)', whiteSpace: 'nowrap', padding: '7px 8px' }}>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setSelectedProfileStudent({
-                            student: item.student,
-                            groupId: item.groupId
-                          })
-                        }
-                        className="m3-btn-text"
-                        style={{
-                          padding: 0,
-                          fontSize: '0.82rem',
-                          fontWeight: 800,
-                          color: 'var(--md-sys-color-primary)',
-                          textAlign: 'right',
-                          cursor: 'pointer',
-                          whiteSpace: 'nowrap'
-                        }}
-                        title="عرض الملف الشامل للتلميذ"
-                      >
-                        {item.student.name}
-                      </button>
+                    <td style={{ fontWeight: 800, color: 'var(--md-sys-color-primary)', whiteSpace: 'nowrap', padding: '7px 8px', fontSize: '0.84rem' }}>
+                      <span>{item.student.name}</span>
                     </td>
                     <td style={{ fontSize: '0.8rem', color: 'var(--md-sys-color-on-surface-variant)', textAlign: 'center', whiteSpace: 'nowrap', padding: '7px 6px' }}>
                       {item.student.phone ? (
-                        <a href={`tel:${item.student.phone}`} style={{ color: 'inherit', textDecoration: 'none', direction: 'ltr', display: 'inline-block' }}>
+                        <a
+                          href={`tel:${item.student.phone}`}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ color: 'inherit', textDecoration: 'none', direction: 'ltr', display: 'inline-block' }}
+                        >
                           {item.student.phone}
                         </a>
                       ) : (
@@ -494,16 +487,18 @@ export default function StudentsPage() {
                         boxShadow: '-3px 0 6px rgba(0, 0, 0, 0.08)',
                         borderInlineStart: '1px solid var(--md-sys-color-outline-variant)'
                       }}
+                      onClick={(e) => e.stopPropagation()}
                     >
                       <div style={{ display: 'inline-flex', gap: '5px', justifyContent: 'center', alignItems: 'center' }}>
                         <button
                           type="button"
-                          onClick={() =>
+                          onClick={(e) => {
+                            e.stopPropagation();
                             setSelectedProfileStudent({
                               student: item.student,
                               groupId: item.groupId
-                            })
-                          }
+                            });
+                          }}
                           className="m3-btn m3-btn-outlined m3-btn-sm"
                           style={{ padding: '3px 8px', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '3px', whiteSpace: 'nowrap' }}
                           title="عرض الملف الشامل وسجل الحضور"
@@ -513,12 +508,13 @@ export default function StudentsPage() {
                         </button>
                         <button
                           type="button"
-                          onClick={() =>
+                          onClick={(e) => {
+                            e.stopPropagation();
                             setActiveStudentModal({
                               groupId: item.groupId,
                               student: item.student
-                            })
-                          }
+                            });
+                          }}
                           className="m3-btn m3-btn-primary m3-btn-sm"
                           style={{ padding: '3px 8px', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '3px', whiteSpace: 'nowrap' }}
                           title="تسجيل دفعة أو تعديل المبالغ"

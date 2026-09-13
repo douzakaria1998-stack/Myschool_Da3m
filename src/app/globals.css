@@ -370,6 +370,14 @@ body {
   background: var(--md-sys-color-surface-container-low);
 }
 
+.clickable-student-row {
+  cursor: pointer;
+}
+
+.clickable-student-row:hover td {
+  background-color: var(--md-sys-color-surface-container-low) !important;
+}
+
 /* Modal Backdrop & Dialog */
 .m3-dialog-backdrop {
   position: fixed;
