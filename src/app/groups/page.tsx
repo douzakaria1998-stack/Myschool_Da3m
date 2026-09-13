@@ -186,7 +186,8 @@ export default function GroupsPage() {
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
-          gap: '18px'
+          gap: '18px',
+          alignItems: 'start'
         }}
       >
         {filteredGroups.map((group) => {
@@ -200,11 +201,11 @@ export default function GroupsPage() {
               key={group.id}
               className="m3-card"
               style={{
-                padding: '20px',
+                padding: '16px',
                 backgroundColor: 'var(--md-sys-color-surface-container-lowest)',
                 display: 'flex',
                 flexDirection: 'column',
-                justifyContent: 'space-between',
+                gap: '10px',
                 opacity: statusInfo.status === 'inactive' ? 0.94 : 1,
                 border: isToday
                   ? '2px solid var(--md-sys-color-primary)'
@@ -215,291 +216,292 @@ export default function GroupsPage() {
                   : '1px solid var(--md-sys-color-outline-variant)'
               }}
             >
-              <div>
-                {/* Header Row: Group ID + Status on right, Edit + Tier on left */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: statusInfo.status === 'inactive' ? '8px' : '10px', gap: '8px' }}>
-                  {/* Right side: Group ID + Status Badge + Today/VIP */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--md-sys-color-primary)', whiteSpace: 'nowrap', lineHeight: 1 }}>
-                      {group.id}
-                    </span>
+              {/* Header Row: Group ID + Status on right, Edit on left (strictly one line) */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                {/* Right side: Group ID + Status Badge + Today/VIP */}
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexWrap: 'nowrap', overflow: 'hidden' }}>
+                  <span style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--md-sys-color-primary)', whiteSpace: 'nowrap', lineHeight: 1 }}>
+                    {group.id}
+                  </span>
 
-                    {/* Status Badge directly next to group ID */}
-                    {statusInfo.status === 'active' ? (
-                      <span
-                        className="m3-chip"
-                        style={{
-                          backgroundColor: 'var(--status-present-container)',
-                          color: 'var(--status-present)',
-                          fontWeight: 800,
-                          fontSize: '0.72rem',
-                          padding: '3px 8px',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '5px',
-                          whiteSpace: 'nowrap'
-                        }}
-                        title={`فوج نشط - أنجز ${statusInfo.currentSession} من أصل ${statusInfo.totalSessions} حصص`}
-                      >
-                        <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'var(--status-present)' }} />
-                        <span>نشط ({statusInfo.currentSession}/{statusInfo.totalSessions})</span>
-                      </span>
-                    ) : (
-                      <span
-                        className="m3-chip"
-                        style={{
-                          backgroundColor: 'var(--md-sys-color-surface-container-highest)',
-                          color: 'var(--md-sys-color-outline)',
-                          fontWeight: 800,
-                          fontSize: '0.72rem',
-                          padding: '3px 8px',
-                          border: '1px solid var(--md-sys-color-outline-variant)',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '5px',
-                          whiteSpace: 'nowrap'
-                        }}
-                        title={`فوج غير نشط - بلغ آخر حصة (${statusInfo.totalSessions}/${statusInfo.totalSessions})`}
-                      >
-                        <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'var(--md-sys-color-outline)' }} />
-                        <span>غير نشط • مكتمل ({statusInfo.totalSessions}/{statusInfo.totalSessions})</span>
-                      </span>
-                    )}
-
-                    {isToday && (
-                      <span
-                        className="m3-chip"
-                        style={{
-                          backgroundColor: 'var(--status-present-container)',
-                          color: 'var(--status-present)',
-                          fontWeight: 800,
-                          border: '1px solid var(--status-present)',
-                          padding: '2px 8px',
-                          whiteSpace: 'nowrap'
-                        }}
-                      >
-                        اليوم ★
-                      </span>
-                    )}
-                    {group.isVip && <span className="m3-chip m3-chip-vip" style={{ whiteSpace: 'nowrap' }}>VIP خاص</span>}
-                  </div>
-
-                  {/* Left side: The 2 buttons (Edit + Pricing Tier) aligned to the left */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-                    <button
-                      type="button"
-                      onClick={() => setEditingGroupId(group.id)}
-                      className="m3-btn-text"
+                  {/* Status Badge directly next to group ID */}
+                  {statusInfo.status === 'active' ? (
+                    <span
+                      className="m3-chip"
                       style={{
+                        backgroundColor: 'var(--status-present-container)',
+                        color: 'var(--status-present)',
+                        fontWeight: 800,
+                        fontSize: '0.7rem',
+                        padding: '2px 7px',
                         display: 'inline-flex',
                         alignItems: 'center',
                         gap: '4px',
-                        padding: '3px 8px',
-                        borderRadius: 'var(--md-shape-sm)',
-                        backgroundColor: 'var(--md-sys-color-surface-container-high)',
-                        border: '1px solid var(--md-sys-color-outline-variant)',
-                        color: 'var(--md-sys-color-primary)',
-                        fontSize: '0.78rem',
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                        transition: 'var(--transition-standard)',
                         whiteSpace: 'nowrap'
                       }}
-                      title="تعديل جميع معلومات الفوج"
+                      title={`فوج نشط - أنجز ${statusInfo.currentSession} من أصل ${statusInfo.totalSessions} حصص`}
                     >
-                      <Edit3 size={13} />
-                      <span>تعديل</span>
-                    </button>
-
+                      <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'var(--status-present)' }} />
+                      <span>نشط ({statusInfo.currentSession}/{statusInfo.totalSessions})</span>
+                    </span>
+                  ) : (
                     <span
+                      className="m3-chip"
                       style={{
-                        fontSize: '0.8rem',
+                        backgroundColor: 'var(--md-sys-color-surface-container-highest)',
+                        color: 'var(--md-sys-color-outline)',
                         fontWeight: 800,
-                        backgroundColor: 'var(--md-sys-color-primary-container)',
-                        color: 'var(--md-sys-color-on-primary-container)',
-                        padding: '3px 8px',
-                        borderRadius: 'var(--md-shape-sm)',
-                        whiteSpace: 'nowrap',
-                        direction: 'ltr',
+                        fontSize: '0.7rem',
+                        padding: '2px 7px',
+                        border: '1px solid var(--md-sys-color-outline-variant)',
                         display: 'inline-flex',
                         alignItems: 'center',
-                        justifyContent: 'center',
-                        letterSpacing: '0.5px'
+                        gap: '4px',
+                        whiteSpace: 'nowrap'
+                      }}
+                      title={`فوج غير نشط - بلغ آخر حصة (${statusInfo.totalSessions}/${statusInfo.totalSessions})`}
+                    >
+                      <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'var(--md-sys-color-outline)' }} />
+                      <span>غير نشط ({statusInfo.totalSessions}/{statusInfo.totalSessions})</span>
+                    </span>
+                  )}
+
+                  {isToday && (
+                    <span
+                      className="m3-chip"
+                      style={{
+                        backgroundColor: 'var(--status-present-container)',
+                        color: 'var(--status-present)',
+                        fontWeight: 800,
+                        border: '1px solid var(--status-present)',
+                        padding: '2px 6px',
+                        fontSize: '0.7rem',
+                        whiteSpace: 'nowrap'
                       }}
                     >
-                      {group.type}
+                      اليوم ★
                     </span>
-                  </div>
+                  )}
+                  {group.isVip && (
+                    <span
+                      className="m3-chip m3-chip-vip"
+                      style={{
+                        whiteSpace: 'nowrap',
+                        fontSize: '0.7rem',
+                        padding: '2px 7px'
+                      }}
+                    >
+                      VIP خاص
+                    </span>
+                  )}
                 </div>
 
-                {/* Rollover / New ID Button: Placed below, sized to the whole space (width: 100%) */}
-                {statusInfo.status === 'inactive' && (
+                {/* Left side: Edit button aligned to the left */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
                   <button
                     type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setRenewingGroupId(group.id);
-                    }}
+                    onClick={() => setEditingGroupId(group.id)}
                     className="m3-btn-text"
                     style={{
-                      width: '100%',
-                      display: 'flex',
+                      display: 'inline-flex',
                       alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '6px',
-                      padding: '6px 12px',
-                      fontSize: '0.78rem',
-                      fontWeight: 800,
+                      gap: '4px',
+                      padding: '3px 8px',
                       borderRadius: 'var(--md-shape-sm)',
-                      backgroundColor: 'var(--md-sys-color-primary-container)',
-                      color: 'var(--md-sys-color-on-primary-container)',
-                      border: '1px solid var(--md-sys-color-primary)',
+                      backgroundColor: 'var(--md-sys-color-surface-container-high)',
+                      border: '1px solid var(--md-sys-color-outline-variant)',
+                      color: 'var(--md-sys-color-primary)',
+                      fontSize: '0.76rem',
+                      fontWeight: 700,
                       cursor: 'pointer',
-                      whiteSpace: 'nowrap',
-                      marginBottom: '10px',
-                      transition: 'var(--transition-standard)'
+                      transition: 'var(--transition-standard)',
+                      whiteSpace: 'nowrap'
                     }}
-                    title="فتح دورة جديدة ونقل التلاميذ الذين حضروا الحصة الأولى"
+                    title="تعديل جميع معلومات الفوج"
                   >
-                    <RotateCw size={13} />
-                    <span>دورة جديدة 🔁</span>
+                    <Edit3 size={12} />
+                    <span>تعديل</span>
                   </button>
-                )}
+                </div>
+              </div>
 
-                {/* Teacher name first, then subject, after that time in ONE line */}
-                <div
+              {/* Rollover / New ID Button: Placed below, sized to the whole space (width: 100%) */}
+              {statusInfo.status === 'inactive' && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setRenewingGroupId(group.id);
+                  }}
+                  className="m3-btn-text"
                   style={{
+                    width: '100%',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '8px',
-                    flexWrap: 'wrap',
-                    backgroundColor: isToday ? 'var(--md-sys-color-primary-container)' : 'var(--md-sys-color-surface-container)',
-                    border: isToday ? '1px solid var(--md-sys-color-primary)' : '1px solid var(--md-sys-color-outline-variant)',
-                    padding: '8px 12px',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    padding: '6px 12px',
+                    fontSize: '0.78rem',
+                    fontWeight: 800,
                     borderRadius: 'var(--md-shape-sm)',
-                    marginBottom: '14px',
-                    fontSize: '0.85rem'
+                    backgroundColor: 'var(--md-sys-color-primary-container)',
+                    color: 'var(--md-sys-color-on-primary-container)',
+                    border: '1px solid var(--md-sys-color-primary)',
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                    transition: 'var(--transition-standard)'
+                  }}
+                  title="فتح دورة جديدة ونقل التلاميذ الذين حضروا الحصة الأولى"
+                >
+                  <RotateCw size={13} />
+                  <span>دورة جديدة 🔁</span>
+                </button>
+              )}
+
+              {/* Teacher name first, then subject, after that time in ONE line */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  flexWrap: 'wrap',
+                  backgroundColor: isToday ? 'var(--md-sys-color-primary-container)' : 'var(--md-sys-color-surface-container)',
+                  border: isToday ? '1px solid var(--md-sys-color-primary)' : '1px solid var(--md-sys-color-outline-variant)',
+                  padding: '7px 10px',
+                  borderRadius: 'var(--md-shape-sm)',
+                  fontSize: '0.82rem'
+                }}
+              >
+                {/* 1. Teacher name first */}
+                <span style={{ color: isToday ? 'var(--md-sys-color-on-primary-container)' : 'var(--md-sys-color-on-surface)' }}>
+                  الأستاذ: <strong>{group.teacherName}</strong>
+                </span>
+
+                <span style={{ color: 'var(--md-sys-color-outline)', fontWeight: 700 }}>•</span>
+
+                {/* 2. Then subject */}
+                <strong style={{ color: 'var(--md-sys-color-primary)', fontWeight: 800, fontSize: '0.86rem' }}>
+                  {group.subject}
+                </strong>
+
+                <span style={{ color: 'var(--md-sys-color-outline)', fontWeight: 700 }}>•</span>
+
+                {/* 3. After that time */}
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: isToday ? 'var(--md-sys-color-on-primary-container)' : 'var(--md-sys-color-on-surface-variant)' }}>
+                  <Calendar size={13} color={isToday ? 'var(--md-sys-color-on-primary-container)' : 'var(--md-sys-color-primary)'} />
+                  <span>
+                    {group.day1} ({formatGroupTime(group.time1) || 'صباحاً'})
+                    {group.day2 ? ` • ${group.day2} (${formatGroupTime(group.time2)})` : ''}
+                  </span>
+                  {isToday && <span style={{ fontWeight: 800, color: 'var(--status-present)', marginInlineStart: '4px' }}>★ موعد اليوم</span>}
+                </div>
+              </div>
+
+              {/* Financial breakdown per student */}
+              {(() => {
+                const tier = data.pricingTiers.find((t) => t.id === group.type);
+                const fee = groupSheet?.studentFee ?? group.studentFee ?? tier?.price ?? (group.type.includes('10000') ? 10000 : 2500);
+                const teacherRate = groupSheet?.teacherPayPerStudent ?? group.teacherPayPerStudent ?? tier?.teacherRate ?? (group.type.includes('10000') ? 7500 : 1500);
+                const schoolRate = groupSheet?.schoolSharePerStudent ?? group.schoolSharePerStudent ?? tier?.schoolRate ?? (fee - teacherRate);
+
+                return (
+                  <div
+                    style={{
+                      backgroundColor: 'var(--md-sys-color-surface-container-low)',
+                      border: '1px solid var(--md-sys-color-outline-variant)',
+                      borderRadius: 'var(--md-shape-sm)',
+                      padding: '8px 10px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                      <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--md-sys-color-on-surface)', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        <Coins size={14} color="var(--md-sys-color-primary)" />
+                        <span>المستحقات لكل تلميذ:</span>
+                      </span>
+                      <span
+                        style={{
+                          fontSize: '0.74rem',
+                          fontWeight: 800,
+                          backgroundColor: 'var(--md-sys-color-primary-container)',
+                          color: 'var(--md-sys-color-on-primary-container)',
+                          padding: '2px 8px',
+                          borderRadius: 'var(--md-shape-sm)',
+                          direction: 'ltr',
+                          letterSpacing: '0.5px'
+                        }}
+                      >
+                        {group.type}
+                      </span>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px', textAlign: 'center' }}>
+                      <div style={{ backgroundColor: 'var(--md-sys-color-surface)', padding: '4px 2px', borderRadius: '4px' }}>
+                        <div style={{ fontSize: '0.66rem', color: 'var(--md-sys-color-on-surface-variant)' }}>الاشتراك</div>
+                        <div style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--md-sys-color-primary)' }}>{fee.toLocaleString()} دج</div>
+                      </div>
+                      <div style={{ backgroundColor: 'var(--md-sys-color-surface)', padding: '4px 2px', borderRadius: '4px' }}>
+                        <div style={{ fontSize: '0.66rem', color: 'var(--md-sys-color-on-surface-variant)' }}>الأستاذ</div>
+                        <div style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--status-present)' }}>{teacherRate.toLocaleString()} دج</div>
+                      </div>
+                      <div style={{ backgroundColor: 'var(--md-sys-color-surface)', padding: '4px 2px', borderRadius: '4px' }}>
+                        <div style={{ fontSize: '0.66rem', color: 'var(--md-sys-color-on-surface-variant)' }}>المدرسة</div>
+                        <div style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--status-vip)' }}>{schoolRate.toLocaleString()} دج</div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Financial overview */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr 1fr',
+                  gap: '8px',
+                  textAlign: 'center'
+                }}
+              >
+                <div
+                  style={{
+                    padding: '8px 4px',
+                    backgroundColor: 'var(--md-sys-color-surface-container-low)',
+                    borderRadius: 'var(--md-shape-sm)'
                   }}
                 >
-                  {/* 1. Teacher name first */}
-                  <span style={{ color: isToday ? 'var(--md-sys-color-on-primary-container)' : 'var(--md-sys-color-on-surface)' }}>
-                    الأستاذ: <strong>{group.teacherName}</strong>
-                  </span>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)' }}>التلاميذ</div>
+                  <div style={{ fontSize: '1rem', fontWeight: 800 }}>{stats.studentCount}</div>
+                </div>
 
-                  <span style={{ color: 'var(--md-sys-color-outline)', fontWeight: 700 }}>•</span>
-
-                  {/* 2. Then subject */}
-                  <strong style={{ color: 'var(--md-sys-color-primary)', fontWeight: 800, fontSize: '0.9rem' }}>
-                    {group.subject}
-                  </strong>
-
-                  <span style={{ color: 'var(--md-sys-color-outline)', fontWeight: 700 }}>•</span>
-
-                  {/* 3. After that time */}
-                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: isToday ? 'var(--md-sys-color-on-primary-container)' : 'var(--md-sys-color-on-surface-variant)' }}>
-                    <Calendar size={13} color={isToday ? 'var(--md-sys-color-on-primary-container)' : 'var(--md-sys-color-primary)'} />
-                    <span>
-                      {group.day1} ({formatGroupTime(group.time1) || 'صباحاً'})
-                      {group.day2 ? ` • ${group.day2} (${formatGroupTime(group.time2)})` : ''}
-                    </span>
-                    {isToday && <span style={{ fontWeight: 800, color: 'var(--status-present)', marginInlineStart: '4px' }}>★ موعد اليوم</span>}
+                <div
+                  style={{
+                    padding: '8px 4px',
+                    backgroundColor: 'var(--status-present-container)',
+                    borderRadius: 'var(--md-shape-sm)'
+                  }}
+                >
+                  <div style={{ fontSize: '0.75rem', color: 'var(--status-present)' }}>المحصل</div>
+                  <div style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--status-present)' }}>
+                    {stats.totalReceived.toLocaleString()}
                   </div>
                 </div>
 
-                {/* Financial breakdown per student */}
-                {(() => {
-                  const tier = data.pricingTiers.find((t) => t.id === group.type);
-                  const fee = groupSheet?.studentFee ?? group.studentFee ?? tier?.price ?? (group.type.includes('10000') ? 10000 : 2500);
-                  const teacherRate = groupSheet?.teacherPayPerStudent ?? group.teacherPayPerStudent ?? tier?.teacherRate ?? (group.type.includes('10000') ? 7500 : 1500);
-                  const schoolRate = groupSheet?.schoolSharePerStudent ?? group.schoolSharePerStudent ?? tier?.schoolRate ?? (fee - teacherRate);
-
-                  return (
-                    <div
-                      style={{
-                        backgroundColor: 'var(--md-sys-color-surface-container-low)',
-                        border: '1px solid var(--md-sys-color-outline-variant)',
-                        borderRadius: 'var(--md-shape-sm)',
-                        padding: '8px 10px',
-                        marginBottom: '14px'
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                        <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--md-sys-color-on-surface)', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                          <Coins size={14} color="var(--md-sys-color-primary)" />
-                          <span>المستحقات لكل تلميذ:</span>
-                        </span>
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px', textAlign: 'center' }}>
-                        <div style={{ backgroundColor: 'var(--md-sys-color-surface)', padding: '4px 2px', borderRadius: '4px' }}>
-                          <div style={{ fontSize: '0.66rem', color: 'var(--md-sys-color-on-surface-variant)' }}>الاشتراك</div>
-                          <div style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--md-sys-color-primary)' }}>{fee.toLocaleString()} دج</div>
-                        </div>
-                        <div style={{ backgroundColor: 'var(--md-sys-color-surface)', padding: '4px 2px', borderRadius: '4px' }}>
-                          <div style={{ fontSize: '0.66rem', color: 'var(--md-sys-color-on-surface-variant)' }}>الأستاذ</div>
-                          <div style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--status-present)' }}>{teacherRate.toLocaleString()} دج</div>
-                        </div>
-                        <div style={{ backgroundColor: 'var(--md-sys-color-surface)', padding: '4px 2px', borderRadius: '4px' }}>
-                          <div style={{ fontSize: '0.66rem', color: 'var(--md-sys-color-on-surface-variant)' }}>المدرسة</div>
-                          <div style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--status-vip)' }}>{schoolRate.toLocaleString()} دج</div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {/* Financial overview */}
                 <div
                   style={{
-                    display: 'grid',
-                    gridTemplateColumns: '1fr 1fr 1fr',
-                    gap: '8px',
-                    textAlign: 'center',
-                    marginBottom: '16px'
+                    padding: '8px 4px',
+                    backgroundColor: stats.totalDebt > 0 ? 'var(--status-absent-container)' : 'var(--md-sys-color-surface-container-low)',
+                    borderRadius: 'var(--md-shape-sm)'
                   }}
                 >
-                  <div
-                    style={{
-                      padding: '8px 4px',
-                      backgroundColor: 'var(--md-sys-color-surface-container-low)',
-                      borderRadius: 'var(--md-shape-sm)'
-                    }}
-                  >
-                    <div style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)' }}>التلاميذ</div>
-                    <div style={{ fontSize: '1rem', fontWeight: 800 }}>{stats.studentCount}</div>
+                  <div style={{ fontSize: '0.75rem', color: stats.totalDebt > 0 ? 'var(--status-absent)' : 'var(--md-sys-color-on-surface-variant)' }}>
+                    الديون
                   </div>
-
                   <div
                     style={{
-                      padding: '8px 4px',
-                      backgroundColor: 'var(--status-present-container)',
-                      borderRadius: 'var(--md-shape-sm)'
+                      fontSize: '0.95rem',
+                      fontWeight: 800,
+                      color: stats.totalDebt > 0 ? 'var(--status-absent)' : 'var(--md-sys-color-on-surface)'
                     }}
                   >
-                    <div style={{ fontSize: '0.75rem', color: 'var(--status-present)' }}>المحصل</div>
-                    <div style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--status-present)' }}>
-                      {stats.totalReceived.toLocaleString()}
-                    </div>
-                  </div>
-
-                  <div
-                    style={{
-                      padding: '8px 4px',
-                      backgroundColor: stats.totalDebt > 0 ? 'var(--status-absent-container)' : 'var(--md-sys-color-surface-container-low)',
-                      borderRadius: 'var(--md-shape-sm)'
-                    }}
-                  >
-                    <div style={{ fontSize: '0.75rem', color: stats.totalDebt > 0 ? 'var(--status-absent)' : 'var(--md-sys-color-on-surface-variant)' }}>
-                      الديون
-                    </div>
-                    <div
-                      style={{
-                        fontSize: '0.95rem',
-                        fontWeight: 800,
-                        color: stats.totalDebt > 0 ? 'var(--status-absent)' : 'var(--md-sys-color-on-surface)'
-                      }}
-                    >
-                      {stats.totalDebt.toLocaleString()}
-                    </div>
+                    {stats.totalDebt.toLocaleString()}
                   </div>
                 </div>
               </div>
