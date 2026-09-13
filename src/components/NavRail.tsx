@@ -76,7 +76,7 @@ export default function NavRail() {
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'space-between',
-        padding: '16px 12px',
+        padding: '12px 10px',
         position: 'fixed',
         top: '64px',
         bottom: 0,
@@ -89,23 +89,7 @@ export default function NavRail() {
         boxSizing: 'border-box'
       }}
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '6px 12px 12px',
-            borderBottom: '1px solid var(--md-sys-color-outline-variant)',
-            marginBottom: '6px'
-          }}
-        >
-          <img
-            src="/logo.svg"
-            alt={data.centerName}
-            style={{ height: '36px', width: 'auto', objectFit: 'contain' }}
-          />
-        </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
         {navItems.map((item) => {
           const isActive = pathname === item.href;
           const Icon = item.icon;
@@ -117,12 +101,13 @@ export default function NavRail() {
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '12px',
-                padding: '12px 16px',
+                gap: '10px',
+                padding: '9px 12px',
                 borderRadius: 'var(--md-shape-full)',
                 textDecoration: 'none',
                 fontWeight: isActive ? 700 : 500,
-                fontSize: '0.95rem',
+                fontSize: '0.84rem',
+                whiteSpace: 'nowrap',
                 color: isActive
                   ? 'var(--md-sys-color-on-primary-container)'
                   : 'var(--md-sys-color-on-surface-variant)',
@@ -132,7 +117,7 @@ export default function NavRail() {
                 transition: 'var(--transition-standard)'
               }}
             >
-              <Icon size={20} color={isActive ? 'var(--md-sys-color-primary)' : 'currentColor'} />
+              <Icon size={18} color={isActive ? 'var(--md-sys-color-primary)' : 'currentColor'} />
               <span>{lang === 'ar' ? item.labelAr : item.labelEn}</span>
             </Link>
           );
@@ -143,18 +128,19 @@ export default function NavRail() {
       <div
         className="m3-card"
         style={{
-          padding: '14px',
+          padding: '10px 12px',
           backgroundColor: 'var(--md-sys-color-surface-container)',
-          border: '1px solid var(--md-sys-color-outline-variant)'
+          border: '1px solid var(--md-sys-color-outline-variant)',
+          borderRadius: 'var(--md-shape-md)'
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-          <Sparkles size={16} color="var(--md-sys-color-primary)" />
-          <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--md-sys-color-primary)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+          <Sparkles size={14} color="var(--md-sys-color-primary)" />
+          <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--md-sys-color-primary)' }}>
             {lang === 'ar' ? 'إحصائيات سريعة' : 'Quick Stats'}
           </span>
         </div>
-        <div style={{ fontSize: '0.8rem', color: 'var(--md-sys-color-on-surface-variant)', lineHeight: 1.6 }}>
+        <div style={{ fontSize: '0.74rem', color: 'var(--md-sys-color-on-surface-variant)', lineHeight: 1.5 }}>
           <div>الأفواج: <strong>{data.groups.length} فوج</strong></div>
           <div>الأساتذة: <strong>{data.teachers.length} أستاذ</strong></div>
           <div>الاشتراكات: <strong>{data.pricingTiers.length} فئات</strong></div>
