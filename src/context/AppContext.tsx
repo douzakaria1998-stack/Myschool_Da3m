@@ -128,9 +128,18 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
       changed = true;
     }
 
-    // Normalize sessionDates to YYYY/MM/DD
-    const currentDates = gSheet.sessionDates || [];
-    const sessionCount = currentDates.length > 0 ? currentDates.length : (gSheet.sessionCount || 4);
+    // Enforce 4 sessions for all groups as requested
+    const sessionCount = 4;
+    if (gSheet.sessionCount !== 4) {
+      changed = true;
+    }
+
+    // Normalize sessionDates to YYYY/MM/DD and strictly cap to 4 sessions
+    let currentDates = (gSheet.sessionDates || []).slice(0, 4);
+    if ((gSheet.sessionDates || []).length !== 4) {
+      changed = true;
+    }
+
     const hasPlaceholders =
       currentDates.length === 0 ||
       currentDates.some((d) => !d || /^\d{1,2}$/.test(d.trim()) || d.includes('حصة') || !d.trim());
@@ -142,14 +151,14 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
         currentDates.every((d) => !d || /^\d{1,2}$/.test(d.trim()) || d.includes('حصة') || !d.trim());
 
       if (allPlaceholders) {
-        normalizedDates = generateSessionDates(gSheet.day1 || 'السبت', sessionCount);
+        normalizedDates = generateSessionDates(gSheet.day1 || 'السبت', 4);
       } else {
         const firstValid = currentDates.find(
           (d) => /^\d{4}[./\-]\d{1,2}[./\-]\d{1,2}/.test(d) || /^\d{1,2}[./\-]\d{1,2}[./\-]\d{4}/.test(d)
         );
         normalizedDates = generateSessionDates(
           gSheet.day1 || 'السبت',
-          sessionCount,
+          4,
           firstValid ? formatToYYYYMMDD(firstValid) : undefined
         );
       }
@@ -162,12 +171,37 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
       });
     }
 
-    let finalStudents = cleanStudents;
+    if (normalizedDates.length > 4) {
+      normalizedDates = normalizedDates.slice(0, 4);
+      changed = true;
+    } else if (normalizedDates.length < 4) {
+      normalizedDates = generateSessionDates(
+        gSheet.day1 || 'السبت',
+        4,
+        normalizedDates[0] ? formatToYYYYMMDD(normalizedDates[0]) : undefined
+      );
+      changed = true;
+    }
+
+    // Enforce 4 sessions for all students
+    let finalStudents = cleanStudents.map((s) => {
+      let att = (s.attendance || []).slice(0, 4);
+      while (att.length < 4) att.push('');
+      let payments = (s.payments || []).slice(0, 4);
+      while (payments.length < 4) payments.push('');
+      if ((s.attendance || []).length !== 4) changed = true;
+      return {
+        ...s,
+        attendance: att,
+        payments: payments
+      };
+    });
+
     const seedGroup = (initialSeedData.groupData as Record<string, GroupSheet>)?.[finalGid];
     if (cleanStudents.length === 0 && seedGroup && seedGroup.students && seedGroup.students.length > 0) {
       finalStudents = seedGroup.students;
       if (seedGroup.sessionDates && seedGroup.sessionDates.length > 0) {
-        normalizedDates = seedGroup.sessionDates;
+        normalizedDates = seedGroup.sessionDates.slice(0, 4);
       }
       changed = true;
     }
@@ -182,6 +216,7 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
     newGroupData[finalGid] = {
       ...gSheet,
       groupId: finalGid,
+      sessionCount: 4,
       sessionDates: normalizedDates,
       status: finalStatus,
       students: finalStudents
@@ -217,12 +252,12 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
 
     if (!seenIds.has(cleanId)) {
       seenIds.add(cleanId);
-      cleanGroups.push({ ...g, id: cleanId, status: cleanStatus });
+      cleanGroups.push({ ...g, id: cleanId, status: cleanStatus, sessionCount: 4 });
     } else {
       // Duplicate ID detected (e.g. duplicate BAC01) - assign next ascending ID!
       const uniqueId = getNextGroupId(g.isVip || cleanId.startsWith('BACV'), cleanGroups);
       seenIds.add(uniqueId);
-      cleanGroups.push({ ...g, id: uniqueId, status: cleanStatus });
+      cleanGroups.push({ ...g, id: uniqueId, status: cleanStatus, sessionCount: 4 });
       changed = true;
     }
   }
