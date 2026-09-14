@@ -182,6 +182,19 @@
       "teacherId": "D04",
       "teacherName": "عبدالرؤوف بن عمارة",
       "sessionCount": 4
+    },
+    {
+      "id": "BAC10",
+      "teacherId": "",
+      "teacherName": "",
+      "subject": "رياضيات",
+      "day1": "السبت",
+      "time1": "08:00",
+      "day2": "",
+      "time2": "",
+      "type": "4-2500",
+      "isVip": false,
+      "sessionCount": 4
     }
   ],
   "teachers": [
@@ -11400,6 +11413,23 @@
         "2026/09/28",
         "2026/10/05"
       ]
+    },
+    "BAC10": {
+      "groupId": "BAC10",
+      "teacherName": "",
+      "subject": "رياضيات",
+      "day1": "السبت",
+      "time1": "08:00",
+      "type": "4-2500",
+      "isVip": false,
+      "sessionCount": 4,
+      "sessionDates": [
+        "2026/08/22",
+        "2026/08/29",
+        "2026/09/05",
+        "2026/09/12"
+      ],
+      "students": []
     }
   },
   "centerName": "مؤسسة دعم للدروس الخصوصية والتعليمية",
