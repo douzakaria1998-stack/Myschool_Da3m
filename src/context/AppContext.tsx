@@ -1,7 +1,8 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import initialSeedData from '../data/initialData.json';
+import { supabase } from '../lib/supabaseClient';
 import {
   CenterData,
   StudentRecord,
@@ -32,6 +33,10 @@ interface AppContextType {
   toggleTheme: () => void;
   lang: 'ar' | 'en';
   toggleLang: () => void;
+  // Cloud Sync
+  cloudSyncStatus: 'synced' | 'syncing' | 'offline' | 'error';
+  lastSyncedAt: Date | null;
+  syncNow: () => Promise<void>;
   // Student Actions
   updateAttendance: (groupId: string, rowId: number, sessionIndex: number, status: AttendanceStatus) => void;
   markAllPresent: (groupId: string, sessionIndex: number, studentRowIds?: number[]) => void;
@@ -265,8 +270,45 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [lang, setLang] = useState<'ar' | 'en'>('ar');
 
-  // Load from localStorage on mount
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<'synced' | 'syncing' | 'offline' | 'error'>('synced');
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
+  const cloudSyncTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isSavingRef = useRef<boolean>(false);
+
+  // Cloud save to Supabase
+  const saveToCloud = useCallback(async (newData: CenterData) => {
+    try {
+      setCloudSyncStatus('syncing');
+      isSavingRef.current = true;
+      const { error } = await supabase
+        .from('center_data')
+        .upsert({
+          id: 'main',
+          data: newData,
+          updated_at: new Date().toISOString()
+        });
+
+      if (error) {
+        console.error('Supabase cloud sync error:', error);
+        setCloudSyncStatus('error');
+      } else {
+        setCloudSyncStatus('synced');
+        setLastSyncedAt(new Date());
+      }
+    } catch (err) {
+      console.error('Failed to sync to Supabase:', err);
+      setCloudSyncStatus('offline');
+    } finally {
+      setTimeout(() => {
+        isSavingRef.current = false;
+      }, 500);
+    }
+  }, []);
+
+  // Load from localStorage immediately, then fetch latest from Supabase
   useEffect(() => {
+    let isMounted = true;
+
     try {
       const savedData = localStorage.getItem(STORAGE_KEY);
       if (savedData) {
@@ -292,9 +334,75 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, []);
 
-  // Save changes to localStorage
+    // Fetch latest from Supabase cloud
+    const fetchCloudData = async () => {
+      try {
+        const { data: remoteRow, error } = await supabase
+          .from('center_data')
+          .select('data, updated_at')
+          .eq('id', 'main')
+          .maybeSingle();
+
+        if (!isMounted) return;
+
+        if (error) {
+          console.warn('Supabase fetch error, running offline:', error);
+          setCloudSyncStatus('offline');
+          return;
+        }
+
+        if (remoteRow && remoteRow.data) {
+          const { cleaned } = sanitizeData(remoteRow.data as CenterData);
+          setData(cleaned);
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(cleaned));
+          } catch (e) {}
+          setLastSyncedAt(new Date(remoteRow.updated_at || Date.now()));
+          setCloudSyncStatus('synced');
+        } else {
+          // Supabase is empty, initialize it with current data
+          const { cleaned } = sanitizeData(initialSeedData as unknown as CenterData);
+          saveToCloud(cleaned);
+        }
+      } catch (err) {
+        console.warn('Network error reaching Supabase:', err);
+        if (isMounted) setCloudSyncStatus('offline');
+      }
+    };
+
+    fetchCloudData();
+
+    // Realtime subscription for multi-device synchronization
+    const channel = supabase
+      .channel('center_data_realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'center_data', filter: 'id=eq.main' },
+        (payload) => {
+          if (isSavingRef.current) return; // Don't overwrite local changes with our own echo
+          if (payload.new && (payload.new as any).data) {
+            const incoming = (payload.new as any).data as CenterData;
+            const { cleaned } = sanitizeData(incoming);
+            setData(cleaned);
+            try {
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(cleaned));
+            } catch (e) {}
+            setLastSyncedAt(new Date((payload.new as any).updated_at || Date.now()));
+            setCloudSyncStatus('synced');
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      if (cloudSyncTimerRef.current) clearTimeout(cloudSyncTimerRef.current);
+      supabase.removeChannel(channel);
+    };
+  }, [saveToCloud]);
+
+  // Save changes locally and debounce sync to Supabase
   const persistData = (newData: CenterData) => {
     setData(newData);
     try {
@@ -302,6 +410,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } catch (e) {
       console.error('Failed to persist data:', e);
     }
+
+    // Debounced cloud sync (500ms)
+    if (cloudSyncTimerRef.current) {
+      clearTimeout(cloudSyncTimerRef.current);
+    }
+    setCloudSyncStatus('syncing');
+    cloudSyncTimerRef.current = setTimeout(() => {
+      saveToCloud(newData);
+    }, 500);
+  };
+
+  // Manual one-click sync
+  const syncNow = async () => {
+    if (cloudSyncTimerRef.current) {
+      clearTimeout(cloudSyncTimerRef.current);
+    }
+    await saveToCloud(data);
   };
 
   const toggleTheme = () => {
@@ -1383,6 +1508,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         toggleTheme,
         lang,
         toggleLang,
+        cloudSyncStatus,
+        lastSyncedAt,
+        syncNow,
         updateAttendance,
         markAllPresent,
         updatePayment,

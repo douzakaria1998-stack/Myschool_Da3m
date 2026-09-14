@@ -1,11 +1,34 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { Sun, Moon, Download, GraduationCap, School } from 'lucide-react';
+import { Sun, Moon, Download, GraduationCap, School, CloudCheck, CloudOff, RefreshCw } from 'lucide-react';
 
 export default function TopAppBar() {
-  const { data, theme, toggleTheme, lang, toggleLang, exportDataJson } = useApp();
+  const {
+    data,
+    theme,
+    toggleTheme,
+    lang,
+    toggleLang,
+    exportDataJson,
+    cloudSyncStatus,
+    lastSyncedAt,
+    syncNow
+  } = useApp();
+
+  const [isManualSyncing, setIsManualSyncing] = useState(false);
+
+  const handleManualSync = async () => {
+    setIsManualSyncing(true);
+    try {
+      await syncNow();
+    } finally {
+      setTimeout(() => setIsManualSyncing(false), 500);
+    }
+  };
+
+  const isSyncing = cloudSyncStatus === 'syncing' || isManualSyncing;
 
   return (
     <header
@@ -65,6 +88,69 @@ export default function TopAppBar() {
 
       {/* Action Buttons */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        {/* Cloud Sync Status & Manual Sync Button */}
+        <button
+          onClick={handleManualSync}
+          disabled={isSyncing}
+          className="m3-btn m3-btn-sm"
+          title={
+            cloudSyncStatus === 'synced'
+              ? (lang === 'ar'
+                  ? `متزامن سحابياً مع Supabase ${lastSyncedAt ? `(آخر حفظ: ${lastSyncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })})` : ''} - اضغط للمزامنة الفورية`
+                  : 'Synced with Supabase - Click to sync now')
+              : isSyncing
+              ? (lang === 'ar' ? 'جاري المزامنة مع السحابة...' : 'Syncing with Supabase...')
+              : (lang === 'ar' ? 'غير متصل بالسحابة (محلي) - اضغط لإعادة المحاولة' : 'Cloud offline - Click to retry')
+          }
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '6px 12px',
+            borderRadius: 'var(--md-shape-full)',
+            border: cloudSyncStatus === 'error'
+              ? '1px solid #ef4444'
+              : cloudSyncStatus === 'offline'
+              ? '1px solid #f59e0b'
+              : '1px solid var(--md-sys-color-outline-variant)',
+            backgroundColor: isSyncing
+              ? 'var(--md-sys-color-primary-container)'
+              : cloudSyncStatus === 'error'
+              ? '#fee2e2'
+              : cloudSyncStatus === 'offline'
+              ? '#fef3c7'
+              : 'var(--md-sys-color-surface-container-high)',
+            color: isSyncing
+              ? 'var(--md-sys-color-on-primary-container)'
+              : cloudSyncStatus === 'error'
+              ? '#991b1b'
+              : cloudSyncStatus === 'offline'
+              ? '#92400e'
+              : 'var(--md-sys-color-on-surface)',
+            cursor: isSyncing ? 'default' : 'pointer',
+            fontSize: '0.8rem',
+            fontWeight: 600,
+            transition: 'all 0.2s ease'
+          }}
+        >
+          {isSyncing ? (
+            <>
+              <RefreshCw size={14} className="animate-spin" />
+              <span>{lang === 'ar' ? 'جاري الحفظ...' : 'Syncing...'}</span>
+            </>
+          ) : cloudSyncStatus === 'synced' ? (
+            <>
+              <CloudCheck size={16} style={{ color: '#16a34a' }} />
+              <span>{lang === 'ar' ? 'سحابي متزامن' : 'Synced'}</span>
+            </>
+          ) : (
+            <>
+              <CloudOff size={15} style={{ color: cloudSyncStatus === 'error' ? '#ef4444' : '#d97706' }} />
+              <span>{cloudSyncStatus === 'error' ? (lang === 'ar' ? 'خطأ مزامنة' : 'Sync Error') : (lang === 'ar' ? 'وضع محلي' : 'Offline')}</span>
+            </>
+          )}
+        </button>
+
         {/* Quick Export Backup */}
         <button
           onClick={exportDataJson}
