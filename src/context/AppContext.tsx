@@ -275,6 +275,78 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const cloudSyncTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isSavingRef = useRef<boolean>(false);
 
+  // Sync relational tables (groups, teachers, students) in background for Supabase Table Editor
+  const syncRelationalTables = async (centerData: CenterData) => {
+    try {
+      // 1. Teachers
+      const teachersToInsert = (centerData.teachers || []).map((t) => ({
+        id: t.id,
+        name: t.name,
+        phone: t.phone || '',
+        subject: t.subject || ''
+      }));
+      if (teachersToInsert.length > 0) {
+        await supabase.from('teachers').upsert(teachersToInsert);
+      }
+      const teacherIds = new Set(teachersToInsert.map((t) => t.id));
+
+      // 2. Groups
+      const groupsToInsert = (centerData.groups || []).map((g) => {
+        const sheet = centerData.groupData[g.id] || {};
+        return {
+          id: g.id,
+          teacher_id: g.teacherId && teacherIds.has(g.teacherId) ? g.teacherId : null,
+          subject: g.subject || sheet.subject || '',
+          day1: g.day1 || sheet.day1 || '',
+          time1: g.time1 || sheet.time1 || '',
+          day2: g.day2 || sheet.day2 || null,
+          time2: g.time2 || sheet.time2 || null,
+          type: g.type || sheet.type || '4-2500',
+          is_vip: g.isVip || false,
+          session_count: sheet.sessionCount || 4,
+          student_fee: sheet.studentFee || null,
+          teacher_rate: sheet.teacherPayPerStudent || null,
+          status: g.status || null,
+          session_dates: sheet.sessionDates || []
+        };
+      });
+      if (groupsToInsert.length > 0) {
+        await supabase.from('groups').upsert(groupsToInsert);
+      }
+
+      // 3. Students
+      const studentsToInsert: any[] = [];
+      for (const [gid, sheet] of Object.entries(centerData.groupData || {})) {
+        for (const s of sheet.students || []) {
+          if (s.name && !isSummaryRow(s, gid)) {
+            studentsToInsert.push({
+              group_id: gid,
+              row_id: s.rowId || 1,
+              name: s.name,
+              phone: s.phone || '',
+              discount: s.discount ? String(s.discount) : '1',
+              attendance: s.attendance || [],
+              payments: s.payments || [],
+              fee: s.fee || 0,
+              total_received: s.totalReceived || 0,
+              debt: s.debt || 0,
+              teacher_pay: s.teacherPay || 0,
+              school_earn: s.schoolEarn || 0
+            });
+          }
+        }
+      }
+      if (studentsToInsert.length > 0) {
+        await supabase.from('students').delete().neq('id', 0);
+        for (let i = 0; i < studentsToInsert.length; i += 100) {
+          await supabase.from('students').insert(studentsToInsert.slice(i, i + 100));
+        }
+      }
+    } catch (err) {
+      console.warn('Relational tables background sync warning:', err);
+    }
+  };
+
   // Cloud save to Supabase
   const saveToCloud = useCallback(async (newData: CenterData) => {
     try {
@@ -294,6 +366,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       } else {
         setCloudSyncStatus('synced');
         setLastSyncedAt(new Date());
+        // Sync relational tables in background so Table Editor always shows live rows
+        syncRelationalTables(newData).catch((e) => console.warn(e));
       }
     } catch (err) {
       console.error('Failed to sync to Supabase:', err);
