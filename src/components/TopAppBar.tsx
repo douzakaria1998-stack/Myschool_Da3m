@@ -2,11 +2,13 @@
 
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { Sun, Moon, Download, GraduationCap, School, CloudCheck, CloudOff, RefreshCw } from 'lucide-react';
+import { Sun, Moon, Download, GraduationCap, School, CloudCheck, CloudOff, RefreshCw, Scan } from 'lucide-react';
+import BarcodeScannerModal from './BarcodeScannerModal';
 
 export default function TopAppBar() {
   const {
     data,
+    selectedGroup,
     theme,
     toggleTheme,
     lang,
@@ -16,6 +18,8 @@ export default function TopAppBar() {
     lastSyncedAt,
     syncNow
   } = useApp();
+
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
 
   const [isManualSyncing, setIsManualSyncing] = useState(false);
 
@@ -151,6 +155,29 @@ export default function TopAppBar() {
           )}
         </button>
 
+        {/* Fast Barcode / Card Scanner Button */}
+        <button
+          onClick={() => setIsScannerOpen(true)}
+          className="m3-btn m3-btn-sm"
+          title={lang === 'ar' ? 'قارئ الباركود ومسح البطاقات السريع' : 'Fast Barcode / Card Scanner'}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
+            color: '#ffffff',
+            fontWeight: 800,
+            boxShadow: '0 2px 8px rgba(79, 70, 229, 0.35)',
+            border: 'none',
+            cursor: 'pointer',
+            padding: '6px 12px',
+            borderRadius: 'var(--md-shape-full)'
+          }}
+        >
+          <Scan size={15} />
+          <span>{lang === 'ar' ? 'قارئ الباركود ⚡' : 'Scan ⚡'}</span>
+        </button>
+
         {/* Quick Export Backup */}
         <button
           onClick={exportDataJson}
@@ -182,6 +209,14 @@ export default function TopAppBar() {
           {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
         </button>
       </div>
+
+      {/* Barcode Scanner Modal */}
+      {isScannerOpen && (
+        <BarcodeScannerModal
+          initialGroupId={selectedGroup}
+          onClose={() => setIsScannerOpen(false)}
+        />
+      )}
     </header>
   );
 }

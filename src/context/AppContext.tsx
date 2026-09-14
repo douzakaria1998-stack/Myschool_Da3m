@@ -12,7 +12,8 @@ import {
   Teacher,
   TeacherPaymentRecord,
   GroupMeta,
-  PricingTier
+  PricingTier,
+  QueuedReceipt
 } from '../types';
 import {
   isSummaryRow,
@@ -37,6 +38,19 @@ interface AppContextType {
   cloudSyncStatus: 'synced' | 'syncing' | 'offline' | 'error';
   lastSyncedAt: Date | null;
   syncNow: () => Promise<void>;
+  // Barcode Scanner, Cover & Print Queue Actions
+  printQueue: QueuedReceipt[];
+  addToPrintQueue: (receipt: QueuedReceipt) => void;
+  removeFromPrintQueue: (id: string) => void;
+  clearPrintQueue: () => void;
+  endSessionAndMarkAbsent: (groupId: string, sessionIndex: number) => { presentCount: number; makeupCount: number; absentCount: number };
+  recordCoverAttendance: (
+    activeGroupId: string,
+    originalGroupId: string,
+    studentRowId: number,
+    sessionIndex: number,
+    paymentAmount?: number
+  ) => void;
   // Student Actions
   updateAttendance: (groupId: string, rowId: number, sessionIndex: number, status: AttendanceStatus) => void;
   markAllPresent: (groupId: string, sessionIndex: number, studentRowIds?: number[]) => void;
@@ -304,6 +318,46 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [selectedGroup, setSelectedGroup] = useState<string>('BAC01');
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [lang, setLang] = useState<'ar' | 'en'>('ar');
+
+  // Print Queue for deferred thermal receipts
+  const [printQueue, setPrintQueue] = useState<QueuedReceipt[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('da3m_print_queue_v1');
+        return saved ? JSON.parse(saved) : [];
+      } catch (e) {
+        return [];
+      }
+    }
+    return [];
+  });
+
+  const addToPrintQueue = (receipt: QueuedReceipt) => {
+    setPrintQueue((prev) => {
+      const next = [receipt, ...prev];
+      try {
+        localStorage.setItem('da3m_print_queue_v1', JSON.stringify(next));
+      } catch (e) {}
+      return next;
+    });
+  };
+
+  const removeFromPrintQueue = (id: string) => {
+    setPrintQueue((prev) => {
+      const next = prev.filter((r) => r.id !== id);
+      try {
+        localStorage.setItem('da3m_print_queue_v1', JSON.stringify(next));
+      } catch (e) {}
+      return next;
+    });
+  };
+
+  const clearPrintQueue = () => {
+    setPrintQueue([]);
+    try {
+      localStorage.removeItem('da3m_print_queue_v1');
+    } catch (e) {}
+  };
 
   const [cloudSyncStatus, setCloudSyncStatus] = useState<'synced' | 'syncing' | 'offline' | 'error'>('synced');
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
@@ -780,6 +834,130 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       groupData: {
         ...data.groupData,
         [groupId]: { ...group, students: updatedStudents }
+      }
+    };
+    persistData(updatedData);
+  };
+
+  // Automated Absence Tracking: End session and automatically mark all unscanned/unattended students as Absent ('A')
+  const endSessionAndMarkAbsent = (groupId: string, sessionIndex: number) => {
+    const group = data.groupData[groupId];
+    if (!group) return { presentCount: 0, makeupCount: 0, absentCount: 0 };
+
+    let presentCount = 0;
+    let makeupCount = 0;
+    let absentCount = 0;
+
+    const updatedStudents = group.students.map((student) => {
+      if (isSummaryRow(student, groupId)) return student;
+
+      const currentStatus = student.attendance?.[sessionIndex] || '';
+      const newAttendance = [...(student.attendance || [])];
+      while (newAttendance.length <= sessionIndex) newAttendance.push('');
+
+      if (currentStatus === 'P') {
+        presentCount++;
+      } else if (currentStatus === 'M') {
+        makeupCount++;
+      } else {
+        // Any student who never scanned their barcode or has no record for this session becomes Absent ('A')
+        newAttendance[sessionIndex] = 'A';
+        absentCount++;
+      }
+
+      return calculateStudentFinances(
+        { ...student, attendance: newAttendance },
+        group.type,
+        data.pricingTiers,
+        group
+      );
+    });
+
+    const updatedData: CenterData = {
+      ...data,
+      groupData: {
+        ...data.groupData,
+        [groupId]: { ...group, students: updatedStudents }
+      }
+    };
+    persistData(updatedData);
+
+    return { presentCount, makeupCount, absentCount };
+  };
+
+  // Record Covering/Make-up Attendance when a student attends another group's session
+  const recordCoverAttendance = (
+    activeGroupId: string,
+    originalGroupId: string,
+    studentRowId: number,
+    sessionIndex: number,
+    paymentAmount?: number
+  ) => {
+    const activeGroup = data.groupData[activeGroupId];
+    if (!activeGroup) return;
+
+    const originalGroup = data.groupData[originalGroupId];
+    const originalStudent = originalGroup?.students.find((s) => s.rowId === studentRowId);
+    if (!originalStudent) return;
+
+    let updatedActiveGroup = { ...activeGroup };
+    const existingInActive = activeGroup.students.find(
+      (s) => s.name.trim() === originalStudent.name.trim()
+    );
+
+    if (existingInActive) {
+      const newAttendance = [...(existingInActive.attendance || [])];
+      newAttendance[sessionIndex] = 'M';
+      let newPayments = [...(existingInActive.payments || [])];
+      if (paymentAmount && paymentAmount > 0) {
+        const currentP = Number(newPayments[sessionIndex]) || 0;
+        newPayments[sessionIndex] = currentP + paymentAmount;
+      }
+      const updatedStudent = calculateStudentFinances(
+        { ...existingInActive, attendance: newAttendance, payments: newPayments },
+        activeGroup.type,
+        data.pricingTiers,
+        activeGroup
+      );
+      updatedActiveGroup.students = activeGroup.students.map((s) =>
+        s.rowId === existingInActive.rowId ? updatedStudent : s
+      );
+    } else {
+      const newRowId = (activeGroup.students || []).reduce((max, s) => Math.max(max, s.rowId || 0), 0) + 1;
+      const initialAttendance: AttendanceStatus[] = Array(activeGroup.sessionCount || 4).fill('');
+      initialAttendance[sessionIndex] = 'M';
+      const initialPayments: (number | string)[] = Array(activeGroup.sessionCount || 4).fill('');
+      if (paymentAmount && paymentAmount > 0) {
+        initialPayments[sessionIndex] = paymentAmount;
+      }
+      const newCoverStudent = calculateStudentFinances(
+        {
+          rowId: newRowId,
+          name: originalStudent.name,
+          phone: originalStudent.phone,
+          barcode: originalStudent.barcode || `${originalGroupId}-${originalStudent.rowId}`,
+          discount: 'تعويض',
+          attendance: initialAttendance,
+          payments: initialPayments,
+          fee: 0,
+          totalReceived: paymentAmount || 0,
+          teacherPay: 0,
+          schoolEarn: 0,
+          debt: 0,
+          totalAttendance: 1
+        },
+        activeGroup.type,
+        data.pricingTiers,
+        activeGroup
+      );
+      updatedActiveGroup.students = [...activeGroup.students, newCoverStudent];
+    }
+
+    const updatedData: CenterData = {
+      ...data,
+      groupData: {
+        ...data.groupData,
+        [activeGroupId]: updatedActiveGroup
       }
     };
     persistData(updatedData);
@@ -1707,6 +1885,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         cloudSyncStatus,
         lastSyncedAt,
         syncNow,
+        printQueue,
+        addToPrintQueue,
+        removeFromPrintQueue,
+        clearPrintQueue,
+        endSessionAndMarkAbsent,
+        recordCoverAttendance,
         updateAttendance,
         markAllPresent,
         updatePayment,

@@ -6,6 +6,7 @@ export interface StudentRecord {
   rowId: number;
   name: string;
   phone: string;
+  barcode?: string; // Barcode or card serial number
   attendance: AttendanceStatus[]; // dynamic N sessions
   discount: DiscountType; // '1' (100%), '0.8' (80%), '0' (0%), or 'تعويض'
   fee: number; // Total fee required (المجموع)
@@ -97,4 +98,24 @@ export interface CenterData {
   groupData: Record<string, GroupSheet>;
   pricingTiers: PricingTier[];
   credentials: CenterCredentials;
+}
+
+export interface QueuedReceipt {
+  id: string;
+  receiptNo: string;
+  groupId: string;
+  subject: string;
+  teacherName: string;
+  studentRowId: number;
+  studentName: string;
+  studentPhone?: string;
+  amount: number;
+  totalFee: number;
+  totalPaid: number;
+  balance: number;
+  date: string;
+  time: string;
+  sessionIndex: number;
+  isCover?: boolean;
+  originalGroup?: string;
 }

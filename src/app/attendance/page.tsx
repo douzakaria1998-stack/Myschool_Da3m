@@ -23,7 +23,9 @@ import {
   RotateCw,
   Eye,
   EyeOff,
-  CheckCheck
+  CheckCheck,
+  Scan,
+  UserX
 } from 'lucide-react';
 import StudentPaymentModal from '../../components/StudentPaymentModal';
 import AddStudentModal from '../../components/AddStudentModal';
@@ -31,6 +33,7 @@ import ThermalReceiptsModal from '../../components/ThermalReceiptsModal';
 import EditGroupModal from '../../components/EditGroupModal';
 import RenewGroupModal from '../../components/RenewGroupModal';
 import GroupSearchSelect from '../../components/GroupSearchSelect';
+import BarcodeScannerModal from '../../components/BarcodeScannerModal';
 import {
   isSessionDateToday,
   isGroupToday,
@@ -53,7 +56,8 @@ export default function AttendancePage() {
     markAllPresent,
     deleteStudent,
     getGroupStats,
-    updateSessionDates
+    updateSessionDates,
+    endSessionAndMarkAbsent
   } = useApp();
 
   const group = data.groupData[selectedGroup] || Object.values(data.groupData)[0];
@@ -62,6 +66,7 @@ export default function AttendancePage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterDebt, setFilterDebt] = useState<'all' | 'debt' | 'paid' | 'exempt'>('all');
   const [activeStudentForPayment, setActiveStudentForPayment] = useState<StudentRecord | null>(null);
+  const [isBarcodeScannerOpen, setIsBarcodeScannerOpen] = useState(false);
   const [isAddStudentOpen, setIsAddStudentOpen] = useState(false);
   const [isThermalModalOpen, setIsThermalModalOpen] = useState(false);
   const [isEditFinancesOpen, setIsEditFinancesOpen] = useState(false);
@@ -72,6 +77,21 @@ export default function AttendancePage() {
     group?.sessionDates || ['حصة 1', 'حصة 2', 'حصة 3', 'حصة 4', 'حصة 5', 'حصة 6', 'حصة 7', 'حصة 8']
   );
   const [autoCascadeDates, setAutoCascadeDates] = useState(true);
+
+  // Automated Absence Tracking: End Session action
+  const handleEndSession = (sessionIndex: number) => {
+    const sessionLabel = group.sessionDates[sessionIndex] || `حصة ${sessionIndex + 1}`;
+    if (
+      confirm(
+        `هل أنت متأكد من إنهاء "${sessionLabel}" للفوج (${group.groupId})؟\n\nتنبيه: سيتم تلقائياً رصد جميع التلاميذ المسجلين في هذا الفوج الذين لم يمسحوا بطاقاتهم كـ "غائب (A)" مع إعادة احتساب ديونهم المالية فوراً.`
+      )
+    ) {
+      const res = endSessionAndMarkAbsent(group.groupId, sessionIndex);
+      alert(
+        `تم إنهاء الحصة بنجاح:\n✓ الحاضرون: ${res.presentCount}\n✓ في حصة تعويض: ${res.makeupCount}\n✓ تم تسجيلهم غياب تلقائي (A): ${res.absentCount}`
+      );
+    }
+  };
 
   // Sync editableDates whenever group changes
   React.useEffect(() => {
@@ -423,6 +443,26 @@ export default function AttendancePage() {
 
         {/* Action buttons */}
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button
+            onClick={() => setIsBarcodeScannerOpen(true)}
+            className="m3-btn m3-btn-sm"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
+              color: '#ffffff',
+              fontWeight: 800,
+              boxShadow: '0 2px 8px rgba(79, 70, 229, 0.35)',
+              border: 'none',
+              cursor: 'pointer'
+            }}
+            title="مسح بطاقات الحضور بالباركود سريعاً وتأكيد الدفع والتعويض وطباعة الوصل"
+          >
+            <Scan size={16} />
+            <span>قارئ الباركود والبطاقات ⚡</span>
+          </button>
+
           <button
             onClick={() => setIsAddStudentOpen(true)}
             className="m3-btn m3-btn-primary m3-btn-sm"
@@ -824,53 +864,85 @@ export default function AttendancePage() {
                         (اليوم)
                       </div>
                     )}
-                    {/* Mark All Present Button */}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        markAllPresent(group.groupId, i, filteredStudents.map((s) => s.rowId));
-                      }}
-                      style={{
-                        marginTop: '6px',
-                        padding: '3px 6px',
-                        fontSize: '0.68rem',
-                        fontWeight: 700,
-                        borderRadius: 'var(--md-shape-full)',
-                        border: isAllPresent
-                          ? '1px solid #10b981'
-                          : isToday
-                          ? '1px solid var(--md-sys-color-primary)'
-                          : '1px solid var(--md-sys-color-outline-variant)',
-                        backgroundColor: isAllPresent
-                          ? '#d1fae5'
-                          : isToday
-                          ? 'var(--md-sys-color-primary)'
-                          : 'var(--md-sys-color-surface-container-highest)',
-                        color: isAllPresent
-                          ? '#065f46'
-                          : isToday
-                          ? 'var(--md-sys-color-on-primary)'
-                          : 'var(--md-sys-color-on-surface)',
-                        cursor: 'pointer',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '3px',
-                        width: '100%',
-                        maxWidth: '82px',
-                        boxShadow: isToday && !isAllPresent ? '0 1px 3px rgba(0,0,0,0.12)' : 'none',
-                        transition: 'all 0.15s ease'
-                      }}
-                      title={
-                        isAllPresent
-                          ? `جميع التلاميذ حاضرون (${presentCount}/${targetStudents.length}) — اضغط لإلغاء التحديد`
-                          : `تسجيل حضور الجميع للحصة ${i + 1} (${presentCount}/${targetStudents.length})`
-                      }
-                    >
-                      <CheckCheck size={11} />
-                      <span>{isAllPresent ? 'الكل حاضر' : 'الكل حاضر'}</span>
-                    </button>
+                    {/* Mark All Present and End Session Buttons */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', marginTop: '6px' }}>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          markAllPresent(group.groupId, i, filteredStudents.map((s) => s.rowId));
+                        }}
+                        style={{
+                          padding: '3px 4px',
+                          fontSize: '0.66rem',
+                          fontWeight: 700,
+                          borderRadius: 'var(--md-shape-full)',
+                          border: isAllPresent
+                            ? '1px solid #10b981'
+                            : isToday
+                            ? '1px solid var(--md-sys-color-primary)'
+                            : '1px solid var(--md-sys-color-outline-variant)',
+                          backgroundColor: isAllPresent
+                            ? '#d1fae5'
+                            : isToday
+                            ? 'var(--md-sys-color-primary)'
+                            : 'var(--md-sys-color-surface-container-highest)',
+                          color: isAllPresent
+                            ? '#065f46'
+                            : isToday
+                            ? 'var(--md-sys-color-on-primary)'
+                            : 'var(--md-sys-color-on-surface)',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '2px',
+                          width: '100%',
+                          maxWidth: '82px',
+                          margin: '0 auto',
+                          boxShadow: isToday && !isAllPresent ? '0 1px 3px rgba(0,0,0,0.12)' : 'none',
+                          transition: 'all 0.15s ease'
+                        }}
+                        title={
+                          isAllPresent
+                            ? `جميع التلاميذ حاضرون (${presentCount}/${targetStudents.length}) — اضغط لإلغاء التحديد`
+                            : `تسجيل حضور الجميع للحصة ${i + 1} (${presentCount}/${targetStudents.length})`
+                        }
+                      >
+                        <CheckCheck size={11} />
+                        <span>الكل حاضر</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleEndSession(i);
+                        }}
+                        style={{
+                          padding: '2px 4px',
+                          fontSize: '0.62rem',
+                          fontWeight: 700,
+                          borderRadius: 'var(--md-shape-full)',
+                          border: '1px solid #ef4444',
+                          backgroundColor: '#fef2f2',
+                          color: '#b91c1c',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '2px',
+                          width: '100%',
+                          maxWidth: '82px',
+                          margin: '0 auto',
+                          transition: 'all 0.15s ease'
+                        }}
+                        title={`إنهاء الحصة ${i + 1} وتثبيت الغياب التلقائي (A) لمن لم يمسح بطاقته`}
+                      >
+                        <UserX size={10} />
+                        <span>إنهاء الحصة</span>
+                      </button>
+                    </div>
                   </th>
                 );
               })}
@@ -1105,6 +1177,14 @@ export default function AttendancePage() {
         <RenewGroupModal
           sourceGroupId={group.groupId}
           onClose={() => setIsRenewModalOpen(false)}
+        />
+      )}
+
+      {/* Barcode / Card Scanner & Covering Modal */}
+      {isBarcodeScannerOpen && (
+        <BarcodeScannerModal
+          initialGroupId={group.groupId}
+          onClose={() => setIsBarcodeScannerOpen(false)}
         />
       )}
     </div>
