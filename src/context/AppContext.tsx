@@ -314,32 +314,119 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         await supabase.from('groups').upsert(groupsToInsert);
       }
 
-      // 3. Students
-      const studentsToInsert: any[] = [];
+      // 3. Students (Consolidated by unique student with multiple groups & balance)
+      const studentMap = new Map<string, {
+        name: string;
+        phone: string;
+        groups: string[];
+        totalFee: number;
+        totalPaid: number;
+        totalDebt: number;
+        balance: number;
+        enrollments: any[];
+      }>();
+
       for (const [gid, sheet] of Object.entries(centerData.groupData || {})) {
         for (const s of sheet.students || []) {
           if (s.name && !isSummaryRow(s, gid)) {
-            studentsToInsert.push({
-              group_id: gid,
-              row_id: s.rowId || 1,
-              name: s.name,
-              phone: s.phone || '',
-              discount: s.discount ? String(s.discount) : '1',
-              attendance: s.attendance || [],
-              payments: s.payments || [],
-              fee: s.fee || 0,
-              total_received: s.totalReceived || 0,
-              debt: s.debt || 0,
-              teacher_pay: s.teacherPay || 0,
-              school_earn: s.schoolEarn || 0
-            });
+            const cleanName = s.name.trim();
+            const phone = s.phone ? s.phone.trim() : '';
+            const key = cleanName.toLowerCase();
+
+            if (!studentMap.has(key)) {
+              studentMap.set(key, {
+                name: cleanName,
+                phone: phone,
+                groups: [gid],
+                totalFee: s.fee || 0,
+                totalPaid: s.totalReceived || 0,
+                totalDebt: s.debt || 0,
+                balance: (s.totalReceived || 0) - (s.fee || 0),
+                enrollments: [{
+                  groupId: gid,
+                  rowId: s.rowId,
+                  subject: sheet.subject || '',
+                  teacherName: sheet.teacherName || '',
+                  fee: s.fee || 0,
+                  totalReceived: s.totalReceived || 0,
+                  debt: s.debt || 0,
+                  discount: s.discount || '1',
+                  attendance: s.attendance || [],
+                  payments: s.payments || []
+                }]
+              });
+            } else {
+              const item = studentMap.get(key)!;
+              if (phone && !item.phone) item.phone = phone;
+              if (!item.groups.includes(gid)) item.groups.push(gid);
+              item.totalFee += (s.fee || 0);
+              item.totalPaid += (s.totalReceived || 0);
+              item.totalDebt += (s.debt || 0);
+              item.balance = item.totalPaid - item.totalFee;
+              item.enrollments.push({
+                groupId: gid,
+                rowId: s.rowId,
+                subject: sheet.subject || '',
+                teacherName: sheet.teacherName || '',
+                fee: s.fee || 0,
+                totalReceived: s.totalReceived || 0,
+                debt: s.debt || 0,
+                discount: s.discount || '1',
+                attendance: s.attendance || [],
+                payments: s.payments || []
+              });
+            }
           }
         }
       }
-      if (studentsToInsert.length > 0) {
+
+      const consolidatedStudents = Array.from(studentMap.values()).map((s) => ({
+        name: s.name,
+        phone: s.phone,
+        groups: s.groups,
+        balance: s.balance,
+        total_fee: s.totalFee,
+        total_paid: s.totalPaid,
+        total_debt: s.totalDebt,
+        enrollments: s.enrollments
+      }));
+
+      // Check if students table supports the unified multi-group schema
+      const testRes = await supabase.from('students').insert(consolidatedStudents.slice(0, 1));
+      if (!testRes.error) {
+        // Table supports multi-group schema!
         await supabase.from('students').delete().neq('id', 0);
-        for (let i = 0; i < studentsToInsert.length; i += 100) {
-          await supabase.from('students').insert(studentsToInsert.slice(i, i + 100));
+        for (let i = 0; i < consolidatedStudents.length; i += 100) {
+          await supabase.from('students').insert(consolidatedStudents.slice(i, i + 100));
+        }
+      } else {
+        // Legacy fallback until user executes the updated SQL
+        const flatStudents: any[] = [];
+        for (const [gid, sheet] of Object.entries(centerData.groupData || {})) {
+          for (const s of sheet.students || []) {
+            if (s.name && !isSummaryRow(s, gid)) {
+              flatStudents.push({
+                group_id: gid,
+                row_id: s.rowId || 1,
+                name: s.name,
+                phone: s.phone || '',
+                discount: s.discount ? String(s.discount) : '1',
+                attendance: s.attendance || [],
+                payments: s.payments || [],
+                fee: s.fee || 0,
+                total_received: s.totalReceived || 0,
+                debt: s.debt || 0,
+                teacher_pay: s.teacherPay || 0,
+                school_earn: s.schoolEarn || 0
+              });
+            }
+          }
+        }
+        if (flatStudents.length > 0) {
+          await supabase.from('students').delete().neq('id', 0);
+          for (let i = 0; i < flatStudents.length; i += 100) {
+            await supabase.from('students').insert(flatStudents.slice(i, i + 100));
+          }
         }
       }
     } catch (err) {

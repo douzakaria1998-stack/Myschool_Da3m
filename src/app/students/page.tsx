@@ -15,13 +15,16 @@ import {
   Receipt,
   FileText,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Layers,
+  Sparkles,
+  DollarSign
 } from 'lucide-react';
 import StudentPaymentModal from '../../components/StudentPaymentModal';
 import StudentProfileModal from '../../components/StudentProfileModal';
 import { isSummaryRow } from '../../utils/sessionUtils';
 
-interface FlatStudent {
+export interface GroupEnrollment {
   groupId: string;
   groupType: string;
   subject: string;
@@ -31,24 +34,44 @@ interface FlatStudent {
   student: StudentRecord;
 }
 
+export interface UnifiedStudent {
+  key: string;
+  name: string;
+  phone: string;
+  groups: GroupEnrollment[];
+  totalFee: number;
+  totalReceived: number;
+  totalDebt: number;
+  balance: number; // totalReceived - totalFee
+  totalAttended: number;
+  totalPossibleSessions: number;
+  primaryGroupId: string;
+  primaryStudentRecord: StudentRecord;
+}
+
 export default function StudentsPage() {
   const { data } = useApp();
 
   const [search, setSearch] = useState('');
-  const [filterType, setFilterType] = useState<'all' | 'debt' | 'paid' | 'exempt' | 'vip'>('all');
+  const [filterType, setFilterType] = useState<'all' | 'debt' | 'paid' | 'multi' | 'vip'>('all');
   const [selectedGroupFilter, setSelectedGroupFilter] = useState('all');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
-  const [activeStudentModal, setActiveStudentModal] = useState<{ groupId: string; student: StudentRecord } | null>(null);
+  const [activePaymentStudent, setActivePaymentStudent] = useState<{ groupId: string; student: StudentRecord } | null>(null);
   const [selectedProfileStudent, setSelectedProfileStudent] = useState<{ student: StudentRecord; groupId: string } | null>(null);
 
-  // Flatten all students across all groups
+  // Consolidate students so each student can have multiple groups and an aggregate balance
   const allStudents = useMemo(() => {
-    const list: FlatStudent[] = [];
+    const map = new Map<string, UnifiedStudent>();
+
     Object.entries(data.groupData).forEach(([gid, gSheet]) => {
       gSheet.students.forEach((s) => {
-        if (isSummaryRow(s, gid)) return;
-        list.push({
+        if (isSummaryRow(s, gid) || !s.name || !s.name.trim()) return;
+        const cleanName = s.name.trim();
+        const phone = s.phone ? s.phone.trim() : '';
+        const key = cleanName.toLowerCase();
+
+        const enrollment: GroupEnrollment = {
           groupId: gid,
           groupType: gSheet.type,
           subject: gSheet.subject,
@@ -56,17 +79,46 @@ export default function StudentsPage() {
           isVip: gSheet.isVip,
           sessionCount: gSheet.sessionDates?.length || gSheet.sessionCount || 4,
           student: s
-        });
+        };
+
+        if (!map.has(key)) {
+          map.set(key, {
+            key,
+            name: cleanName,
+            phone,
+            groups: [enrollment],
+            totalFee: s.fee || 0,
+            totalReceived: s.totalReceived || 0,
+            totalDebt: s.debt || 0,
+            balance: (s.totalReceived || 0) - (s.fee || 0),
+            totalAttended: s.totalAttendance || 0,
+            totalPossibleSessions: enrollment.sessionCount,
+            primaryGroupId: gid,
+            primaryStudentRecord: s
+          });
+        } else {
+          const item = map.get(key)!;
+          if (phone && !item.phone) item.phone = phone;
+          item.groups.push(enrollment);
+          item.totalFee += (s.fee || 0);
+          item.totalReceived += (s.totalReceived || 0);
+          item.totalDebt += (s.debt || 0);
+          item.balance = item.totalReceived - item.totalFee;
+          item.totalAttended += (s.totalAttendance || 0);
+          item.totalPossibleSessions += enrollment.sessionCount;
+        }
       });
     });
-    return list;
+
+    return Array.from(map.values());
   }, [data]);
 
   // Statistics
   const totalStudents = allStudents.length;
-  const debtorsList = allStudents.filter((item) => item.student.debt > 0);
-  const paidList = allStudents.filter((item) => item.student.debt === 0 && item.student.fee > 0);
-  const exemptList = allStudents.filter((item) => item.student.discount === '0');
+  const multiGroupList = allStudents.filter((item) => item.groups.length > 1);
+  const positiveBalanceList = allStudents.filter((item) => item.balance >= 0);
+  const negativeBalanceList = allStudents.filter((item) => item.balance < 0);
+  const vipList = allStudents.filter((item) => item.groups.some((g) => g.isVip));
 
   // Filtered students
   const filteredStudents = useMemo(() => {
@@ -74,20 +126,25 @@ export default function StudentsPage() {
       const q = search.trim().toLowerCase();
       const matchesSearch =
         !q ||
-        item.student.name.toLowerCase().includes(q) ||
-        (item.student.phone && item.student.phone.includes(q)) ||
-        item.groupId.toLowerCase().includes(q) ||
-        item.subject.toLowerCase().includes(q) ||
-        item.teacherName.toLowerCase().includes(q);
+        item.name.toLowerCase().includes(q) ||
+        (item.phone && item.phone.includes(q)) ||
+        item.groups.some(
+          (g) =>
+            g.groupId.toLowerCase().includes(q) ||
+            g.subject.toLowerCase().includes(q) ||
+            g.teacherName.toLowerCase().includes(q)
+        );
 
-      const matchesGroup = selectedGroupFilter === 'all' || item.groupId === selectedGroupFilter;
+      const matchesGroup =
+        selectedGroupFilter === 'all' ||
+        item.groups.some((g) => g.groupId === selectedGroupFilter);
 
       if (!matchesSearch || !matchesGroup) return false;
 
-      if (filterType === 'debt') return item.student.debt > 0;
-      if (filterType === 'paid') return item.student.debt === 0 && item.student.fee > 0;
-      if (filterType === 'exempt') return item.student.discount === '0';
-      if (filterType === 'vip') return item.isVip;
+      if (filterType === 'debt') return item.balance < 0;
+      if (filterType === 'paid') return item.balance >= 0;
+      if (filterType === 'multi') return item.groups.length > 1;
+      if (filterType === 'vip') return item.groups.some((g) => g.isVip);
       return true;
     });
   }, [allStudents, search, selectedGroupFilter, filterType]);
@@ -102,21 +159,29 @@ export default function StudentsPage() {
 
   // Export all filtered students to CSV
   const handleExportAllCsv = () => {
-    const headers = ['#', 'الاسم واللقب', 'الهاتف', 'الفوج', 'نوع الفوج', 'المادة', 'الأستاذ', 'نوع التسجيل', 'المطلوب (دج)', 'المسدد (دج)', 'الدين (دج)', 'الحصص المحضورة', 'إجمالي الحصص'];
+    const headers = [
+      '#',
+      'الاسم واللقب',
+      'الهاتف',
+      'الأفواج المسجل بها',
+      'عدد الأفواج',
+      'المطلوب الإجمالي (دج)',
+      'المسدد الإجمالي (دج)',
+      'الدين الإجمالي (دج)',
+      'الرصيد المالي (دج)',
+      'حالة الرصيد'
+    ];
     const rows = filteredStudents.map((item, idx) => [
       idx + 1,
-      `"${item.student.name}"`,
-      `"${item.student.phone || ''}"`,
-      item.groupId,
-      item.isVip ? 'VIP' : 'عادي',
-      item.subject,
-      `"${item.teacherName}"`,
-      item.student.discount === '0' ? 'معفى' : item.student.discount === '0.8' ? '20%' : item.student.discount === 'تعويض' ? 'تعويض' : 'عادي',
-      item.student.fee,
-      item.student.totalReceived,
-      item.student.debt,
-      item.student.totalAttendance,
-      item.sessionCount
+      `"${item.name}"`,
+      `"${item.phone || ''}"`,
+      `"${item.groups.map((g) => `${g.groupId} (${g.subject})`).join(' | ')}"`,
+      item.groups.length,
+      item.totalFee,
+      item.totalReceived,
+      item.totalDebt,
+      item.balance,
+      item.balance >= 0 ? 'موجب / مسدد' : 'سالب / دين'
     ]);
 
     const csvContent = '\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
@@ -124,24 +189,22 @@ export default function StudentsPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `بيانات_التلاميذ_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.download = `سجل_التلاميذ_والأرصدة_${new Date().toISOString().slice(0, 10)}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   };
 
-  // Export debt report to CSV
+  // Export negative balance (debt) report to CSV
   const handleExportDebtsCsv = () => {
-    const headers = ['#', 'الاسم واللقب', 'الهاتف', 'الفوج', 'المادة', 'الأستاذ', 'المطلوب (دج)', 'المسدد (دج)', 'الدين المتبقي (دج)'];
-    const rows = debtorsList.map((item, idx) => [
+    const headers = ['#', 'الاسم واللقب', 'الهاتف', 'الأفواج', 'المطلوب (دج)', 'المسدد (دج)', 'الرصيد السالب (دج)'];
+    const rows = negativeBalanceList.map((item, idx) => [
       idx + 1,
-      `"${item.student.name}"`,
-      `"${item.student.phone || ''}"`,
-      item.groupId,
-      item.subject,
-      `"${item.teacherName}"`,
-      item.student.fee,
-      item.student.totalReceived,
-      item.student.debt
+      `"${item.name}"`,
+      `"${item.phone || ''}"`,
+      `"${item.groups.map((g) => g.groupId).join(', ')}"`,
+      item.totalFee,
+      item.totalReceived,
+      item.balance
     ]);
 
     const csvContent = '\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
@@ -149,13 +212,164 @@ export default function StudentsPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `سجل_ديون_الطلبة_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.download = `سجل_الديون_والأرصدة_السالبة_${new Date().toISOString().slice(0, 10)}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      {/* Top Statistics Cards */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+          gap: '12px'
+        }}
+      >
+        <div
+          className="m3-card"
+          style={{
+            padding: '14px 18px',
+            borderRadius: 'var(--md-shape-lg)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '14px',
+            backgroundColor: 'var(--md-sys-color-surface-container)'
+          }}
+        >
+          <div
+            style={{
+              width: '44px',
+              height: '44px',
+              borderRadius: '50%',
+              backgroundColor: 'var(--md-sys-color-primary-container)',
+              color: 'var(--md-sys-color-on-primary-container)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            <Users size={22} />
+          </div>
+          <div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--md-sys-color-on-surface-variant)', fontWeight: 600 }}>
+              إجمالي التلاميذ
+            </div>
+            <div style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--md-sys-color-on-surface)' }}>
+              {totalStudents.toLocaleString()}
+            </div>
+          </div>
+        </div>
+
+        <div
+          className="m3-card"
+          style={{
+            padding: '14px 18px',
+            borderRadius: 'var(--md-shape-lg)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '14px',
+            backgroundColor: 'var(--md-sys-color-surface-container)'
+          }}
+        >
+          <div
+            style={{
+              width: '44px',
+              height: '44px',
+              borderRadius: '50%',
+              backgroundColor: '#e0f2fe',
+              color: '#0369a1',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            <Layers size={22} />
+          </div>
+          <div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--md-sys-color-on-surface-variant)', fontWeight: 600 }}>
+              في عدة أفواج
+            </div>
+            <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#0369a1' }}>
+              {multiGroupList.length.toLocaleString()}
+              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--md-sys-color-outline)', marginInlineStart: '4px' }}>
+                ({totalStudents > 0 ? Math.round((multiGroupList.length / totalStudents) * 100) : 0}%)
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div
+          className="m3-card"
+          style={{
+            padding: '14px 18px',
+            borderRadius: 'var(--md-shape-lg)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '14px',
+            backgroundColor: 'var(--md-sys-color-surface-container)'
+          }}
+        >
+          <div
+            style={{
+              width: '44px',
+              height: '44px',
+              borderRadius: '50%',
+              backgroundColor: '#dcfce7',
+              color: '#15803d',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            <CheckCircle2 size={22} />
+          </div>
+          <div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--md-sys-color-on-surface-variant)', fontWeight: 600 }}>
+              رصيد موجب / مسدد (≥ 0)
+            </div>
+            <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#15803d' }}>
+              {positiveBalanceList.length.toLocaleString()}
+            </div>
+          </div>
+        </div>
+
+        <div
+          className="m3-card"
+          style={{
+            padding: '14px 18px',
+            borderRadius: 'var(--md-shape-lg)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '14px',
+            backgroundColor: 'var(--md-sys-color-surface-container)'
+          }}
+        >
+          <div
+            style={{
+              width: '44px',
+              height: '44px',
+              borderRadius: '50%',
+              backgroundColor: '#fee2e2',
+              color: '#b91c1c',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            <AlertTriangle size={22} />
+          </div>
+          <div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--md-sys-color-on-surface-variant)', fontWeight: 600 }}>
+              رصيد سالب / ديون (&lt; 0)
+            </div>
+            <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#b91c1c' }}>
+              {negativeBalanceList.length.toLocaleString()}
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Filter and Search Bar */}
       <div
@@ -177,7 +391,7 @@ export default function StudentsPage() {
                 setSearch(e.target.value);
                 setPage(1);
               }}
-              placeholder="ابحث بالاسم، الهاتف أو الفوج..."
+              placeholder="ابحث بالاسم، الهاتف، الفوج أو المادة..."
               className="m3-input"
               style={{ paddingInlineStart: '36px', paddingBlock: '8px', fontSize: '0.85rem' }}
             />
@@ -201,7 +415,7 @@ export default function StudentsPage() {
               setPage(1);
             }}
             className="m3-input"
-            style={{ width: '190px', paddingBlock: '8px', fontSize: '0.85rem' }}
+            style={{ width: '210px', paddingBlock: '8px', fontSize: '0.85rem' }}
           >
             <option value="all">كل الأفواج ({data.groups.length})</option>
             {data.groups.map((g) => (
@@ -226,9 +440,9 @@ export default function StudentsPage() {
           >
             {[
               { id: 'all', label: `الكل (${totalStudents})` },
-              { id: 'debt', label: `عليهم دين (${debtorsList.length})` },
-              { id: 'paid', label: `مسدد بالكامل (${paidList.length})` },
-              { id: 'exempt', label: `معفى (${exemptList.length})` },
+              { id: 'debt', label: `رصيد سالب (${negativeBalanceList.length})` },
+              { id: 'paid', label: `رصيد موجب (${positiveBalanceList.length})` },
+              { id: 'multi', label: `في عدة أفواج (${multiGroupList.length})` },
               { id: 'vip', label: 'أفواج VIP ★' }
             ].map((tab) => (
               <button
@@ -280,16 +494,14 @@ export default function StudentsPage() {
           <thead>
             <tr>
               <th style={{ width: '36px', textAlign: 'center', whiteSpace: 'nowrap', padding: '8px 4px' }}>#</th>
-              <th style={{ minWidth: '130px', whiteSpace: 'nowrap', padding: '8px 8px' }}>اسم ولقب التلميذ</th>
-              <th style={{ minWidth: '90px', textAlign: 'center', whiteSpace: 'nowrap', padding: '8px 6px' }}>رقم الهاتف</th>
-              <th style={{ minWidth: '75px', textAlign: 'center', whiteSpace: 'nowrap', padding: '8px 6px' }}>الفوج</th>
-              <th style={{ minWidth: '140px', whiteSpace: 'nowrap', padding: '8px 8px' }}>المادة والأستاذ</th>
-              <th style={{ minWidth: '70px', textAlign: 'center', whiteSpace: 'nowrap', padding: '8px 4px' }}>نوع التسجيل</th>
-              <th style={{ minWidth: '75px', textAlign: 'center', whiteSpace: 'nowrap', padding: '8px 4px' }}>المطلوب</th>
-              <th style={{ minWidth: '75px', textAlign: 'center', whiteSpace: 'nowrap', padding: '8px 4px' }}>المسدد</th>
-              <th style={{ minWidth: '80px', textAlign: 'center', whiteSpace: 'nowrap', padding: '8px 4px' }}>الدين المتبقي</th>
-              <th style={{ minWidth: '85px', textAlign: 'center', whiteSpace: 'nowrap', padding: '8px 4px' }}>سجل الحصص</th>
-              <th style={{ minWidth: '60px', textAlign: 'center', whiteSpace: 'nowrap', padding: '8px 4px' }}>نسبة الحضور</th>
+              <th style={{ minWidth: '150px', whiteSpace: 'nowrap', padding: '8px 8px' }}>اسم ولقب التلميذ</th>
+              <th style={{ minWidth: '95px', textAlign: 'center', whiteSpace: 'nowrap', padding: '8px 6px' }}>رقم الهاتف</th>
+              <th style={{ minWidth: '220px', whiteSpace: 'nowrap', padding: '8px 8px' }}>الأفواج المسجل بها</th>
+              <th style={{ minWidth: '85px', textAlign: 'center', whiteSpace: 'nowrap', padding: '8px 6px' }}>المطلوب الإجمالي</th>
+              <th style={{ minWidth: '85px', textAlign: 'center', whiteSpace: 'nowrap', padding: '8px 6px' }}>المسدد الإجمالي</th>
+              <th style={{ minWidth: '85px', textAlign: 'center', whiteSpace: 'nowrap', padding: '8px 6px' }}>الدين الإجمالي</th>
+              <th style={{ minWidth: '110px', textAlign: 'center', whiteSpace: 'nowrap', padding: '8px 8px' }}>الرصيد المالي</th>
+              <th style={{ minWidth: '80px', textAlign: 'center', whiteSpace: 'nowrap', padding: '8px 6px' }}>نسبة الحضور</th>
               <th
                 style={{
                   width: '120px',
@@ -312,22 +524,26 @@ export default function StudentsPage() {
           <tbody>
             {paginatedStudents.length === 0 ? (
               <tr>
-                <td colSpan={12} style={{ textAlign: 'center', padding: '36px', color: 'var(--md-sys-color-outline)' }}>
+                <td colSpan={10} style={{ textAlign: 'center', padding: '36px', color: 'var(--md-sys-color-outline)' }}>
                   لا يوجد تلاميذ مطابقون للتصفية الحالية.
                 </td>
               </tr>
             ) : (
               paginatedStudents.map((item, idx) => {
                 const absIdx = (page - 1) * pageSize + idx + 1;
-                const maxSessions = item.sessionCount || 4;
+                const isPositive = item.balance >= 0;
+                const attendanceRate =
+                  item.totalPossibleSessions > 0
+                    ? Math.round((item.totalAttended / item.totalPossibleSessions) * 100)
+                    : 0;
 
                 return (
                   <tr
-                    key={`${item.groupId}-${item.student.rowId}`}
+                    key={item.key}
                     onClick={() =>
                       setSelectedProfileStudent({
-                        student: item.student,
-                        groupId: item.groupId
+                        student: item.primaryStudentRecord,
+                        groupId: item.primaryGroupId
                       })
                     }
                     style={{
@@ -338,143 +554,135 @@ export default function StudentsPage() {
                     className="clickable-student-row"
                     title="اضغط على أي مكان في السطر لفتح الملف الشامل للتلميذ"
                   >
-                    <td style={{ textAlign: 'center', color: 'var(--md-sys-color-outline)', whiteSpace: 'nowrap', padding: '7px 4px', fontSize: '0.8rem' }}>
+                    <td style={{ textAlign: 'center', color: 'var(--md-sys-color-outline)', whiteSpace: 'nowrap', padding: '8px 4px', fontSize: '0.8rem' }}>
                       {absIdx}
                     </td>
-                    <td style={{ fontWeight: 800, color: 'var(--md-sys-color-primary)', whiteSpace: 'nowrap', padding: '7px 8px', fontSize: '0.84rem' }}>
-                      <span>{item.student.name}</span>
+                    <td style={{ fontWeight: 800, color: 'var(--md-sys-color-primary)', whiteSpace: 'nowrap', padding: '8px 8px', fontSize: '0.86rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span>{item.name}</span>
+                        {item.groups.length > 1 && (
+                          <span
+                            style={{
+                              fontSize: '0.7rem',
+                              fontWeight: 700,
+                              backgroundColor: '#e0f2fe',
+                              color: '#0369a1',
+                              padding: '1px 6px',
+                              borderRadius: 'var(--md-shape-full)',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '2px'
+                            }}
+                            title={`مسجل في ${item.groups.length} أفواج`}
+                          >
+                            <Layers size={10} />
+                            <span>{item.groups.length}</span>
+                          </span>
+                        )}
+                      </div>
                     </td>
-                    <td style={{ fontSize: '0.8rem', color: 'var(--md-sys-color-on-surface-variant)', textAlign: 'center', whiteSpace: 'nowrap', padding: '7px 6px' }}>
-                      {item.student.phone ? (
+                    <td style={{ fontSize: '0.8rem', color: 'var(--md-sys-color-on-surface-variant)', textAlign: 'center', whiteSpace: 'nowrap', padding: '8px 6px' }}>
+                      {item.phone ? (
                         <a
-                          href={`tel:${item.student.phone}`}
+                          href={`tel:${item.phone}`}
                           onClick={(e) => e.stopPropagation()}
                           style={{ color: 'inherit', textDecoration: 'none', direction: 'ltr', display: 'inline-block' }}
                         >
-                          {item.student.phone}
+                          {item.phone}
                         </a>
                       ) : (
                         '—'
                       )}
                     </td>
-                    <td style={{ textAlign: 'center', whiteSpace: 'nowrap', padding: '7px 6px' }}>
+                    {/* Groups enrolled */}
+                    <td style={{ padding: '8px 8px' }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center' }}>
+                        {item.groups.map((g) => (
+                          <span
+                            key={g.groupId}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedProfileStudent({
+                                student: g.student,
+                                groupId: g.groupId
+                              });
+                            }}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              fontWeight: 700,
+                              fontSize: '0.74rem',
+                              whiteSpace: 'nowrap',
+                              color: g.isVip ? '#b45309' : 'var(--md-sys-color-primary)',
+                              backgroundColor: g.isVip ? '#fef3c7' : 'var(--md-sys-color-primary-container)',
+                              padding: '2px 8px',
+                              borderRadius: 'var(--md-shape-full)',
+                              border: g.isVip ? '1px solid #fde68a' : '1px solid var(--md-sys-color-outline-variant)',
+                              cursor: 'pointer'
+                            }}
+                            title={`فوج ${g.groupId}: ${g.subject} (${g.teacherName}) - اضغط للمعاينة`}
+                          >
+                            <strong>{g.groupId}</strong>
+                            <span>•</span>
+                            <span>{g.subject}</span>
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    {/* Total Expected Fee */}
+                    <td style={{ textAlign: 'center', fontWeight: 700, fontSize: '0.84rem', whiteSpace: 'nowrap', padding: '8px 6px' }}>
+                      {item.totalFee.toLocaleString()} دج
+                    </td>
+                    {/* Total Received Paid */}
+                    <td style={{ textAlign: 'center', color: '#15803d', fontWeight: 700, fontSize: '0.84rem', whiteSpace: 'nowrap', padding: '8px 6px' }}>
+                      {item.totalReceived.toLocaleString()} دج
+                    </td>
+                    {/* Total Debt */}
+                    <td style={{ textAlign: 'center', whiteSpace: 'nowrap', padding: '8px 6px' }}>
+                      <span
+                        style={{
+                          fontWeight: 800,
+                          fontSize: '0.84rem',
+                          color: item.totalDebt > 0 ? '#b91c1c' : '#15803d'
+                        }}
+                      >
+                        {item.totalDebt > 0 ? `${item.totalDebt.toLocaleString()} دج` : '0 دج'}
+                      </span>
+                    </td>
+                    {/* Balance: GREEN when >= 0, RED when < 0 */}
+                    <td style={{ textAlign: 'center', whiteSpace: 'nowrap', padding: '8px 8px' }}>
                       <span
                         style={{
                           display: 'inline-flex',
                           alignItems: 'center',
-                          gap: '3px',
-                          fontWeight: 800,
-                          fontSize: '0.78rem',
-                          whiteSpace: 'nowrap',
-                          color: item.isVip ? 'var(--status-vip)' : 'var(--md-sys-color-primary)',
-                          backgroundColor: item.isVip ? 'var(--md-sys-color-surface-container)' : 'var(--md-sys-color-primary-container)',
-                          padding: '2px 7px',
-                          borderRadius: 'var(--md-shape-sm)'
-                        }}
-                      >
-                        {item.groupId} {item.isVip ? '★ VIP' : ''}
-                      </span>
-                    </td>
-                    <td style={{ fontSize: '0.8rem', whiteSpace: 'nowrap', padding: '7px 8px' }}>
-                      <span style={{ fontWeight: 700, color: 'var(--md-sys-color-on-surface)' }}>{item.subject}</span>
-                      <span style={{ color: 'var(--md-sys-color-outline)', margin: '0 4px' }}>•</span>
-                      <span style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>{item.teacherName}</span>
-                    </td>
-                    <td style={{ textAlign: 'center', whiteSpace: 'nowrap', padding: '7px 4px' }}>
-                      <span
-                        style={{
-                          fontSize: '0.72rem',
-                          fontWeight: 700,
-                          padding: '2px 6px',
-                          whiteSpace: 'nowrap',
-                          borderRadius: 'var(--md-shape-sm)',
-                          backgroundColor:
-                            item.student.discount === '0'
-                              ? 'var(--status-exempt-container)'
-                              : item.student.discount === '0.8'
-                              ? 'var(--status-makeup-container)'
-                              : 'var(--md-sys-color-surface-container)',
-                          color:
-                            item.student.discount === '0'
-                              ? 'var(--status-exempt)'
-                              : item.student.discount === '0.8'
-                              ? 'var(--status-makeup)'
-                              : 'var(--md-sys-color-on-surface)'
-                        }}
-                      >
-                        {item.student.discount === '0'
-                          ? 'معفى'
-                          : item.student.discount === '0.8'
-                          ? 'تخفيض 20%'
-                          : item.student.discount === 'تعويض'
-                          ? 'تعويض'
-                          : 'عادي'}
-                      </span>
-                    </td>
-                    <td style={{ textAlign: 'center', fontWeight: 700, fontSize: '0.82rem', whiteSpace: 'nowrap', padding: '7px 6px' }}>
-                      {item.student.fee.toLocaleString()} دج
-                    </td>
-                    <td style={{ textAlign: 'center', color: 'var(--status-present)', fontWeight: 700, fontSize: '0.82rem', whiteSpace: 'nowrap', padding: '7px 6px' }}>
-                      {item.student.totalReceived.toLocaleString()} دج
-                    </td>
-                    <td style={{ textAlign: 'center', whiteSpace: 'nowrap', padding: '7px 6px' }}>
-                      <span
-                        style={{
+                          gap: '4px',
                           fontWeight: 800,
                           fontSize: '0.82rem',
-                          whiteSpace: 'nowrap',
-                          color: item.student.debt > 0 ? 'var(--status-absent)' : 'var(--status-present)'
+                          padding: '3px 10px',
+                          borderRadius: 'var(--md-shape-full)',
+                          backgroundColor: isPositive ? '#dcfce7' : '#fee2e2',
+                          color: isPositive ? '#15803d' : '#b91c1c',
+                          border: isPositive ? '1px solid #86efac' : '1px solid #fca5a5'
                         }}
+                        title={isPositive ? 'رصيد موجب أو مسدد بالكامل (لا توجد ديون)' : 'رصيد سالب (مستحقات غير مسددة)'}
                       >
-                        {item.student.debt > 0 ? `${item.student.debt.toLocaleString()} دج` : 'مسدد ✓'}
+                        {isPositive ? '✓' : '✕'}
+                        <span>
+                          {isPositive && item.balance > 0 ? `+${item.balance.toLocaleString()}` : item.balance.toLocaleString()} دج
+                        </span>
                       </span>
                     </td>
-                    <td style={{ textAlign: 'center', padding: '7px 4px', whiteSpace: 'nowrap' }}>
-                      <div style={{ display: 'inline-flex', gap: '3px', alignItems: 'center' }}>
-                        {Array.from({ length: Math.min(maxSessions, 4) }).map((_, sIdx) => {
-                          const att = item.student.attendance?.[sIdx];
-                          const isP = att === 'P';
-                          const isA = att === 'A';
-                          const isM = att === 'M';
-
-                          return (
-                            <span
-                              key={sIdx}
-                              style={{
-                                width: '17px',
-                                height: '17px',
-                                borderRadius: '50%',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                fontSize: '0.6rem',
-                                fontWeight: 800,
-                                backgroundColor: isP
-                                  ? 'var(--status-present-container)'
-                                  : isA
-                                  ? 'var(--status-absent-container)'
-                                  : isM
-                                  ? 'var(--status-makeup-container)'
-                                  : 'var(--md-sys-color-surface-container)',
-                                color: isP
-                                  ? 'var(--status-present)'
-                                  : isA
-                                  ? 'var(--status-absent)'
-                                  : isM
-                                  ? 'var(--status-makeup)'
-                                  : 'var(--md-sys-color-outline)'
-                              }}
-                              title={`حصة ${sIdx + 1}: ${isP ? 'حاضر' : isA ? 'غائب' : isM ? 'تعويض' : 'لم تسجل'}`}
-                            >
-                              {isP ? '✓' : isA ? '✕' : isM ? 'ع' : '—'}
-                            </span>
-                          );
-                        })}
-                      </div>
+                    {/* Attendance */}
+                    <td style={{ textAlign: 'center', fontWeight: 700, fontSize: '0.8rem', whiteSpace: 'nowrap', padding: '8px 6px' }}>
+                      <span style={{ color: attendanceRate >= 75 ? '#15803d' : attendanceRate >= 50 ? '#d97706' : '#b91c1c' }}>
+                        {item.totalAttended} / {item.totalPossibleSessions}
+                      </span>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--md-sys-color-outline)', marginInlineStart: '3px' }}>
+                        ({attendanceRate}%)
+                      </span>
                     </td>
-                    <td style={{ textAlign: 'center', fontWeight: 700, fontSize: '0.82rem', whiteSpace: 'nowrap', padding: '7px 4px' }}>
-                      {item.student.totalAttendance} / {item.sessionCount}
-                    </td>
+                    {/* Actions */}
                     <td
                       style={{
                         textAlign: 'center',
@@ -495,13 +703,13 @@ export default function StudentsPage() {
                           onClick={(e) => {
                             e.stopPropagation();
                             setSelectedProfileStudent({
-                              student: item.student,
-                              groupId: item.groupId
+                              student: item.primaryStudentRecord,
+                              groupId: item.primaryGroupId
                             });
                           }}
                           className="m3-btn m3-btn-outlined m3-btn-sm"
                           style={{ padding: '3px 8px', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '3px', whiteSpace: 'nowrap' }}
-                          title="عرض الملف الشامل وسجل الحضور"
+                          title="عرض الملف الشامل وجميع الأفواج المسجل بها"
                         >
                           <FileText size={13} />
                           <span>الملف</span>
@@ -510,14 +718,15 @@ export default function StudentsPage() {
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            setActiveStudentModal({
-                              groupId: item.groupId,
-                              student: item.student
+                            // If user has multiple groups, default to first or open payment modal
+                            setActivePaymentStudent({
+                              groupId: item.primaryGroupId,
+                              student: item.primaryStudentRecord
                             });
                           }}
                           className="m3-btn m3-btn-primary m3-btn-sm"
                           style={{ padding: '3px 8px', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '3px', whiteSpace: 'nowrap' }}
-                          title="تسجيل دفعة أو تعديل المبالغ"
+                          title="تسجيل دفعة جديدة"
                         >
                           <Receipt size={13} />
                           <span>دفع</span>
@@ -549,7 +758,7 @@ export default function StudentsPage() {
           <span>
             عرض <strong>{filteredStudents.length > 0 ? (page - 1) * pageSize + 1 : 0}</strong> إلى{' '}
             <strong>{Math.min(page * pageSize, filteredStudents.length)}</strong> من أصل{' '}
-            <strong>{filteredStudents.length}</strong> سجل
+            <strong>{filteredStudents.length}</strong> تلميذ
           </span>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -601,11 +810,11 @@ export default function StudentsPage() {
       </div>
 
       {/* Payment Modal */}
-      {activeStudentModal && (
+      {activePaymentStudent && (
         <StudentPaymentModal
-          groupId={activeStudentModal.groupId}
-          student={activeStudentModal.student}
-          onClose={() => setActiveStudentModal(null)}
+          groupId={activePaymentStudent.groupId}
+          student={activePaymentStudent.student}
+          onClose={() => setActivePaymentStudent(null)}
         />
       )}
 
