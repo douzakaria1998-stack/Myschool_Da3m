@@ -46,6 +46,21 @@ export default function ThermalReceiptsModal({ group, onClose }: Props) {
   const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
   const [searchStudent, setSearchStudent] = useState('');
 
+  // Print Mode: 'batch' (all-in-one document with page breaks) or 'sequential' (one-by-one separate jobs for printers that only cut on document completion)
+  const [printMode, setPrintMode] = useState<'batch' | 'sequential'>(() => {
+    if (typeof window !== 'undefined') {
+      return (localStorage.getItem('da3m_thermal_print_mode') as 'batch' | 'sequential') || 'batch';
+    }
+    return 'batch';
+  });
+
+  const handleSetPrintMode = (mode: 'batch' | 'sequential') => {
+    setPrintMode(mode);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('da3m_thermal_print_mode', mode);
+    }
+  };
+
   // Sync local payments when group or selectedSessionIdx changes
   useEffect(() => {
     const initial: Record<number, string | number> = {};
@@ -167,6 +182,243 @@ export default function ThermalReceiptsModal({ group, onClose }: Props) {
     return sum + (Number(pVal) || 0);
   }, 0);
 
+  // Helper to build HTML for an individual student receipt
+  const buildReceiptHtml = (student: StudentRecord, idx: number, printDateStr: string, printTimeStr: string) => {
+    const pVal = localPayments[student.rowId] !== undefined ? localPayments[student.rowId] : student.payments[selectedSessionIdx];
+    const paidToday = Number(pVal) || 0;
+    const totalPaid = student.totalReceived || 0;
+    const balance = Math.max(0, student.fee - totalPaid);
+    const receiptNo = `${group.groupId}-${(student.rowId || idx + 1).toString().padStart(3, '0')}`;
+
+    return `
+      <div class="receipt">
+        <!-- School Logo -->
+        <div class="center" style="margin-bottom: 6px;">
+          <img src="${window.location.origin}/logo.svg" alt="شعار المؤسسة" style="height: 38px; max-width: 65mm; object-fit: contain; display: block; margin: 0 auto; filter: grayscale(100%);" />
+        </div>
+        <!-- Header -->
+        <div class="center bold title">${data.centerName}</div>
+        <div class="center subtitle">${data.cycle} | ${data.academicYear}</div>
+        <div class="divider"></div>
+        
+        <div class="center bold receipt-title">وصل تسديد حصة الدعم</div>
+        <div class="flex-row small">
+          <span>رقم الوصل: <strong>#${receiptNo}</strong></span>
+          <span>${printDateStr} ${printTimeStr}</span>
+        </div>
+        
+        <div class="divider"></div>
+        
+        <!-- Group Info -->
+        <div class="flex-row">
+          <span>الفوج: <strong class="bold">${group.groupId} ${group.isVip ? '(VIP)' : ''}</strong></span>
+          <span>المادة: <strong class="bold">${group.subject}</strong></span>
+        </div>
+        <div class="flex-row">
+          <span>الأستاذ: <strong>${group.teacherName}</strong></span>
+          <span>الحصة: <strong>${selectedSessionIdx + 1} (${sessionDate})</strong></span>
+        </div>
+        
+        <div class="divider"></div>
+        
+        <!-- Student Info -->
+        <div class="flex-row">
+          <span>اسم التلميذ:</span>
+          <span class="bold student-name">${student.name}</span>
+        </div>
+        ${student.phone ? `
+        <div class="flex-row small">
+          <span>الهاتف:</span>
+          <span>${student.phone}</span>
+        </div>` : ''}
+        
+        <!-- Payment Highlight for this day -->
+        <div class="divider"></div>
+        <div class="payment-box">
+          <div class="pay-title">المبلغ المسدد اليوم (حصة ${selectedSessionIdx + 1}):</div>
+          <div class="pay-amount">${paidToday.toLocaleString()} دج</div>
+        </div>
+        <div class="divider"></div>
+        
+        <!-- Overall Financial Status -->
+        <div class="flex-row">
+          <span>المبلغ الإجمالي للدورة:</span>
+          <span>${student.fee} دج</span>
+        </div>
+        <div class="flex-row">
+          <span>مجموع المبالغ المسددة:</span>
+          <span class="bold">${totalPaid} دج</span>
+        </div>
+        <div class="divider"></div>
+        <div class="flex-row bold status-text">
+          <span>الوضعية المتبقية:</span>
+          <span>${balance > 0 ? `دين متبقي: ${balance} دج` : 'خالص بالكامل ✓'}</span>
+        </div>
+        
+        <!-- Barcode Simulation -->
+        <div class="center barcode">*${receiptNo}*</div>
+        
+        <!-- Footer Note -->
+        <div class="center footer-text">
+          شكراً لثقتكم بمؤسستنا - مع تمنياتنا بالتفوق والنجاح<br />
+          يرجى الاحتفاظ بهذا الوصل للاستظهار به عند الحاجة
+        </div>
+
+        <!-- Cutter clearance feed space to ensure physical auto-cutter cuts below footer text -->
+        <div class="cutter-feed"></div>
+      </div>
+    `;
+  };
+
+  // Shared print styles for 80mm thermal printers
+  const thermalPrintCss = `
+    @page {
+      size: 80mm auto;
+      margin: 0mm !important;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    html, body {
+      font-family: 'Courier New', 'Cairo', Tahoma, Arial, sans-serif;
+      width: 100% !important;
+      max-width: 80mm !important;
+      margin: 0 auto !important;
+      padding: 0 !important;
+      background: #ffffff !important;
+      color: #000000 !important;
+      direction: rtl;
+      text-align: right;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .receipt {
+      width: 100% !important;
+      max-width: 80mm !important;
+      margin: 0 auto !important;
+      padding: 8px 6px 12px 6px !important;
+      page-break-inside: avoid !important;
+      break-inside: avoid !important;
+      page-break-after: always !important;
+      break-after: page !important;
+    }
+    .receipt:last-child {
+      page-break-after: auto !important;
+      break-after: auto !important;
+    }
+    .cutter-feed {
+      height: 14mm;
+      width: 100%;
+      display: block;
+    }
+    .center {
+      text-align: center;
+    }
+    .bold {
+      font-weight: 900;
+    }
+    .title {
+      font-size: 15px;
+      font-weight: 900;
+      line-height: 1.3;
+      margin-bottom: 2px;
+    }
+    .subtitle {
+      font-size: 11px;
+      color: #333;
+      margin-bottom: 3px;
+    }
+    .receipt-title {
+      font-size: 13px;
+      margin: 4px 0 2px;
+    }
+    .small {
+      font-size: 11px;
+    }
+    .divider {
+      width: 100%;
+      border-top: 1.5px dashed #000000;
+      margin: 5px 0;
+    }
+    .flex-row {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin: 2px 0;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    .student-name {
+      font-size: 15px;
+      font-weight: 900;
+    }
+    .payment-box {
+      width: 100%;
+      text-align: center;
+      padding: 6px 2px;
+      background: #f2f2f2 !important;
+      border: 2px solid #000000;
+      margin: 5px 0;
+    }
+    .pay-title {
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 2px;
+    }
+    .pay-amount {
+      font-size: 22px;
+      font-weight: 900;
+      color: #000000;
+    }
+    .status-text {
+      font-size: 13px;
+    }
+    .barcode {
+      font-family: monospace;
+      letter-spacing: 3px;
+      margin: 6px 0 2px 0;
+      font-size: 12px;
+      font-weight: bold;
+    }
+    .footer-text {
+      margin-top: 5px;
+      line-height: 1.3;
+      font-size: 10px;
+    }
+    @media print {
+      html, body {
+        width: 100% !important;
+        max-width: 80mm !important;
+        margin: 0 !important;
+        padding: 0 !important;
+      }
+      .receipt {
+        width: 100% !important;
+        max-width: 80mm !important;
+        margin: 0 auto !important;
+        padding: 8px 6px 12px 6px !important;
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+        page-break-after: always !important;
+        break-after: page !important;
+        border-bottom: none !important;
+      }
+      .receipt:last-child {
+        page-break-after: auto !important;
+        break-after: auto !important;
+      }
+      .cutter-feed {
+        height: 14mm !important;
+      }
+      .no-print {
+        display: none !important;
+      }
+    }
+  `;
+
   // Trigger thermal 80mm bulk print (accepts custom student list or defaults to studentsToPrint)
   const handlePrintThermal = (targetList?: StudentRecord[]) => {
     // Auto-save any unsaved input first
@@ -178,253 +430,141 @@ export default function ThermalReceiptsModal({ group, onClose }: Props) {
       return;
     }
 
-    const printWindow = window.open('', '_blank', 'width=420,height=600');
+    const printDateStr = formatToYYYYMMDD(new Date());
+    const printTimeStr = new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' });
+
+    // Single student OR batch mode with explicit page breaks
+    if (listToPrint.length === 1 || printMode === 'batch') {
+      const printWindow = window.open('', '_blank', 'width=420,height=600');
+      if (!printWindow) {
+        alert('يرجى السماح بفتح النوافذ المنبثقة للطباعة');
+        return;
+      }
+
+      const receiptsHtml = listToPrint
+        .map((student, idx) => buildReceiptHtml(student, idx, printDateStr, printTimeStr))
+        .join('');
+
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html dir="rtl" lang="ar">
+          <head>
+            <meta charset="utf-8" />
+            <title>وصولات حرارية 80mm - فوج ${group.groupId}</title>
+            <style>
+              ${thermalPrintCss}
+            </style>
+          </head>
+          <body>
+            <div class="receipts-container">
+              ${receiptsHtml}
+            </div>
+            <script>
+              window.onload = function() {
+                window.print();
+                setTimeout(function() { window.close(); }, 600);
+              };
+            </script>
+          </body>
+        </html>
+      `);
+      printWindow.document.close();
+      return;
+    }
+
+    // Sequential mode: prints each receipt as an independent print job to guarantee cutter triggers on all printers
+    const printWindow = window.open('', '_blank', 'width=450,height=650');
     if (!printWindow) {
       alert('يرجى السماح بفتح النوافذ المنبثقة للطباعة');
       return;
     }
 
-    const printDateStr = formatToYYYYMMDD(new Date());
-    const printTimeStr = new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' });
-
-    // Generate HTML for each student who paid on that day
-    const receiptsHtml = listToPrint
-      .map((student, idx) => {
-        const pVal = localPayments[student.rowId] !== undefined ? localPayments[student.rowId] : student.payments[selectedSessionIdx];
-        const paidToday = Number(pVal) || 0;
-        const totalPaid = student.totalReceived || 0;
-        const balance = Math.max(0, student.fee - totalPaid);
-        const receiptNo = `${group.groupId}-${(student.rowId || idx + 1).toString().padStart(3, '0')}`;
-
-        return `
-          <div class="receipt">
-            <!-- School Logo -->
-            <div class="center" style="margin-bottom: 6px;">
-              <img src="${window.location.origin}/logo.svg" alt="شعار المؤسسة" style="height: 38px; max-width: 65mm; object-fit: contain; display: block; margin: 0 auto; filter: grayscale(100%);" />
-            </div>
-            <!-- Header -->
-            <div class="center bold title">${data.centerName}</div>
-            <div class="center subtitle">${data.cycle} | ${data.academicYear}</div>
-            <div class="divider"></div>
-            
-            <div class="center bold receipt-title">وصل تسديد حصة الدعم</div>
-            <div class="flex-row small">
-              <span>رقم الوصل: <strong>#${receiptNo}</strong></span>
-              <span>${printDateStr} ${printTimeStr}</span>
-            </div>
-            
-            <div class="divider"></div>
-            
-            <!-- Group Info -->
-            <div class="flex-row">
-              <span>الفوج: <strong class="bold">${group.groupId} ${group.isVip ? '(VIP)' : ''}</strong></span>
-              <span>المادة: <strong class="bold">${group.subject}</strong></span>
-            </div>
-            <div class="flex-row">
-              <span>الأستاذ: <strong>${group.teacherName}</strong></span>
-              <span>الحصة: <strong>${selectedSessionIdx + 1} (${sessionDate})</strong></span>
-            </div>
-            
-            <div class="divider"></div>
-            
-            <!-- Student Info -->
-            <div class="flex-row">
-              <span>اسم التلميذ:</span>
-              <span class="bold student-name">${student.name}</span>
-            </div>
-            ${student.phone ? `
-            <div class="flex-row small">
-              <span>الهاتف:</span>
-              <span>${student.phone}</span>
-            </div>` : ''}
-            
-            <!-- Payment Highlight for this day -->
-            <div class="divider"></div>
-            <div class="payment-box">
-              <div class="pay-title">المبلغ المسدد اليوم (حصة ${selectedSessionIdx + 1}):</div>
-              <div class="pay-amount">${paidToday.toLocaleString()} دج</div>
-            </div>
-            <div class="divider"></div>
-            
-            <!-- Overall Financial Status -->
-            <div class="flex-row">
-              <span>المبلغ الإجمالي للدورة:</span>
-              <span>${student.fee} دج</span>
-            </div>
-            <div class="flex-row">
-              <span>مجموع المبالغ المسددة:</span>
-              <span class="bold">${totalPaid} دج</span>
-            </div>
-            <div class="divider"></div>
-            <div class="flex-row bold status-text">
-              <span>الوضعية المتبقية:</span>
-              <span>${balance > 0 ? `دين متبقي: ${balance} دج` : 'خالص بالكامل ✓'}</span>
-            </div>
-            
-            <!-- Barcode Simulation -->
-            <div class="center barcode">*${receiptNo}*</div>
-            
-            <!-- Footer Note -->
-            <div class="center footer-text">
-              شكراً لثقتكم بمؤسستنا - مع تمنياتنا بالتفوق والنجاح<br />
-              يرجى الاحتفاظ بهذا الوصل للاستظهار به عند الحاجة
-            </div>
-            
-            <!-- Cut separator between receipts under each other -->
-            <div class="cut-line">✄ - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -</div>
-          </div>
-        `;
-      })
-      .join('');
+    const receiptsData = listToPrint.map((student, idx) => ({
+      name: student.name,
+      html: buildReceiptHtml(student, idx, printDateStr, printTimeStr)
+    }));
 
     printWindow.document.write(`
       <!DOCTYPE html>
       <html dir="rtl" lang="ar">
         <head>
           <meta charset="utf-8" />
-          <title>وصولات الدفع الحرارية 80mm - فوج ${group.groupId}</title>
+          <title>طباعة متتالية للوصولات 80mm - فوج ${group.groupId}</title>
           <style>
-            @page {
-              size: 80mm auto;
-              margin: 0mm !important;
-            }
-            * {
-              box-sizing: border-box;
-              margin: 0;
-              padding: 0;
-            }
-            html, body {
-              font-family: 'Courier New', 'Cairo', Tahoma, Arial, sans-serif;
-              width: 100% !important;
-              max-width: 80mm !important;
-              margin: 0 auto !important;
-              padding: 0 !important;
-              background: #ffffff !important;
-              color: #000000 !important;
-              direction: rtl;
-              text-align: right;
-              -webkit-print-color-adjust: exact;
-              print-color-adjust: exact;
-            }
-            .receipt {
-              width: 100% !important;
-              max-width: 80mm !important;
-              margin: 0 auto !important;
-              padding: 8px 4px 16px 4px !important;
-              /* Receipts appear continuously under each other on the roll */
-              page-break-inside: avoid !important;
-              break-inside: avoid !important;
-              page-break-after: auto !important;
-              break-after: auto !important;
-              border-bottom: 2px dashed #000000;
-            }
-            .center {
-              text-align: center;
-            }
-            .bold {
-              font-weight: 900;
-            }
-            .title {
-              font-size: 15px;
-              font-weight: 900;
-              line-height: 1.3;
-              margin-bottom: 2px;
-            }
-            .subtitle {
-              font-size: 11px;
-              color: #333;
-              margin-bottom: 3px;
-            }
-            .receipt-title {
-              font-size: 13px;
-              margin: 4px 0 2px;
-            }
-            .small {
-              font-size: 11px;
-            }
-            .divider {
-              width: 100%;
-              border-top: 1.5px dashed #000000;
-              margin: 5px 0;
-            }
-            .flex-row {
-              width: 100%;
-              display: flex;
-              justify-content: space-between;
-              align-items: center;
-              margin: 2px 0;
-              font-size: 12px;
-              line-height: 1.4;
-            }
-            .student-name {
-              font-size: 15px;
-              font-weight: 900;
-            }
-            .payment-box {
-              width: 100%;
-              text-align: center;
-              padding: 6px 2px;
-              background: #f2f2f2 !important;
-              border: 2px solid #000000;
-              margin: 5px 0;
-            }
-            .pay-title {
-              font-size: 12px;
-              font-weight: 700;
-              margin-bottom: 2px;
-            }
-            .pay-amount {
-              font-size: 22px;
-              font-weight: 900;
-              color: #000000;
-            }
-            .status-text {
-              font-size: 13px;
-            }
-            .barcode {
-              font-family: monospace;
-              letter-spacing: 3px;
-              margin: 6px 0 2px 0;
-              font-size: 12px;
-              font-weight: bold;
-            }
-            .footer-text {
-              margin-top: 5px;
-              line-height: 1.3;
-              font-size: 10px;
-            }
-            .cut-line {
-              text-align: center;
-              font-size: 10px;
-              font-weight: bold;
-              color: #222;
-              margin-top: 10px;
-              padding-bottom: 4px;
-            }
-            @media print {
-              html, body {
-                width: 100% !important;
-                max-width: 80mm !important;
-              }
-              .receipt {
-                width: 100% !important;
-                max-width: 80mm !important;
-                page-break-inside: avoid !important;
-                break-inside: avoid !important;
-                page-break-after: auto !important;
-                break-after: auto !important;
-              }
-            }
+            ${thermalPrintCss}
           </style>
         </head>
         <body>
-          <div class="receipts-container">
-            ${receiptsHtml}
+          <div class="no-print" style="position: sticky; top: 0; background: #00639b; color: #ffffff; padding: 10px 14px; text-align: center; border-radius: 0 0 8px 8px; margin-bottom: 12px; font-family: sans-serif; box-shadow: 0 2px 8px rgba(0,0,0,0.15);">
+            <div style="font-weight: 800; font-size: 14px; margin-bottom: 2px;">
+              طباعة متتالية: وصل <span id="cur-num">1</span> من ${receiptsData.length}
+            </div>
+            <div style="font-size: 12px; opacity: 0.95; margin-bottom: 8px;" id="cur-name">
+              ${receiptsData[0]?.name || ''}
+            </div>
+            <div style="display: flex; justify-content: center; gap: 8px;">
+              <button onclick="printCurrent()" style="background: #ffffff; color: #00639b; border: none; padding: 4px 12px; border-radius: 4px; font-weight: 800; cursor: pointer; font-size: 12px;">
+                طباعة هذا الوصل 🖨️
+              </button>
+              <button onclick="skipToNext()" style="background: rgba(255,255,255,0.25); color: #fff; border: 1px solid rgba(255,255,255,0.4); padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                تخطي للوصل التالي ⏭️
+              </button>
+            </div>
+            <div style="font-size: 10px; opacity: 0.85; margin-top: 6px;">
+              يتم قص كل وصل تلقائياً بعد تأكيد طباعته
+            </div>
           </div>
+
+          <div id="receipt-container"></div>
+
           <script>
+            var receipts = ${JSON.stringify(receiptsData)};
+            var curIdx = 0;
+
+            function renderReceipt(idx) {
+              if (idx >= receipts.length) {
+                var ctrl = document.querySelector('.no-print');
+                if (ctrl) ctrl.style.display = 'none';
+                document.getElementById('receipt-container').innerHTML = 
+                  '<div style="text-align: center; padding: 40px 10px; font-family: sans-serif; font-weight: bold; color: #15803d; font-size: 15px;">✓ اكتملت طباعة وقص جميع الوصولات (' + receipts.length + ') بنجاح!</div>';
+                setTimeout(function() { window.close(); }, 1200);
+                return;
+              }
+              document.getElementById('cur-num').innerText = (idx + 1);
+              document.getElementById('cur-name').innerText = receipts[idx].name;
+              document.getElementById('receipt-container').innerHTML = receipts[idx].html;
+            }
+
+            function printCurrent() {
+              if (curIdx >= receipts.length) return;
+              renderReceipt(curIdx);
+              setTimeout(function() {
+                window.print();
+              }, 350);
+            }
+
+            function skipToNext() {
+              curIdx++;
+              if (curIdx < receipts.length) {
+                printCurrent();
+              } else {
+                renderReceipt(curIdx);
+              }
+            }
+
+            window.onafterprint = function() {
+              curIdx++;
+              if (curIdx < receipts.length) {
+                setTimeout(function() {
+                  printCurrent();
+                }, 500);
+              } else {
+                renderReceipt(curIdx);
+              }
+            };
+
             window.onload = function() {
-              window.print();
-              setTimeout(function() { window.close(); }, 500);
+              printCurrent();
             };
           </script>
         </body>
@@ -848,31 +988,109 @@ export default function ThermalReceiptsModal({ group, onClose }: Props) {
         {/* Modal Actions */}
         <div
           style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
             borderTop: '1px solid var(--md-sys-color-outline-variant)',
             paddingTop: '10px',
+            display: 'flex',
+            flexDirection: 'column',
             gap: '8px'
           }}
         >
-          <div style={{ fontSize: '0.72rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
-            طباعة حرارية 80mm للمحددين فقط ({studentsToPrint.length} تلميذ)
+          {/* Cutter separation mode selector */}
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              backgroundColor: 'var(--md-sys-color-surface-container-low)',
+              padding: '6px 10px',
+              borderRadius: 'var(--md-shape-xs)',
+              fontSize: '0.74rem',
+              flexWrap: 'wrap',
+              gap: '8px'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+              <span style={{ fontWeight: 700, color: 'var(--md-sys-color-on-surface)' }}>
+                طريقة قص وفصل الوصولات:
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+              <label
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  cursor: 'pointer',
+                  fontWeight: printMode === 'batch' ? 700 : 400,
+                  color: printMode === 'batch' ? 'var(--md-sys-color-primary)' : 'inherit'
+                }}
+                title="طباعة دفعة واحدة مع فاصل صفحات وقص تلقائي بينها (تتطلب تفعيل Cut between pages في إعدادات الطابعة)"
+              >
+                <input
+                  type="radio"
+                  name="printMode"
+                  value="batch"
+                  checked={printMode === 'batch'}
+                  onChange={() => handleSetPrintMode('batch')}
+                  style={{ cursor: 'pointer' }}
+                />
+                <span>دفعة واحدة (فواصل صفحات للقص)</span>
+              </label>
+
+              <label
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  cursor: 'pointer',
+                  fontWeight: printMode === 'sequential' ? 700 : 400,
+                  color: printMode === 'sequential' ? 'var(--md-sys-color-primary)' : 'inherit'
+                }}
+                title="إرسال كل وصل كأمر مستقل منفصل لضمان تشغيل مقص الطابعة لكل وصل مهما كانت إعدادات الطابعة"
+              >
+                <input
+                  type="radio"
+                  name="printMode"
+                  value="sequential"
+                  checked={printMode === 'sequential'}
+                  onChange={() => handleSetPrintMode('sequential')}
+                  style={{ cursor: 'pointer' }}
+                />
+                <span>وصل تلو الآخر (قص مؤكد 100%)</span>
+              </label>
+            </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button type="button" onClick={onClose} className="m3-btn m3-btn-text m3-btn-sm" style={{ padding: '5px 12px', fontSize: '0.8rem' }}>
-              إغلاق
-            </button>
-            <button
-              type="button"
-              onClick={() => handlePrintThermal()}
-              className="m3-btn m3-btn-primary m3-btn-sm"
-              style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 14px', fontSize: '0.82rem' }}
-            >
-              <Printer size={15} />
-              <span>طباعة وصولات المحددين ({studentsToPrint.length} وصل)</span>
-            </button>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: '8px'
+            }}
+          >
+            <div style={{ fontSize: '0.72rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
+              طباعة حرارية 80mm للمحددين فقط ({studentsToPrint.length} تلميذ)
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button type="button" onClick={onClose} className="m3-btn m3-btn-text m3-btn-sm" style={{ padding: '5px 12px', fontSize: '0.8rem' }}>
+                إغلاق
+              </button>
+              <button
+                type="button"
+                onClick={() => handlePrintThermal()}
+                className="m3-btn m3-btn-primary m3-btn-sm"
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 14px', fontSize: '0.82rem' }}
+              >
+                <Printer size={15} />
+                <span>
+                  طباعة وصولات المحددين ({studentsToPrint.length} وصل)
+                  {printMode === 'sequential' && studentsToPrint.length > 1 ? ' • متتالية' : ''}
+                </span>
+              </button>
+            </div>
           </div>
         </div>
       </div>

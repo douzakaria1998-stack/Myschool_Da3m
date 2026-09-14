@@ -43,6 +43,55 @@ export function formatToYYYYMMDD(dateVal: Date | string | null | undefined): str
 }
 
 /**
+ * Arabic day names mapped by JavaScript getDay() index (0 = Sunday, 1 = Monday, ..., 6 = Saturday)
+ */
+export const ARABIC_DAYS = [
+  'الأحد',    // 0
+  'الإثنين',  // 1
+  'الثلاثاء', // 2
+  'الأربعاء', // 3
+  'الخميس',   // 4
+  'الجمعة',   // 5
+  'السبت'     // 6
+];
+
+/**
+ * Returns today's Arabic weekday name
+ */
+export function getTodayArabicDayName(today: Date = new Date()): string {
+  return ARABIC_DAYS[today.getDay()];
+}
+
+/**
+ * Normalizes Arabic text (removes alef hamzas, taa marbuta variations, etc.) for reliable matching
+ */
+export function normalizeArabicText(text: string): string {
+  if (!text) return '';
+  return text
+    .trim()
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/[\u064B-\u065F]/g, ''); // strip tashkeel
+}
+
+/**
+ * Resolves day of week index (0 = Sunday .. 6 = Saturday) from an Arabic day name string
+ */
+export function getDayOfWeekFromArabic(dayName: string): number {
+  if (!dayName) return -1;
+  const norm = normalizeArabicText(dayName);
+  if (!norm) return -1;
+  // 0: Sunday, 1: Monday, 2: Tuesday, 3: Wednesday, 4: Thursday, 5: Friday, 6: Saturday
+  const days = ['الاحد', 'الاثنين', 'الثلاثاء', 'الاربعاء', 'الخميس', 'الجمعة', 'السبت'];
+  for (let i = 0; i < days.length; i++) {
+    if (norm.includes(days[i]) || days[i].includes(norm)) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/**
  * Standard anchor starts for weekdays in the semester calendar
  */
 export const WEEKDAY_ANCHORS: Record<string, string> = {
@@ -59,12 +108,13 @@ export const WEEKDAY_ANCHORS: Record<string, string> = {
 };
 
 /**
- * Generates consecutive session dates formatted as YYYY/MM/DD based on weekday
+ * Generates consecutive session dates formatted as YYYY/MM/DD based on weekday(s)
  */
 export function generateSessionDates(
   dayName: string = 'السبت',
   count: number = 4,
-  customStart?: string
+  customStart?: string,
+  day2Name?: string
 ): string[] {
   let startDate: Date;
   if (customStart) {
@@ -73,18 +123,116 @@ export function generateSessionDates(
     if (isNaN(startDate.getTime())) {
       const anchor = WEEKDAY_ANCHORS[dayName] || '2026-08-22';
       startDate = new Date(anchor);
+    } else {
+      // Ensure startDate aligns with the specified dayName's weekday
+      const targetWeekday = getDayOfWeekFromArabic(dayName);
+      if (targetWeekday !== -1 && startDate.getDay() !== targetWeekday) {
+        let dayOffset = targetWeekday - startDate.getDay();
+        if (dayOffset > 3) dayOffset -= 7;
+        if (dayOffset < -3) dayOffset += 7;
+        startDate.setDate(startDate.getDate() + dayOffset);
+      }
     }
   } else {
     const anchor = WEEKDAY_ANCHORS[dayName] || '2026-08-22';
     startDate = new Date(anchor);
   }
 
+  // Resolve study weekdays
+  const weekdays: number[] = [];
+  const w1 = getDayOfWeekFromArabic(dayName);
+  if (w1 !== -1) weekdays.push(w1);
+  const w2 = getDayOfWeekFromArabic(day2Name || '');
+  if (w2 !== -1 && w2 !== w1) weekdays.push(w2);
+
   const result: string[] = [];
+  let cur = new Date(startDate);
   for (let i = 0; i < count; i++) {
-    const cur = new Date(startDate);
-    cur.setDate(startDate.getDate() + i * 7);
-    result.push(formatToYYYYMMDD(cur));
+    if (i === 0) {
+      result.push(formatToYYYYMMDD(cur));
+    } else {
+      if (weekdays.length <= 1) {
+        cur = new Date(cur);
+        cur.setDate(cur.getDate() + 7);
+      } else {
+        let nextDate = new Date(cur);
+        let found = false;
+        for (let step = 1; step <= 7; step++) {
+          nextDate.setDate(nextDate.getDate() + 1);
+          if (weekdays.includes(nextDate.getDay())) {
+            cur = nextDate;
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          cur.setDate(cur.getDate() + 7);
+        }
+      }
+      result.push(formatToYYYYMMDD(cur));
+    }
   }
+  return result;
+}
+
+/**
+ * Propagates subsequent session dates when any session date is edited.
+ * Starting from changedIndex, all subsequent sessions (changedIndex + 1 .. dates.length - 1)
+ * are automatically calculated based on the study day(s) of the group.
+ */
+export function recalculateSubsequentDates(
+  currentDates: string[],
+  changedIndex: number,
+  newDateStr: string,
+  day1?: string,
+  day2?: string
+): string[] {
+  const result = [...currentDates];
+  const cleanFormatted = formatToYYYYMMDD(newDateStr);
+  result[changedIndex] = cleanFormatted || newDateStr;
+
+  const parsedStart = new Date(cleanFormatted ? cleanFormatted.replace(/\//g, '-') : newDateStr.replace(/\//g, '-'));
+  if (isNaN(parsedStart.getTime())) {
+    return result;
+  }
+
+  // Resolve study weekday numbers (0 = Sunday .. 6 = Saturday)
+  const weekdays: number[] = [];
+  const w1 = getDayOfWeekFromArabic(day1 || '');
+  if (w1 !== -1) weekdays.push(w1);
+
+  const w2 = getDayOfWeekFromArabic(day2 || '');
+  if (w2 !== -1 && w2 !== w1) weekdays.push(w2);
+
+  // If no valid weekday resolved from day1/day2, default to the weekday of the edited date
+  if (weekdays.length === 0) {
+    weekdays.push(parsedStart.getDay());
+  }
+
+  let curDate = new Date(parsedStart);
+
+  for (let i = changedIndex + 1; i < result.length; i++) {
+    if (weekdays.length === 1) {
+      curDate = new Date(curDate);
+      curDate.setDate(curDate.getDate() + 7);
+    } else {
+      let nextDate = new Date(curDate);
+      let found = false;
+      for (let step = 1; step <= 7; step++) {
+        nextDate.setDate(nextDate.getDate() + 1);
+        if (weekdays.includes(nextDate.getDay())) {
+          curDate = nextDate;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        curDate.setDate(curDate.getDate() + 7);
+      }
+    }
+    result[i] = formatToYYYYMMDD(curDate);
+  }
+
   return result;
 }
 
@@ -205,63 +353,36 @@ export function getDefaultSessionIndex(group: GroupSheet, today: Date = new Date
 }
 
 /**
- * Arabic day names mapped by JavaScript getDay() index (0 = Sunday, 1 = Monday, ..., 6 = Saturday)
- */
-export const ARABIC_DAYS = [
-  'الأحد',    // 0
-  'الإثنين',  // 1
-  'الثلاثاء', // 2
-  'الأربعاء', // 3
-  'الخميس',   // 4
-  'الجمعة',   // 5
-  'السبت'     // 6
-];
-
-/**
- * Returns today's Arabic weekday name
- */
-export function getTodayArabicDayName(today: Date = new Date()): string {
-  return ARABIC_DAYS[today.getDay()];
-}
-
-/**
- * Normalizes Arabic text (removes alef hamzas, taa marbuta variations, etc.) for reliable matching
- */
-export function normalizeArabicText(text: string): string {
-  if (!text) return '';
-  return text
-    .trim()
-    .replace(/[أإآ]/g, 'ا')
-    .replace(/ة/g, 'ه')
-    .replace(/[\u064B-\u065F]/g, ''); // strip tashkeel
-}
-
-/**
  * Checks whether a group is active today:
- * 1. If any session in groupSheet.sessionDates matches today's calendar date
- * 2. OR if group's scheduled weekday (day1 or day2) matches today's day of week
+ * 1. If group has a scheduled weekday (day1 or day2), it strictly matches if today's day of week matches day1 or day2.
+ * 2. If neither day1 nor day2 is set, falls back to checking if any session date matches today's calendar date.
  */
-export function isGroupToday(group: { day1?: string; day2?: string; id?: string }, groupSheet?: GroupSheet, today: Date = new Date()): boolean {
+export function isGroupToday(
+  group: { day1?: string; day2?: string; id?: string },
+  groupSheet?: GroupSheet,
+  today: Date = new Date()
+): boolean {
   if (!group) return false;
 
-  // 1. Check if any session date matches today's date
-  if (groupSheet && Array.isArray(groupSheet.sessionDates)) {
-    const hasTodayDate = groupSheet.sessionDates.some((d) => isSessionDateToday(d, today));
-    if (hasTodayDate) return true;
-  }
-
-  // 2. Check weekday matching
   const todayDayName = ARABIC_DAYS[today.getDay()];
   const normToday = normalizeArabicText(todayDayName);
 
-  const normDay1 = normalizeArabicText(group.day1 || '');
-  const normDay2 = normalizeArabicText(group.day2 || '');
+  const groupDay1 = group.day1 || groupSheet?.day1 || '';
+  const groupDay2 = group.day2 || groupSheet?.day2 || '';
 
-  if (normDay1 && (normDay1.includes(normToday) || normToday.includes(normDay1))) {
-    return true;
+  const normDay1 = normalizeArabicText(groupDay1);
+  const normDay2 = normalizeArabicText(groupDay2);
+
+  // If the group has scheduled day(s), it is today's group IF AND ONLY IF today matches day1 or day2!
+  if (normDay1 || normDay2) {
+    const isDay1Today = normDay1 ? (normDay1.includes(normToday) || normToday.includes(normDay1)) : false;
+    const isDay2Today = normDay2 ? (normDay2.includes(normToday) || normToday.includes(normDay2)) : false;
+    return isDay1Today || isDay2Today;
   }
-  if (normDay2 && (normDay2.includes(normToday) || normToday.includes(normDay2))) {
-    return true;
+
+  // Fallback: If neither day1 nor day2 is set, check if any session date matches today
+  if (groupSheet && Array.isArray(groupSheet.sessionDates)) {
+    return groupSheet.sessionDates.some((d) => isSessionDateToday(d, today));
   }
 
   return false;
@@ -461,7 +582,7 @@ export function isValidGroupId(groupId: string): { isValid: boolean; error?: str
 /**
  * Computes the next ascending sequential Group ID:
  * - For normal groups: BAC01, BAC02, ..., BAC09, BAC10, BAC11...
- * - For VIP groups: BACV01, BACV02, ..., BACV04, BACV05, BACV06...
+ * - For VIP groups: BACV01, BACV02, ..., BACV04, BACV05, BACV10...
  * - Numbers are always formatted with leading zero for single digits: 01, 02, 03...
  */
 export function getNextGroupId(
@@ -558,5 +679,58 @@ export function getSuggestedGroupIds(
   }
 
   return suggestions;
+}
+
+export interface StudentSessionInfo {
+  firstActiveIndex: number;
+  countedSessions: number;
+  isSessionCounted: (sessionIdx: number) => boolean;
+}
+
+/**
+ * Calculates session counting rules for a student:
+ * - Empty cells before the student's first recorded attendance (P/A/M/S) do NOT count (un-enrolled / pre-enrollment sessions).
+ * - Empty cells after the student has recorded attendance DO count (officially registered in the group).
+ */
+export function getStudentSessionInfo(
+  attendance: (string | null | undefined)[],
+  cycleSessions: number = 4
+): StudentSessionInfo {
+  const cycleAtt = (attendance || []).slice(0, cycleSessions);
+  const hasSuspended = cycleAtt.includes('S');
+
+  let firstActiveIndex = -1;
+  for (let i = 0; i < cycleAtt.length; i++) {
+    const st = cycleAtt[i];
+    if (st === 'P' || st === 'A' || st === 'M' || st === 'S') {
+      firstActiveIndex = i;
+      break;
+    }
+  }
+
+  let countedSessions = 0;
+  if (hasSuspended) {
+    countedSessions = cycleAtt.filter((st) => st === 'P' || st === 'A').length;
+  } else if (firstActiveIndex !== -1) {
+    countedSessions = cycleSessions - firstActiveIndex;
+  } else {
+    countedSessions = 0;
+  }
+
+  const isSessionCounted = (sessionIdx: number): boolean => {
+    if (sessionIdx >= cycleSessions) return false;
+    if (hasSuspended) {
+      const st = cycleAtt[sessionIdx];
+      return st === 'P' || st === 'A';
+    }
+    if (firstActiveIndex === -1) return false;
+    return sessionIdx >= firstActiveIndex;
+  };
+
+  return {
+    firstActiveIndex,
+    countedSessions,
+    isSessionCounted
+  };
 }
 

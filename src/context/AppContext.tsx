@@ -19,7 +19,8 @@ import {
   generateSessionDates,
   isVipGroupId,
   isValidGroupId,
-  getNextGroupId
+  getNextGroupId,
+  getStudentSessionInfo
 } from '../utils/sessionUtils';
 
 interface AppContextType {
@@ -33,6 +34,7 @@ interface AppContextType {
   toggleLang: () => void;
   // Student Actions
   updateAttendance: (groupId: string, rowId: number, sessionIndex: number, status: AttendanceStatus) => void;
+  markAllPresent: (groupId: string, sessionIndex: number, studentRowIds?: number[]) => void;
   updatePayment: (groupId: string, rowId: number, paymentIndex: number, amount: number | string) => void;
   updateStudentFullFinances: (groupId: string, rowId: number, payments: (number | string)[], discount?: DiscountType) => void;
   batchUpdateSessionPayments: (groupId: string, sessionIndex: number, studentPayments: { rowId: number; amount: number | string }[]) => void;
@@ -53,6 +55,7 @@ interface AppContextType {
     customGroupFields?: Partial<GroupMeta>
   ) => void;
   updateGroup: (groupId: string, fields: Partial<GroupMeta>) => void;
+  renameGroup: (oldId: string, newId: string) => boolean;
   deleteGroup: (groupId: string) => void;
   updateGroupFinances: (groupId: string, finances: { studentFee: number; teacherPayPerStudent: number; schoolSharePerStudent: number }) => void;
   addTeacher: (teacher: Teacher) => void;
@@ -107,7 +110,12 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
 
     // Ensure group ID follows strict BAC{XX} / BACV{XX} format without hyphens or suffixes like BAC01-2
     let finalGid = gid.trim().toUpperCase();
-    if (finalGid.includes('-') || finalGid.includes('_') || !isValidGroupId(finalGid).isValid) {
+    if (finalGid === 'BACV06' || gid.trim().toUpperCase() === 'BACV06') {
+      finalGid = 'BACV10';
+      idMap[gid] = 'BACV10';
+      idMap['BACV06'] = 'BACV10';
+      changed = true;
+    } else if (finalGid.includes('-') || finalGid.includes('_') || !isValidGroupId(finalGid).isValid) {
       const isVip = gSheet.isVip || /^BACV/i.test(finalGid);
       const existingIds = [...Object.keys(newGroupData), ...(centerData.groups || []).map((g) => g.id)];
       finalGid = getNextGroupId(isVip, existingIds);
@@ -149,12 +157,37 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
       });
     }
 
+    let finalStudents = cleanStudents;
+    const seedGroup = (initialSeedData.groupData as Record<string, GroupSheet>)?.[finalGid];
+    if (cleanStudents.length === 0 && seedGroup && seedGroup.students && seedGroup.students.length > 0) {
+      finalStudents = seedGroup.students;
+      if (seedGroup.sessionDates && seedGroup.sessionDates.length > 0) {
+        normalizedDates = seedGroup.sessionDates;
+      }
+      changed = true;
+    }
+
+    // Clean up any legacy manual status: 'active' so groups default to dynamic session-based status ('auto')
+    let finalStatus = gSheet.status;
+    if (finalStatus === 'active') {
+      finalStatus = undefined;
+      changed = true;
+    }
+
     newGroupData[finalGid] = {
       ...gSheet,
       groupId: finalGid,
       sessionDates: normalizedDates,
-      students: cleanStudents
+      status: finalStatus,
+      students: finalStudents
     };
+  }
+
+  for (const [seedGid, seedSheet] of Object.entries((initialSeedData.groupData as Record<string, GroupSheet>) || {})) {
+    if (!newGroupData[seedGid] && seedSheet.students && seedSheet.students.length > 0) {
+      newGroupData[seedGid] = seedSheet;
+      changed = true;
+    }
   }
 
   // Deduplicate and sanitize groups array
@@ -163,18 +196,51 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
   const cleanGroups: GroupMeta[] = [];
   for (const g of centerData.groups || []) {
     let cleanId = (idMap[g.id] || g.id).trim().toUpperCase();
+    if (cleanId === 'BACV06') {
+      cleanId = 'BACV10';
+      changed = true;
+    }
     if (cleanId.includes('-') || cleanId.includes('_') || !isValidGroupId(cleanId).isValid) {
       cleanId = getNextGroupId(g.isVip || cleanId.startsWith('BACV'), cleanGroups);
       changed = true;
     }
+    let cleanStatus = g.status;
+    if (cleanStatus === 'active') {
+      cleanStatus = undefined;
+      changed = true;
+    }
+
     if (!seenIds.has(cleanId)) {
       seenIds.add(cleanId);
-      cleanGroups.push({ ...g, id: cleanId });
+      cleanGroups.push({ ...g, id: cleanId, status: cleanStatus });
     } else {
       // Duplicate ID detected (e.g. duplicate BAC01) - assign next ascending ID!
       const uniqueId = getNextGroupId(g.isVip || cleanId.startsWith('BACV'), cleanGroups);
       seenIds.add(uniqueId);
-      cleanGroups.push({ ...g, id: uniqueId });
+      cleanGroups.push({ ...g, id: uniqueId, status: cleanStatus });
+      changed = true;
+    }
+  }
+
+  for (const gid of Object.keys(newGroupData)) {
+    if (!seenIds.has(gid)) {
+      const seedMeta = (initialSeedData.groups || []).find((g) => g.id === gid);
+      const sheet = newGroupData[gid];
+      if (seedMeta) {
+        cleanGroups.push(seedMeta);
+      } else {
+        cleanGroups.push({
+          id: gid,
+          teacherId: '',
+          teacherName: sheet.teacherName || '',
+          subject: sheet.subject || '',
+          day1: sheet.day1 || '',
+          time1: sheet.time1 || '',
+          type: sheet.type || '4-2500',
+          isVip: sheet.isVip || false
+        });
+      }
+      seenIds.add(gid);
       changed = true;
     }
   }
@@ -264,54 +330,59 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       sessions: 4
     };
 
+    const cycleSessions = groupFinances?.sessionCount || tier.sessions || 4;
+
     const basePrice = typeof groupFinances?.studentFee === 'number' && groupFinances.studentFee > 0
       ? groupFinances.studentFee
       : tier.price;
     const baseTeacherRate = typeof groupFinances?.teacherPayPerStudent === 'number'
       ? groupFinances.teacherPayPerStudent
       : tier.teacherRate;
-    const baseSchoolRate = typeof groupFinances?.schoolSharePerStudent === 'number'
-      ? groupFinances.schoolSharePerStudent
-      : (basePrice - baseTeacherRate);
 
-    // Attendance calculation
-    const attendedCount = student.attendance.filter((a) => a === 'P' || a === 'M').length;
+    const perSessionPrice = Math.round(basePrice / cycleSessions);
+    const perSessionTeacherRate = Math.round(baseTeacherRate / cycleSessions);
 
-    // Fee calculation based on discount
-    let fee = basePrice;
-    let teacherPay = baseTeacherRate;
-    let schoolEarn = baseSchoolRate;
+    // Calculate session info: empty before first attendance = red (not counted), empty after = yellow (counted)
+    const sessionInfo = getStudentSessionInfo(student.attendance, cycleSessions);
+    const countedSessions = sessionInfo.countedSessions;
+
+    // Attendance counts
+    const cycleAttendance = (student.attendance || []).slice(0, cycleSessions);
+    const attendedCount = cycleAttendance.filter((a) => a === 'P').length;
+    const makeupCount = cycleAttendance.filter((a) => a === 'M').length;
+    const totalAttendance = attendedCount + makeupCount;
+
+    // Fee calculation based on discount and counted sessions
+    let fee = 0;
+    let teacherPay = 0;
+    let schoolEarn = 0;
 
     if (student.discount === '0') {
       fee = 0;
       teacherPay = 0;
       schoolEarn = 0;
     } else if (student.discount === '0.8') {
-      fee = Math.round(basePrice * 0.8);
-      teacherPay = Math.round(baseTeacherRate * 0.8);
-      schoolEarn = fee - teacherPay;
+      fee = Math.round(countedSessions * perSessionPrice * 0.8);
+      teacherPay = attendedCount * perSessionTeacherRate;
+      schoolEarn = Math.max(0, fee - teacherPay);
     } else if (student.discount === 'تعويض') {
-      // per session compensation rate
-      const perSession = Math.round(basePrice / (tier.sessions || 4));
-      const perSessionTeacher = Math.round(baseTeacherRate / (tier.sessions || 4));
-      const mCount = student.attendance.filter((a) => a === 'M').length;
-      fee = perSession * (mCount > 0 ? mCount : 1);
-      teacherPay = perSessionTeacher * (mCount > 0 ? mCount : 1);
-      schoolEarn = fee - teacherPay;
+      const count = makeupCount > 0 ? makeupCount : (attendedCount > 0 ? attendedCount : 1);
+      fee = count * perSessionPrice;
+      teacherPay = count * perSessionTeacherRate;
+      schoolEarn = Math.max(0, fee - teacherPay);
     } else {
-      // Standard 1.0 (Full price)
-      fee = basePrice;
-      teacherPay = baseTeacherRate;
-      schoolEarn = baseSchoolRate;
+      fee = countedSessions * perSessionPrice;
+      teacherPay = attendedCount * perSessionTeacherRate;
+      schoolEarn = Math.max(0, fee - teacherPay);
     }
 
     // Sum up payments
     const totalReceived = (student.payments || []).reduce<number>((sum, p) => {
-      const val = typeof p === 'number' ? p : parseFloat(p);
+      const val = typeof p === 'number' ? p : parseFloat(String(p));
       return sum + (isNaN(val) ? 0 : val);
     }, 0);
 
-    const debt = Math.max(0, fee - totalReceived);
+    const debt = fee - totalReceived;
 
     return {
       ...student,
@@ -320,7 +391,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       teacherPay,
       schoolEarn,
       debt,
-      totalAttendance: attendedCount
+      totalAttendance
     };
   };
 
@@ -333,6 +404,48 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (student.rowId !== rowId) return student;
       const newAttendance = [...student.attendance];
       newAttendance[sessionIndex] = status;
+      return calculateStudentFinances(
+        { ...student, attendance: newAttendance },
+        group.type,
+        data.pricingTiers,
+        group
+      );
+    });
+
+    const updatedData: CenterData = {
+      ...data,
+      groupData: {
+        ...data.groupData,
+        [groupId]: { ...group, students: updatedStudents }
+      }
+    };
+    persistData(updatedData);
+  };
+
+  // Mark all students present for a session in a single batch operation
+  const markAllPresent = (groupId: string, sessionIndex: number, studentRowIds?: number[]) => {
+    const group = data.groupData[groupId];
+    if (!group) return;
+
+    const rowIdSet = studentRowIds && studentRowIds.length > 0 ? new Set(studentRowIds) : null;
+    const targetStudents = group.students.filter(
+      (s) => !isSummaryRow(s, groupId) && (!rowIdSet || rowIdSet.has(s.rowId))
+    );
+
+    // Check if all target students are already 'P'. If so, toggle to clear ('')
+    const allAlreadyPresent =
+      targetStudents.length > 0 && targetStudents.every((s) => s.attendance[sessionIndex] === 'P');
+    const targetStatus: AttendanceStatus = allAlreadyPresent ? '' : 'P';
+
+    const updatedStudents = group.students.map((student) => {
+      if (isSummaryRow(student, groupId)) return student;
+      if (rowIdSet && !rowIdSet.has(student.rowId)) return student;
+
+      const newAttendance = [...student.attendance];
+      const sessionCount = group.sessionDates?.length || group.sessionCount || 8;
+      while (newAttendance.length < sessionCount) newAttendance.push('');
+      newAttendance[sessionIndex] = targetStatus;
+
       return calculateStudentFinances(
         { ...student, attendance: newAttendance },
         group.type,
@@ -696,7 +809,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
 
     const sessionCount = customGroupFields?.sessionCount || sourceGroup.sessionCount || sourceMeta?.sessionCount || 4;
-    const sessionDates = generateSessionDates(customGroupFields?.day1 || sourceGroup.day1 || 'السبت', sessionCount);
+    const todayStr = formatToYYYYMMDD(new Date());
+    const sessionDates = generateSessionDates(
+      customGroupFields?.day1 || sourceGroup.day1 || 'السبت',
+      sessionCount,
+      todayStr
+    );
 
     // Filter genuine students who were selected
     const selectedStudents = sourceGroup.students.filter(
@@ -752,7 +870,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       studentFee,
       teacherPayPerStudent: teacherPay,
       schoolSharePerStudent: schoolShare,
-      status: 'active'
+      status: customGroupFields?.status
     };
 
     const newGroupSheet: GroupSheet = {
@@ -770,7 +888,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       studentFee: newGroupMeta.studentFee,
       teacherPayPerStudent: newGroupMeta.teacherPayPerStudent,
       schoolSharePerStudent: newGroupMeta.schoolSharePerStudent,
-      status: 'active',
+      status: customGroupFields?.status,
       students: newStudents
     };
 
@@ -834,11 +952,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!group) return;
 
     const newSessionCount = fields.sessionCount || group.sessionCount || group.sessionDates.length || 8;
+    const dayChanged = Boolean(fields.day1 && fields.day1 !== group.day1);
     let newSessionDates = [...group.sessionDates];
-    if (newSessionCount !== newSessionDates.length) {
+
+    if (dayChanged) {
+      const effectiveDay = fields.day1 || group.day1 || 'السبت';
+      // When scheduled day changes, regenerate session dates aligned with that weekday
+      newSessionDates = generateSessionDates(effectiveDay, newSessionCount, formatToYYYYMMDD(new Date()));
+    } else if (newSessionCount !== newSessionDates.length) {
       if (newSessionCount > newSessionDates.length) {
-        for (let i = newSessionDates.length; i < newSessionCount; i++) {
-          newSessionDates.push(`حصة ${i + 1}`);
+        const lastDate = newSessionDates[newSessionDates.length - 1];
+        if (lastDate && /^\d{4}\/\d{2}\/\d{2}$/.test(lastDate)) {
+          let cur = new Date(lastDate.replace(/\//g, '-'));
+          for (let i = newSessionDates.length; i < newSessionCount; i++) {
+            cur = new Date(cur);
+            cur.setDate(cur.getDate() + 7);
+            newSessionDates.push(formatToYYYYMMDD(cur));
+          }
+        } else {
+          for (let i = newSessionDates.length; i < newSessionCount; i++) {
+            newSessionDates.push(`حصة ${i + 1}`);
+          }
         }
       } else {
         newSessionDates = newSessionDates.slice(0, newSessionCount);
@@ -860,7 +994,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       studentFee: fields.studentFee !== undefined ? fields.studentFee : group.studentFee,
       teacherPayPerStudent: fields.teacherPayPerStudent !== undefined ? fields.teacherPayPerStudent : group.teacherPayPerStudent,
       schoolSharePerStudent: fields.schoolSharePerStudent !== undefined ? fields.schoolSharePerStudent : group.schoolSharePerStudent,
-      status: fields.status !== undefined ? fields.status : group.status
+      status: 'status' in fields ? fields.status : group.status
     };
 
     // Recalculate students if financial terms or sessions changed
@@ -881,15 +1015,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
     updatedGroup.students = recalculatedStudents;
 
-    const updatedGroupsMeta = data.groups.map((g) =>
-      g.id === groupId
-        ? {
-            ...g,
-            ...fields,
-            sessionCount: newSessionCount
-          }
-        : g
-    );
+    const updatedGroupsMeta = data.groups.map((g) => {
+      if (g.id === groupId) {
+        const next: GroupMeta = {
+          ...g,
+          ...fields,
+          sessionCount: newSessionCount
+        };
+        if ('status' in fields) {
+          next.status = fields.status;
+        }
+        return next;
+      }
+      return g;
+    });
 
     persistData({
       ...data,
@@ -915,6 +1054,53 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       groups: updatedGroups,
       groupData: updatedGroupData
     });
+  };
+
+  // Rename an existing group (e.g. rename BACV06 to BACV10)
+  const renameGroup = (oldId: string, newId: string): boolean => {
+    const cleanOld = oldId.trim().toUpperCase();
+    const cleanNew = newId.trim().toUpperCase();
+    if (!cleanOld || !cleanNew || cleanOld === cleanNew) return false;
+
+    const validation = isValidGroupId(cleanNew);
+    if (!validation.isValid) return false;
+
+    if (data.groupData[cleanNew] || data.groups.some((g) => g.id.toUpperCase() === cleanNew)) {
+      return false;
+    }
+
+    const groupSheet = data.groupData[cleanOld];
+    if (!groupSheet) return false;
+
+    const isVip = isVipGroupId(cleanNew) || groupSheet.isVip;
+
+    const newGroupData = { ...data.groupData };
+    delete newGroupData[cleanOld];
+    newGroupData[cleanNew] = {
+      ...groupSheet,
+      groupId: cleanNew,
+      isVip
+    };
+
+    const newGroups = data.groups.map((g) =>
+      g.id.toUpperCase() === cleanOld
+        ? { ...g, id: cleanNew, isVip }
+        : g
+    );
+
+    const updatedData: CenterData = {
+      ...data,
+      groups: newGroups,
+      groupData: newGroupData
+    };
+
+    persistData(updatedData);
+
+    if (selectedGroup.toUpperCase() === cleanOld) {
+      setSelectedGroup(cleanNew);
+    }
+
+    return true;
   };
 
   // Add teacher
@@ -1125,16 +1311,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     let totalSchoolEarn = 0;
     let totalDebt = 0;
     let totalPresentSlots = 0;
-    const sessionCount = group.sessionDates?.length || group.sessionCount || 8;
-    let totalPossibleSlots = studentCount * sessionCount;
+    const cycleSessions = group.sessionCount || 4;
+    let totalPossibleSlots = 0;
 
     realStudents.forEach((s) => {
       totalExpected += s.fee || 0;
       totalReceived += s.totalReceived || 0;
       totalTeacherPay += s.teacherPay || 0;
       totalSchoolEarn += s.schoolEarn || 0;
-      totalDebt += s.debt || 0;
+      totalDebt += s.debt && s.debt > 0 ? s.debt : 0;
       totalPresentSlots += (s.attendance || []).filter((a) => a === 'P' || a === 'M').length;
+
+      const info = getStudentSessionInfo(s.attendance, cycleSessions);
+      totalPossibleSlots += info.countedSessions > 0 ? info.countedSessions : cycleSessions;
     });
 
     const attendanceRate = totalPossibleSlots > 0 ? Math.round((totalPresentSlots / totalPossibleSlots) * 100) : 0;
@@ -1195,6 +1384,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         lang,
         toggleLang,
         updateAttendance,
+        markAllPresent,
         updatePayment,
         updateStudentFullFinances,
         batchUpdateSessionPayments,
@@ -1206,6 +1396,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         addGroup,
         renewGroupWithStudents,
         updateGroup,
+        renameGroup,
         deleteGroup,
         updateGroupFinances,
         addTeacher,

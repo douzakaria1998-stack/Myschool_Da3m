@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { X, Edit3, Coins, CheckCircle, AlertTriangle, Trash2, Calendar, Clock } from 'lucide-react';
 import { GroupMeta } from '../types';
-import { formatGroupTime, getGroupStatus } from '../utils/sessionUtils';
+import { formatGroupTime, getGroupStatus, isValidGroupId } from '../utils/sessionUtils';
 
 interface Props {
   groupId: string;
@@ -12,7 +12,7 @@ interface Props {
 }
 
 export default function EditGroupModal({ groupId, onClose }: Props) {
-  const { data, updateGroup, deleteGroup } = useApp();
+  const { data, updateGroup, deleteGroup, renameGroup } = useApp();
   const group = data.groupData[groupId];
   const groupMeta = data.groups.find((g) => g.id === groupId);
 
@@ -33,8 +33,8 @@ export default function EditGroupModal({ groupId, onClose }: Props) {
   const [isVip, setIsVip] = useState(Boolean(group?.isVip ?? groupMeta?.isVip));
   const [sessionCount, setSessionCount] = useState<number>(initialSessions);
 
-  const existingStatus = (group?.status || groupMeta?.status) as 'active' | 'inactive' | undefined;
-  const [manualStatus, setManualStatus] = useState<'auto' | 'active' | 'inactive'>(existingStatus || 'auto');
+  // Always default to the first option: 'auto' (تلقائي حسب الحصص) as requested by user
+  const [manualStatus, setManualStatus] = useState<'auto' | 'active' | 'inactive'>('auto');
 
   const statusInfo = groupMeta ? getGroupStatus(groupMeta, group, data.pricingTiers) : null;
 
@@ -43,6 +43,8 @@ export default function EditGroupModal({ groupId, onClose }: Props) {
   const [schoolShare, setSchoolShare] = useState<number>(initialSchoolShare);
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const [groupIdInput, setGroupIdInput] = useState(groupId);
+  const [idError, setIdError] = useState('');
 
   const daysList = ['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة'];
 
@@ -89,6 +91,20 @@ export default function EditGroupModal({ groupId, onClose }: Props) {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
+    const cleanNewId = groupIdInput.trim().toUpperCase();
+
+    if (cleanNewId !== groupId) {
+      const validation = isValidGroupId(cleanNewId);
+      if (!validation.isValid) {
+        setIdError(validation.error || 'رمز الفوج غير صالح');
+        return;
+      }
+      if (data.groupData[cleanNewId] || data.groups.some((g) => g.id.toUpperCase() === cleanNewId)) {
+        setIdError(`رمز الفوج "${cleanNewId}" مستخدم مسبقاً!`);
+        return;
+      }
+    }
+
     const selectedTeacher = data.teachers.find((t) => t.name === teacherName);
 
     const updatedFields: Partial<GroupMeta> = {
@@ -108,7 +124,14 @@ export default function EditGroupModal({ groupId, onClose }: Props) {
       status: manualStatus === 'auto' ? undefined : manualStatus
     };
 
+    // Apply updates to the group first
     updateGroup(groupId, updatedFields);
+
+    // If group ID was renamed, perform rename
+    if (cleanNewId !== groupId) {
+      renameGroup(groupId, cleanNewId);
+    }
+
     setIsSaved(true);
     setTimeout(() => {
       onClose();
@@ -143,7 +166,7 @@ export default function EditGroupModal({ groupId, onClose }: Props) {
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Edit3 size={20} color="var(--md-sys-color-primary)" />
             <h2 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--md-sys-color-on-surface)' }}>
-              تعديل بيانات الفوج: <span style={{ color: 'var(--md-sys-color-primary)' }}>{groupId}</span>
+              تعديل بيانات الفوج: <span style={{ color: 'var(--md-sys-color-primary)' }}>{groupIdInput || groupId}</span>
             </h2>
             {isVip && <span className="m3-chip m3-chip-vip">VIP</span>}
           </div>
@@ -157,6 +180,29 @@ export default function EditGroupModal({ groupId, onClose }: Props) {
         </div>
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          {/* Group ID editing field */}
+          <div>
+            <label style={{ display: 'block', fontWeight: 600, fontSize: '0.85rem', marginBottom: '6px' }}>
+              رمز الفوج (GroupID)
+            </label>
+            <input
+              type="text"
+              value={groupIdInput}
+              onChange={(e) => {
+                setGroupIdInput(e.target.value.toUpperCase());
+                setIdError('');
+              }}
+              className="m3-input"
+              style={{ fontWeight: 800, letterSpacing: '0.5px' }}
+              placeholder={isVip ? 'مثال: BACV10' : 'مثال: BAC10'}
+            />
+            {idError && (
+              <span style={{ color: 'var(--md-sys-color-error)', fontSize: '0.75rem', marginTop: '4px', display: 'block' }}>
+                {idError}
+              </span>
+            )}
+          </div>
+
           {/* Teacher and Subject */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
             <div>

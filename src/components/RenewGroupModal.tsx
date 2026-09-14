@@ -37,7 +37,7 @@ export default function RenewGroupModal({ sourceGroupId, onClose, onCreated }: P
     return realStudents.filter(hasAttendedSession1);
   }, [realStudents]);
 
-  // Generate smart ascending sequential ID suggestions (e.g. BAC10, BAC11 or BACV05, BACV06)
+  // Generate smart ascending sequential ID suggestions (e.g. BAC10, BAC11 or BACV05, BACV10)
   const suggestions = useMemo(() => {
     return getSuggestedGroupIds(isVip, data.groups, 3);
   }, [isVip, data.groups]);
