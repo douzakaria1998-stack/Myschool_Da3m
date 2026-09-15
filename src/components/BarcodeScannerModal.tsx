@@ -24,7 +24,13 @@ import {
 } from 'lucide-react';
 import { playSuccessChime, playWarningAlert } from '../utils/soundUtils';
 import { printSingleThermalReceipt, printBatchThermalReceipts, ThermalReceiptData } from '../utils/printUtils';
-import { isSummaryRow, formatToYYYYMMDD, isSessionDateToday } from '../utils/sessionUtils';
+import {
+  isSummaryRow,
+  formatToYYYYMMDD,
+  isSessionDateToday,
+  detectCurrentActiveGroupAndSession,
+  ActiveGroupDetectionResult
+} from '../utils/sessionUtils';
 
 interface Props {
   initialGroupId?: string;
@@ -44,20 +50,45 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
     clearPrintQueue
   } = useApp();
 
-  // Active Group selection (defaults to initialGroupId or first group)
-  const [activeGroupId, setActiveGroupId] = useState<string>(
-    initialGroupId || data.groups[0]?.id || 'BAC01'
+  // Smart Session Auto-Detection Engine
+  const [autoDetectSchedule, setAutoDetectSchedule] = useState<boolean>(true);
+  const [currentDetection, setCurrentDetection] = useState<ActiveGroupDetectionResult>(() =>
+    detectCurrentActiveGroupAndSession(data.groupData, data.groups, new Date())
   );
+
+  // Active Group selection (defaults to detected active group or initialGroupId or first group)
+  const [activeGroupId, setActiveGroupId] = useState<string>(() => {
+    const initialDetect = detectCurrentActiveGroupAndSession(data.groupData, data.groups, new Date());
+    if (initialDetect.activeGroup) return initialDetect.activeGroup.groupId;
+    return initialGroupId || data.groups[0]?.id || 'BAC01';
+  });
   const activeGroup = data.groupData[activeGroupId] as GroupSheet | undefined;
 
   // Active Session selection (index 0 to sessionCount - 1)
   const [activeSessionIdx, setActiveSessionIdx] = useState<number>(() => {
+    const initialDetect = detectCurrentActiveGroupAndSession(data.groupData, data.groups, new Date());
+    if (initialDetect.activeGroup) return initialDetect.activeSessionIndex;
     if (activeGroup?.sessionDates) {
       const todayIdx = activeGroup.sessionDates.findIndex((d) => isSessionDateToday(formatToYYYYMMDD(d) || d));
       if (todayIdx !== -1) return todayIdx;
     }
     return 0;
   });
+
+  // Periodic re-check of active schedule every 25 seconds
+  useEffect(() => {
+    const checkSchedule = () => {
+      const res = detectCurrentActiveGroupAndSession(data.groupData, data.groups, new Date());
+      setCurrentDetection(res);
+      if (autoDetectSchedule && res.activeGroup) {
+        setActiveGroupId(res.activeGroup.groupId);
+        setActiveSessionIdx(res.activeSessionIndex);
+      }
+    };
+    checkSchedule();
+    const timer = setInterval(checkSchedule, 25000);
+    return () => clearInterval(timer);
+  }, [data.groupData, data.groups, autoDetectSchedule]);
 
   // Scanner Barcode Input State
   const [barcodeInput, setBarcodeInput] = useState('');
@@ -68,6 +99,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
     student: StudentRecord;
     homeGroupId: string;
     isInActiveGroup: boolean;
+    studentEnrolledGroups: string[];
   } | null>(null);
 
   // Workflow Dialog States
@@ -133,6 +165,9 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
     const clean = code.trim().toLowerCase();
     if (!clean) return null;
 
+    let foundStudent: StudentRecord | null = null;
+    let homeGid = '';
+
     // 1. Search in active group first
     if (activeGroup?.students) {
       const matchInActive = activeGroup.students.find((s) => {
@@ -152,40 +187,58 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
       });
 
       if (matchInActive) {
-        return {
-          student: matchInActive,
-          homeGroupId: activeGroupId,
-          isInActiveGroup: true
-        };
+        foundStudent = matchInActive;
+        homeGid = activeGroupId;
       }
     }
 
-    // 2. Search across all other groups
-    for (const [gid, sheet] of Object.entries(data.groupData)) {
-      for (const s of sheet.students || []) {
-        if (isSummaryRow(s, gid)) return null;
-        const sBarcode = s.barcode?.toLowerCase() || '';
-        const sId = `${gid}-${s.rowId}`.toLowerCase();
-        const sPhone = s.phone?.trim() || '';
-        const sRow = String(s.rowId);
+    // 2. Search across all other groups if not found in active
+    if (!foundStudent) {
+      for (const [gid, sheet] of Object.entries(data.groupData)) {
+        for (const s of sheet.students || []) {
+          if (isSummaryRow(s, gid)) continue;
+          const sBarcode = s.barcode?.toLowerCase() || '';
+          const sId = `${gid}-${s.rowId}`.toLowerCase();
+          const sPhone = s.phone?.trim() || '';
+          const sRow = String(s.rowId);
 
-        if (
-          sBarcode === clean ||
-          sId === clean ||
-          sPhone === clean ||
-          sRow === clean ||
-          s.name.toLowerCase() === clean
-        ) {
-          return {
-            student: s,
-            homeGroupId: gid,
-            isInActiveGroup: gid === activeGroupId
-          };
+          if (
+            sBarcode === clean ||
+            sId === clean ||
+            sPhone === clean ||
+            sRow === clean ||
+            s.name.toLowerCase() === clean
+          ) {
+            foundStudent = s;
+            homeGid = gid;
+            break;
+          }
         }
+        if (foundStudent) break;
       }
     }
 
-    return null;
+    if (!foundStudent) return null;
+
+    // Collect all groups this student is enrolled in
+    const studentCleanName = foundStudent.name.trim().toLowerCase();
+    const enrolledGroups: string[] = [];
+    for (const [gid, sheet] of Object.entries(data.groupData)) {
+      if (
+        sheet.students.some(
+          (s) => !isSummaryRow(s, gid) && s.name.trim().toLowerCase() === studentCleanName
+        )
+      ) {
+        enrolledGroups.push(gid);
+      }
+    }
+
+    return {
+      student: foundStudent,
+      homeGroupId: homeGid,
+      isInActiveGroup: enrolledGroups.includes(activeGroupId),
+      studentEnrolledGroups: enrolledGroups
+    };
   };
 
   // Process a scanned card / barcode
@@ -193,6 +246,20 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
     if (e) e.preventDefault();
     const rawCode = barcodeInput.trim();
     if (!rawCode) return;
+
+    // Smart Session Auto-Detection at the moment of scan
+    let effectiveGroupId = activeGroupId;
+    let effectiveSessionIdx = activeSessionIdx;
+
+    if (autoDetectSchedule) {
+      const liveDetect = detectCurrentActiveGroupAndSession(data.groupData, data.groups, new Date());
+      if (liveDetect.activeGroup) {
+        effectiveGroupId = liveDetect.activeGroup.groupId;
+        effectiveSessionIdx = liveDetect.activeSessionIndex;
+        setActiveGroupId(effectiveGroupId);
+        setActiveSessionIdx(effectiveSessionIdx);
+      }
+    }
 
     const result = findStudentByCode(rawCode);
 
@@ -205,16 +272,18 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
 
     setScannedResult(result);
 
-    // 1. Check if student belongs to active group
-    if (!result.isInActiveGroup) {
+    // 1. Check if student belongs to the currently active group
+    const isEnrolledInActive = result.studentEnrolledGroups.includes(effectiveGroupId);
+
+    if (!isEnrolledInActive) {
       // Step 2: Session Validation & Covering Logic: Not in active group!
       setShowCoverDialog(true);
-      setSelectedOriginalGroup(result.homeGroupId);
+      setSelectedOriginalGroup(result.studentEnrolledGroups[0] || result.homeGroupId);
       return;
     }
 
     // In active group -> proceed directly to payment check
-    proceedToPaymentCheck(result.student, activeGroupId, false);
+    proceedToPaymentCheck(result.student, effectiveGroupId, false);
   };
 
   // Step 3: Payment Verification
@@ -473,6 +542,98 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
           </div>
         </div>
 
+        {/* Smart Auto-Detection Status Banner */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '10px 16px',
+            backgroundColor: currentDetection.activeGroup
+              ? 'rgba(16, 185, 129, 0.12)'
+              : 'rgba(245, 158, 11, 0.12)',
+            border: currentDetection.activeGroup ? '1px solid #10b981' : '1px solid #f59e0b',
+            borderRadius: '12px',
+            marginBottom: '14px',
+            flexWrap: 'wrap',
+            gap: '10px'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '1.2rem' }}>
+              {currentDetection.activeGroup ? '🟢' : '🟡'}
+            </span>
+            <div>
+              <div
+                style={{
+                  fontSize: '0.85rem',
+                  fontWeight: 800,
+                  color: currentDetection.activeGroup ? '#065f46' : '#92400e'
+                }}
+              >
+                {autoDetectSchedule ? 'الكشف التلقائي الذكي مفعّل:' : 'الكشف التلقائي معطل (يدوي):'}{' '}
+                {currentDetection.activeGroup ? (
+                  <span>
+                    فوج {currentDetection.activeGroup.groupId} ({currentDetection.activeGroup.subject}) • الحصة{' '}
+                    {currentDetection.activeSessionIndex + 1}
+                  </span>
+                ) : (
+                  <span>لا يوجد فوج نشط مجدول في هذا التوقيت حالياً</span>
+                )}
+              </div>
+              <div style={{ fontSize: '0.74rem', color: '#475569', marginTop: '1px' }}>
+                {currentDetection.activeGroup ? (
+                  <>
+                    التوقيت المجدول: <strong>{currentDetection.timeWindowStr}</strong> • الحالة:{' '}
+                    <span style={{ color: '#059669', fontWeight: 700 }}>
+                      {currentDetection.statusLabel}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    أفواج اليوم المجدولة:{' '}
+                    {currentDetection.allTodayGroups.length > 0
+                      ? currentDetection.allTodayGroups
+                          .map((g) => `${g.group.groupId} (${g.timeStr})`)
+                          .join(' ، ')
+                      : 'لا توجد أفواج مجدولة لليوم'}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <label
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontSize: '0.78rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              color: 'var(--md-sys-color-primary)',
+              backgroundColor: 'var(--md-sys-color-surface)',
+              padding: '4px 10px',
+              borderRadius: 'var(--md-shape-full)',
+              border: '1px solid var(--md-sys-color-outline-variant)'
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={autoDetectSchedule}
+              onChange={(e) => {
+                setAutoDetectSchedule(e.target.checked);
+                if (e.target.checked && currentDetection.activeGroup) {
+                  setActiveGroupId(currentDetection.activeGroup.groupId);
+                  setActiveSessionIdx(currentDetection.activeSessionIndex);
+                }
+              }}
+              style={{ cursor: 'pointer' }}
+            />
+            <span>تحديد الفوج تلقائياً حسب الوقت ⚡</span>
+          </label>
+        </div>
+
         {/* Toolbar: Active Group & Active Session Selectors */}
         <div
           style={{
@@ -671,9 +832,9 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
             </div>
 
             <p style={{ fontSize: '0.9rem', color: '#92400e', marginBottom: '12px' }}>
-              التلميذ <strong>"{scannedResult.student.name}"</strong> مسجل في فوج ({scannedResult.homeGroupId}).
+              التلميذ <strong>&quot;{scannedResult.student.name}&quot;</strong> مسجل في فوج ({scannedResult.studentEnrolledGroups?.join(' ، ') || scannedResult.homeGroupId}).
               <br />
-              <strong>هل التلميذ في حصة تعويض؟</strong>
+              <strong>هل التلميذ في حصة تعويض لفوج {activeGroupId} ({activeGroup?.subject})؟</strong>
             </p>
 
             <div style={{ marginBottom: '14px' }}>
@@ -684,13 +845,29 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
                 value={selectedOriginalGroup}
                 onChange={(e) => setSelectedOriginalGroup(e.target.value)}
                 className="m3-input"
-                style={{ width: '100%', maxWidth: '320px', fontWeight: 700 }}
+                style={{ width: '100%', maxWidth: '340px', fontWeight: 700 }}
               >
-                {data.groups.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    فوج {g.id} ({g.subject})
-                  </option>
-                ))}
+                {scannedResult.studentEnrolledGroups && scannedResult.studentEnrolledGroups.length > 0 && (
+                  <optgroup label="أفواج التلميذ المسجل بها">
+                    {scannedResult.studentEnrolledGroups.map((gid) => {
+                      const gMeta = data.groups.find((g) => g.id === gid);
+                      return (
+                        <option key={gid} value={gid}>
+                          فوج {gid} ★ ({gMeta?.subject || data.groupData[gid]?.subject || ''})
+                        </option>
+                      );
+                    })}
+                  </optgroup>
+                )}
+                <optgroup label="باقي أفواج المركز">
+                  {data.groups
+                    .filter((g) => !scannedResult.studentEnrolledGroups?.includes(g.id))
+                    .map((g) => (
+                      <option key={g.id} value={g.id}>
+                        فوج {g.id} ({g.subject})
+                      </option>
+                    ))}
+                </optgroup>
               </select>
             </div>
 

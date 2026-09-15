@@ -22,7 +22,8 @@ import {
   isVipGroupId,
   isValidGroupId,
   getNextGroupId,
-  getStudentSessionInfo
+  getStudentSessionInfo,
+  generateUniqueStudentBarcode
 } from '../utils/sessionUtils';
 
 interface AppContextType {
@@ -58,9 +59,12 @@ interface AppContextType {
   updateStudentFullFinances: (groupId: string, rowId: number, payments: (number | string)[], discount?: DiscountType) => void;
   batchUpdateSessionPayments: (groupId: string, sessionIndex: number, studentPayments: { rowId: number; amount: number | string }[]) => void;
   updateDiscount: (groupId: string, rowId: number, discount: DiscountType) => void;
-  addStudent: (groupId: string, student: { name: string; phone: string; discount?: DiscountType }) => void;
+  addStudent: (
+    groupId: string,
+    student: { name: string; phone: string; discount?: DiscountType; barcode?: string }
+  ) => StudentRecord | null;
   enrollStudentMultiGroups: (
-    studentInfo: { name: string; phone: string; discount?: DiscountType },
+    studentInfo: { name: string; phone: string; discount?: DiscountType; barcode?: string },
     enrollments: { groupId: string; paymentAmount: number | string }[]
   ) => { groupId: string; rowId: number; fee: number; paid: number; debt: number }[];
   deleteStudent: (groupId: string, rowId: number) => void;
@@ -1102,16 +1106,35 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   // Add new student
-  const addStudent = (groupId: string, studentInfo: { name: string; phone: string; discount?: DiscountType }) => {
+  const addStudent = (
+    groupId: string,
+    studentInfo: { name: string; phone: string; discount?: DiscountType; barcode?: string }
+  ): StudentRecord | null => {
     const group = data.groupData[groupId];
-    if (!group) return;
+    if (!group) return null;
 
     const sessionCount = group.sessionDates?.length || group.sessionCount || 8;
     const maxRowId = group.students.reduce((max, s) => Math.max(max, s.rowId || 0), 0);
+    const rowId = maxRowId + 1;
+
+    // Collect all existing barcodes across the center
+    const allStudentsList: StudentRecord[] = [];
+    Object.values(data.groupData).forEach((g) => allStudentsList.push(...g.students));
+
+    // If student already has a barcode in another group, reuse it; otherwise generate a new unique one
+    const existingSameName = allStudentsList.find(
+      (s) => s.name.trim().toLowerCase() === studentInfo.name.trim().toLowerCase() && s.barcode
+    );
+    const barcode =
+      studentInfo.barcode?.trim() ||
+      existingSameName?.barcode ||
+      generateUniqueStudentBarcode(allStudentsList, 'STU');
+
     const newStudentRaw: StudentRecord = {
-      rowId: maxRowId + 1,
-      name: studentInfo.name,
-      phone: studentInfo.phone || '',
+      rowId,
+      name: studentInfo.name.trim(),
+      phone: studentInfo.phone ? studentInfo.phone.trim() : '',
+      barcode,
       attendance: Array(sessionCount).fill(''),
       discount: studentInfo.discount || '1',
       fee: 0,
@@ -1136,15 +1159,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     };
     persistData(updatedData);
+    return calculatedStudent;
   };
 
   // Enroll student in multiple groups with immediate payments
   const enrollStudentMultiGroups = (
-    studentInfo: { name: string; phone: string; discount?: DiscountType },
+    studentInfo: { name: string; phone: string; discount?: DiscountType; barcode?: string },
     enrollments: { groupId: string; paymentAmount: number | string }[]
   ): { groupId: string; rowId: number; fee: number; paid: number; debt: number }[] => {
     const updatedGroupData = { ...data.groupData };
     const results: { groupId: string; rowId: number; fee: number; paid: number; debt: number }[] = [];
+
+    // Collect existing barcodes across the center
+    const allStudentsList: StudentRecord[] = [];
+    Object.values(updatedGroupData).forEach((g) => allStudentsList.push(...g.students));
+
+    const existingSameName = allStudentsList.find(
+      (s) => s.name.trim().toLowerCase() === studentInfo.name.trim().toLowerCase() && s.barcode
+    );
+    const resolvedBarcode =
+      studentInfo.barcode?.trim() ||
+      existingSameName?.barcode ||
+      generateUniqueStudentBarcode(allStudentsList, 'STU');
 
     enrollments.forEach(({ groupId, paymentAmount }) => {
       const group = updatedGroupData[groupId];
@@ -1164,6 +1200,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         rowId,
         name: studentInfo.name.trim(),
         phone: studentInfo.phone ? studentInfo.phone.trim() : '',
+        barcode: resolvedBarcode,
         attendance: Array(sessionCount).fill(''),
         discount: studentInfo.discount || '1',
         fee: 0,
@@ -1191,10 +1228,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       });
     });
 
-    persistData({
+    const updatedData: CenterData = {
       ...data,
       groupData: updatedGroupData
-    });
+    };
+    persistData(updatedData);
 
     return results;
   };

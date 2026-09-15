@@ -11,10 +11,13 @@ import {
   AlertTriangle,
   Layers,
   Phone,
-  UserCheck
+  UserCheck,
+  Printer,
+  IdCard
 } from 'lucide-react';
-import { DiscountType } from '../types';
+import { DiscountType, StudentRecord } from '../types';
 import { isSummaryRow } from '../utils/sessionUtils';
+import StudentBadgeModal from './StudentBadgeModal';
 
 interface Props {
   groupId: string;
@@ -45,6 +48,13 @@ export default function AddStudentModal({ groupId, onClose }: Props) {
   const [discount, setDiscount] = useState<DiscountType>('1');
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [duplicateWarningStudent, setDuplicateWarningStudent] = useState<{
+    name: string;
+    phone: string;
+    groups: string[];
+  } | null>(null);
+  const [lastSavedStudent, setLastSavedStudent] = useState<StudentRecord | null>(null);
+  const [isBadgeModalOpen, setIsBadgeModalOpen] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -102,17 +112,41 @@ export default function AddStudentModal({ groupId, onClose }: Props) {
     e.preventDefault();
 
     if (studentType === 'new') {
-      if (!name.trim()) {
+      const cleanName = name.trim();
+      if (!cleanName) {
         setError('يرجى إدخال اسم ولقب التلميذ');
         nameInputRef.current?.focus();
         return;
       }
 
-      addStudent(groupId, {
-        name: name.trim(),
+      // 1. Name Duplication Check: Check against database / all center students
+      const existingMatch = existingStudents.find(
+        (s) => s.name.trim().toLowerCase() === cleanName.toLowerCase()
+      );
+      if (existingMatch) {
+        setDuplicateWarningStudent({
+          name: existingMatch.name,
+          phone: existingMatch.phone,
+          groups: existingMatch.groups
+        });
+        setError(
+          `تنبيه تكرار الاسم: يوجد تلميذ مسجل سابقاً بنفس الاسم "${existingMatch.name}". يرجى إضافة تمييز للاسم (مثال: "${existingMatch.name} 2" أو تحديد الحي/الفرع) لتفادي الخلط في البطاقات والحضور.`
+        );
+        return;
+      }
+
+      const created = addStudent(groupId, {
+        name: cleanName,
         phone: phone.trim(),
         discount
       });
+
+      if (created) {
+        setLastSavedStudent(created);
+        setIsBadgeModalOpen(true);
+      } else {
+        onClose();
+      }
     } else {
       if (!selectedExistingStudent) {
         setError('يرجى اختيار تلميذ مسجل سابقاً من القائمة');
@@ -125,37 +159,62 @@ export default function AddStudentModal({ groupId, onClose }: Props) {
         return;
       }
 
-      addStudent(groupId, {
+      const created = addStudent(groupId, {
         name: selectedExistingStudent.name,
         phone: selectedExistingStudent.phone,
         discount
       });
-    }
 
-    onClose();
+      if (created) {
+        setLastSavedStudent(created);
+        setIsBadgeModalOpen(true);
+      } else {
+        onClose();
+      }
+    }
   };
 
   const handleSaveAndAddAnother = (e: React.MouseEvent) => {
     e.preventDefault();
 
     if (studentType === 'new') {
-      if (!name.trim()) {
+      const cleanName = name.trim();
+      if (!cleanName) {
         setError('يرجى إدخال اسم ولقب التلميذ');
         nameInputRef.current?.focus();
         return;
       }
 
-      const savedName = name.trim();
-      addStudent(groupId, {
-        name: savedName,
+      // 1. Name Duplication Check: Check against database
+      const existingMatch = existingStudents.find(
+        (s) => s.name.trim().toLowerCase() === cleanName.toLowerCase()
+      );
+      if (existingMatch) {
+        setDuplicateWarningStudent({
+          name: existingMatch.name,
+          phone: existingMatch.phone,
+          groups: existingMatch.groups
+        });
+        setError(
+          `تنبيه تكرار الاسم: يوجد تلميذ مسجل سابقاً بنفس الاسم "${existingMatch.name}". يرجى إضافة تمييز للاسم (مثال: "${existingMatch.name} 2" أو تحديد الحي/الفرع).`
+        );
+        return;
+      }
+
+      const created = addStudent(groupId, {
+        name: cleanName,
         phone: phone.trim(),
         discount
       });
 
+      setLastSavedStudent(created);
       setName('');
       setPhone('');
+      setDuplicateWarningStudent(null);
       setError('');
-      setSuccessMsg(`تمت إضافة "${savedName}" بنجاح! يمكنك إدخال التلميذ التالي الآن.`);
+      setSuccessMsg(
+        `تمت إضافة "${cleanName}" بنجاح! تم توليد الباركود (${created?.barcode || 'STU'}). يمكنك طباعة الشارة أو إدخال التلميذ التالي.`
+      );
 
       setTimeout(() => {
         nameInputRef.current?.focus();
@@ -173,12 +232,13 @@ export default function AddStudentModal({ groupId, onClose }: Props) {
       }
 
       const savedName = selectedExistingStudent.name;
-      addStudent(groupId, {
+      const created = addStudent(groupId, {
         name: savedName,
         phone: selectedExistingStudent.phone,
         discount
       });
 
+      setLastSavedStudent(created);
       setSelectedExistingStudent(null);
       setExistingSearch('');
       setError('');
@@ -192,7 +252,7 @@ export default function AddStudentModal({ groupId, onClose }: Props) {
     // Auto dismiss success message
     setTimeout(() => {
       setSuccessMsg('');
-    }, 4000);
+    }, 6000);
   };
 
   return (
@@ -566,6 +626,118 @@ export default function AddStudentModal({ groupId, onClose }: Props) {
             </div>
           )}
 
+          {/* Duplicate Name Warning Box */}
+          {duplicateWarningStudent && (
+            <div
+              style={{
+                padding: '12px 16px',
+                backgroundColor: '#fef2f2',
+                border: '1.5px solid #ef4444',
+                borderRadius: '10px',
+                color: '#991b1b',
+                fontSize: '0.86rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 800 }}>
+                <AlertTriangle size={18} color="#ef4444" />
+                <span>تنبيه: التلميذ &quot;{duplicateWarningStudent.name}&quot; مسجل مسبقاً!</span>
+              </div>
+              <p style={{ margin: 0, fontSize: '0.8rem', color: '#7f1d1d' }}>
+                يوجد تلميذ مسجل في المؤسسة بهذا الاسم في الفوج ({duplicateWarningStudent.groups.join(', ')}).
+                يرجى إضافة تمييز للاسم مثل: &quot;{duplicateWarningStudent.name} 2&quot; أو تحديد الحي/الفرع.
+              </p>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '4px' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setName(`${name.trim()} 2`);
+                    setDuplicateWarningStudent(null);
+                    setError('');
+                    nameInputRef.current?.focus();
+                  }}
+                  style={{
+                    padding: '5px 12px',
+                    backgroundColor: '#ef4444',
+                    color: '#ffffff',
+                    borderRadius: '6px',
+                    border: 'none',
+                    fontSize: '0.8rem',
+                    fontWeight: 800,
+                    cursor: 'pointer'
+                  }}
+                >
+                  إضافة رقم (2) للاسم تلقائياً ✏️
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStudentType('existing');
+                    const found = existingStudents.find((s) => s.name === duplicateWarningStudent.name);
+                    if (found) setSelectedExistingStudent(found);
+                    setDuplicateWarningStudent(null);
+                    setError('');
+                  }}
+                  style={{
+                    padding: '5px 12px',
+                    backgroundColor: '#ffffff',
+                    color: '#b91c1c',
+                    borderRadius: '6px',
+                    border: '1px solid #ef4444',
+                    fontSize: '0.8rem',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                >
+                  اختياره كتلميذ مسجل سابقاً 👥
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Last Saved Student with Immediate Badge Print Button */}
+          {lastSavedStudent && (
+            <div
+              style={{
+                padding: '12px 16px',
+                backgroundColor: 'rgba(79, 70, 229, 0.08)',
+                border: '1.5px solid #4f46e5',
+                borderRadius: '10px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '10px'
+              }}
+            >
+              <div>
+                <div style={{ fontWeight: 800, color: '#4f46e5', fontSize: '0.9rem' }}>
+                  تم حفظ التلميذ بنجاح! 🪪
+                </div>
+                <div style={{ fontSize: '0.78rem', color: '#475569' }}>
+                  الاسم: <strong>{lastSavedStudent.name}</strong> | الباركود: <strong style={{ fontFamily: 'monospace' }}>{lastSavedStudent.barcode}</strong>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsBadgeModalOpen(true)}
+                className="m3-btn m3-btn-primary m3-btn-sm"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontWeight: 800,
+                  boxShadow: '0 2px 8px rgba(79, 70, 229, 0.3)'
+                }}
+              >
+                <Printer size={15} />
+                <span>طباعة الشارة (PVC Badge) 🖨️</span>
+              </button>
+            </div>
+          )}
+
           {/* Actions */}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px', flexWrap: 'wrap' }}>
             <button
@@ -589,11 +761,23 @@ export default function AddStudentModal({ groupId, onClose }: Props) {
               إلغاء
             </button>
             <button type="submit" className="m3-btn m3-btn-primary">
-              إضافة التلميذ
+              حفظ وطباعة الشارة
             </button>
           </div>
         </form>
       </div>
+
+      {/* PVC Card Badge Modal */}
+      {isBadgeModalOpen && lastSavedStudent && (
+        <StudentBadgeModal
+          student={lastSavedStudent}
+          groupId={groupId}
+          onClose={() => {
+            setIsBadgeModalOpen(false);
+            onClose();
+          }}
+        />
+      )}
     </div>
   );
 }

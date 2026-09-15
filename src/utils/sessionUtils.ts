@@ -734,3 +734,219 @@ export function getStudentSessionInfo(
   };
 }
 
+/**
+ * Parses a time string into minutes from midnight (0..1439).
+ */
+export function parseTimeMinutes(str?: string): number | null {
+  if (!str || typeof str !== 'string') return null;
+  const trimmed = str.trim();
+  if (!trimmed) return null;
+
+  // Decimal Excel time (e.g. 0.5833333)
+  const num = parseFloat(trimmed);
+  if (!isNaN(num) && num > 0 && num < 1 && trimmed.includes('.')) {
+    return Math.round(num * 24 * 60) % 1440;
+  }
+
+  // Check 12-hour indicators
+  const isPM = /pm|مساءً|م/i.test(trimmed);
+  const isAM = /am|صباحاً|ص/i.test(trimmed);
+
+  // Standard "HH:mm" or "HH:mm:ss" or "H:mm"
+  const matchColon = trimmed.match(/(\d{1,2}):(\d{2})/);
+  if (matchColon) {
+    let h = parseInt(matchColon[1], 10);
+    const m = parseInt(matchColon[2], 10);
+    if (isPM && h < 12) h += 12;
+    if (isAM && h === 12) h = 0;
+    return (h * 60 + m) % 1440;
+  }
+
+  // French format "14h30" or "14h"
+  const matchH = trimmed.match(/(\d{1,2})h(\d{0,2})/i);
+  if (matchH) {
+    let h = parseInt(matchH[1], 10);
+    const m = matchH[2] ? parseInt(matchH[2], 10) : 0;
+    if (isPM && h < 12) h += 12;
+    if (isAM && h === 12) h = 0;
+    return (h * 60 + m) % 1440;
+  }
+
+  // Single hour digit (e.g. "14" or "2")
+  const matchHour = trimmed.match(/^(\d{1,2})$/);
+  if (matchHour) {
+    let h = parseInt(matchHour[1], 10);
+    if (isPM && h < 12) h += 12;
+    return (h * 60) % 1440;
+  }
+
+  return null;
+}
+
+/**
+ * Parses time window / duration from time range strings like:
+ * "14:00 - 16:00" or "08:00 إلى 10:00" or "14:00"
+ */
+export function parseTimeWindow(timeStr?: string): { startMinutes: number; endMinutes: number } | null {
+  if (!timeStr) return null;
+  const formatted = formatGroupTime(timeStr);
+  const parts = formatted.split(/[-–—]|إلى|to/i);
+
+  if (parts.length >= 2) {
+    const startM = parseTimeMinutes(parts[0]);
+    const endM = parseTimeMinutes(parts[1]);
+    if (startM !== null && endM !== null) {
+      let finalEnd = endM;
+      if (finalEnd <= startM && finalEnd + 720 > startM) {
+        finalEnd += 720;
+      }
+      return { startMinutes: startM, endMinutes: finalEnd };
+    }
+  }
+
+  // Single time (e.g. "14:00") -> default 2 hours duration (120 minutes)
+  const single = parseTimeMinutes(formatted);
+  if (single !== null) {
+    return { startMinutes: single, endMinutes: single + 120 };
+  }
+
+  return null;
+}
+
+export interface ActiveGroupDetectionResult {
+  activeGroup: GroupSheet | null;
+  activeSessionIndex: number;
+  timeWindowStr: string;
+  statusLabel: string;
+  matchingGroups: {
+    group: GroupSheet;
+    sessionIndex: number;
+    timeWindowStr: string;
+    status: string;
+    startDiffMinutes: number;
+  }[];
+  allTodayGroups: {
+    group: GroupSheet;
+    sessionIndex: number;
+    timeStr: string;
+  }[];
+}
+
+/**
+ * Smart Session Auto-Detection Engine:
+ * Compares current time and day to daily schedule to find the currently active session without manual input.
+ */
+export function detectCurrentActiveGroupAndSession(
+  groupData: Record<string, GroupSheet>,
+  groupsMeta?: GroupMeta[],
+  now: Date = new Date()
+): ActiveGroupDetectionResult {
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  const allGroups = Object.values(groupData || {});
+
+  const matchingGroups: ActiveGroupDetectionResult['matchingGroups'] = [];
+  const allTodayGroups: ActiveGroupDetectionResult['allTodayGroups'] = [];
+
+  for (const group of allGroups) {
+    const meta = groupsMeta?.find((g) => g.id === group.groupId);
+    const isToday = isGroupToday(meta || group, group, now);
+
+    // Calculate the active session index for this group
+    const todayIndex = group.sessionDates?.findIndex((d) => isSessionDateToday(d, now)) ?? -1;
+    let sessionIndex = todayIndex;
+    if (sessionIndex === -1) {
+      const lastWithAtt = getLastSessionWithAttendance(group.students, group.sessionDates?.length || 4);
+      sessionIndex = lastWithAtt === -1 ? 0 : Math.min(lastWithAtt + 1, (group.sessionDates?.length || 4) - 1);
+    }
+
+    const todayDayName = normalizeArabicText(getTodayArabicDayName(now));
+    const day2Name = normalizeArabicText(meta?.day2 || group.day2 || '');
+    const isDay2 = day2Name && (day2Name.includes(todayDayName) || todayDayName.includes(day2Name));
+    const effectiveTime = (isDay2 ? (meta?.time2 || group.time2) : null) || meta?.time1 || group.time1 || '';
+
+    if (isToday) {
+      allTodayGroups.push({
+        group,
+        sessionIndex,
+        timeStr: effectiveTime
+      });
+    }
+
+    const window = parseTimeWindow(effectiveTime);
+    if (window && isToday) {
+      // Scanning Window:
+      // Starts 35 minutes BEFORE class starts (students arriving & scanning)
+      // Ends 25 minutes AFTER class ends (late students / payment / makeup tracking)
+      const scanWindowStart = window.startMinutes - 35;
+      const scanWindowEnd = window.endMinutes + 25;
+
+      if (currentMinutes >= scanWindowStart && currentMinutes <= scanWindowEnd) {
+        let status = 'حصة جارية الآن';
+        if (currentMinutes < window.startMinutes) {
+          const diff = window.startMinutes - currentMinutes;
+          status = `تبدأ بعد ${diff} دقيقة`;
+        } else if (currentMinutes > window.endMinutes) {
+          status = 'نهاية الحصة (مغادرة)';
+        }
+
+        const startDiffMinutes = Math.abs(currentMinutes - window.startMinutes);
+        matchingGroups.push({
+          group,
+          sessionIndex,
+          timeWindowStr: effectiveTime,
+          status,
+          startDiffMinutes
+        });
+      }
+    }
+  }
+
+  // Sort matching groups by closest to current start time
+  matchingGroups.sort((a, b) => a.startDiffMinutes - b.startDiffMinutes);
+
+  const bestMatch = matchingGroups[0] || null;
+
+  return {
+    activeGroup: bestMatch ? bestMatch.group : null,
+    activeSessionIndex: bestMatch ? bestMatch.sessionIndex : 0,
+    timeWindowStr: bestMatch ? bestMatch.timeWindowStr : '',
+    statusLabel: bestMatch ? bestMatch.status : 'لا يوجد فوج نشط مجدول في هذا التوقيت',
+    matchingGroups,
+    allTodayGroups
+  };
+}
+
+/**
+ * Generates a globally unique barcode string for students (Code128 compatible).
+ * Ensures no duplicate exists in the database.
+ */
+export function generateUniqueStudentBarcode(
+  existingBarcodesOrStudents: (string | StudentRecord | null | undefined)[],
+  prefix: string = 'STU'
+): string {
+  const existingSet = new Set<string>();
+  existingBarcodesOrStudents.forEach((item) => {
+    if (!item) return;
+    if (typeof item === 'string') {
+      existingSet.add(item.trim().toUpperCase());
+    } else if (typeof item === 'object' && item.barcode) {
+      existingSet.add(item.barcode.trim().toUpperCase());
+    }
+  });
+
+  const yearPrefix = new Date().getFullYear().toString().slice(-2); // "26"
+
+  // Attempt up to 50 times with random digits
+  for (let i = 0; i < 50; i++) {
+    const randomNum = Math.floor(100000 + Math.random() * 900000); // 6 digits
+    const candidate = `${prefix}-${yearPrefix}${randomNum}`;
+    if (!existingSet.has(candidate)) {
+      return candidate;
+    }
+  }
+
+  // Fallback with high-resolution timestamp
+  return `${prefix}-${yearPrefix}${Date.now().toString().slice(-6)}`;
+}
+
+

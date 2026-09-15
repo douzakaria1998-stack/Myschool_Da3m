@@ -18,10 +18,13 @@ import {
   ChevronRight,
   Layers,
   Sparkles,
-  DollarSign
+  DollarSign,
+  IdCard,
+  Printer
 } from 'lucide-react';
 import StudentPaymentModal from '../../components/StudentPaymentModal';
 import StudentProfileModal from '../../components/StudentProfileModal';
+import StudentBadgeModal from '../../components/StudentBadgeModal';
 import { isSummaryRow } from '../../utils/sessionUtils';
 
 export interface GroupEnrollment {
@@ -59,6 +62,11 @@ export default function StudentsPage() {
   const [pageSize, setPageSize] = useState(25);
   const [activePaymentStudent, setActivePaymentStudent] = useState<{ groupId: string; student: StudentRecord } | null>(null);
   const [selectedProfileStudent, setSelectedProfileStudent] = useState<{ student: StudentRecord; groupId: string } | null>(null);
+  const [activeBadgeStudent, setActiveBadgeStudent] = useState<{
+    student: StudentRecord;
+    groupId: string;
+    allGroups: string[];
+  } | null>(null);
 
   // Consolidate students so each student can have multiple groups and an aggregate balance
   const allStudents = useMemo(() => {
@@ -718,6 +726,32 @@ export default function StudentsPage() {
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
+                            setActiveBadgeStudent({
+                              student: item.primaryStudentRecord,
+                              groupId: item.primaryGroupId,
+                              allGroups: item.groups.map((g) => g.groupId)
+                            });
+                          }}
+                          className="m3-btn m3-btn-outlined m3-btn-sm"
+                          style={{
+                            padding: '3px 8px',
+                            fontSize: '0.75rem',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '3px',
+                            whiteSpace: 'nowrap',
+                            color: '#4f46e5',
+                            borderColor: '#a5b4fc'
+                          }}
+                          title="طباعة بطاقة وشارة التلميذ PVC (85.6mm × 54mm)"
+                        >
+                          <IdCard size={13} />
+                          <span>الشارة</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
                             // If user has multiple groups, default to first or open payment modal
                             setActivePaymentStudent({
                               groupId: item.primaryGroupId,
@@ -824,6 +858,16 @@ export default function StudentsPage() {
           student={selectedProfileStudent.student}
           groupId={selectedProfileStudent.groupId}
           onClose={() => setSelectedProfileStudent(null)}
+        />
+      )}
+
+      {/* PVC Badge Modal */}
+      {activeBadgeStudent && (
+        <StudentBadgeModal
+          student={activeBadgeStudent.student}
+          groupId={activeBadgeStudent.groupId}
+          allGroups={activeBadgeStudent.allGroups}
+          onClose={() => setActiveBadgeStudent(null)}
         />
       )}
     </div>
