@@ -43,7 +43,26 @@ export default function MultiGroupStudentEnrollModal({ isOpen, onClose }: Props)
 
   // Compute fee for a group based on discount
   const getGroupFee = (group: GroupMeta): number => {
-    const baseFee = group.studentFee || (data.groupData[group.id]?.studentFee) || (group.isVip ? 10000 : 2500);
+    const isVip =
+      group.id.toUpperCase().startsWith('BACV') ||
+      group.id.toUpperCase().includes('VIP') ||
+      Boolean(group.isVip) ||
+      Boolean(data.groupData[group.id]?.isVip) ||
+      Boolean(group.type?.includes('10000'));
+    const targetType = group.type || data.groupData[group.id]?.type || (isVip ? '4-10000' : '4-2500');
+    const tier = data.pricingTiers?.find((t) => t.id === targetType);
+    let baseFee = 2500;
+    if (typeof group.studentFee === 'number' && group.studentFee > 0) {
+      baseFee = group.studentFee;
+    } else if (typeof data.groupData[group.id]?.studentFee === 'number' && (data.groupData[group.id]?.studentFee || 0) > 0) {
+      baseFee = data.groupData[group.id]?.studentFee || 2500;
+    } else if (tier && typeof tier.price === 'number' && tier.price > 0) {
+      baseFee = tier.price;
+    } else if (isVip) {
+      baseFee = 10000;
+    } else {
+      baseFee = 2500;
+    }
     if (discount === '0') return 0;
     if (discount === '0.8') return Math.round(baseFee * 0.8);
     return baseFee;
@@ -167,7 +186,26 @@ export default function MultiGroupStudentEnrollModal({ isOpen, onClose }: Props)
         if (payingGroupIds.includes(id)) {
           const g = data.groups.find((grp) => grp.id === id);
           if (g) {
-            const baseFee = g.studentFee || (data.groupData[g.id]?.studentFee) || (g.isVip ? 10000 : 2500);
+            const isVip =
+              g.id.toUpperCase().startsWith('BACV') ||
+              g.id.toUpperCase().includes('VIP') ||
+              Boolean(g.isVip) ||
+              Boolean(data.groupData[g.id]?.isVip) ||
+              Boolean(g.type?.includes('10000'));
+            const targetType = g.type || data.groupData[g.id]?.type || (isVip ? '4-10000' : '4-2500');
+            const tier = data.pricingTiers?.find((t) => t.id === targetType);
+            let baseFee = 2500;
+            if (typeof g.studentFee === 'number' && g.studentFee > 0) {
+              baseFee = g.studentFee;
+            } else if (typeof data.groupData[g.id]?.studentFee === 'number' && (data.groupData[g.id]?.studentFee || 0) > 0) {
+              baseFee = data.groupData[g.id]?.studentFee || 2500;
+            } else if (tier && typeof tier.price === 'number' && tier.price > 0) {
+              baseFee = tier.price;
+            } else if (isVip) {
+              baseFee = 10000;
+            } else {
+              baseFee = 2500;
+            }
             let newFee = baseFee;
             if (newDiscount === '0') newFee = 0;
             else if (newDiscount === '0.8') newFee = Math.round(baseFee * 0.8);

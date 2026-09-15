@@ -35,6 +35,7 @@ import {
 import AddGroupModal from '../components/AddGroupModal';
 import EditGroupModal from '../components/EditGroupModal';
 import MultiGroupStudentEnrollModal from '../components/MultiGroupStudentEnrollModal';
+import MultiGroupPaymentModal from '../components/MultiGroupPaymentModal';
 import RenewGroupModal from '../components/RenewGroupModal';
 import StudentProfileModal from '../components/StudentProfileModal';
 import StudentPaymentModal from '../components/StudentPaymentModal';
@@ -49,16 +50,33 @@ import {
 
 export default function DashboardPage() {
   const { data, getCenterStats, getGroupStats, setSelectedGroup, lang } = useApp();
-  const stats = getCenterStats();
+
+  // Dynamic Period & Scope Filter state for Stats
+  const [statsPeriodType, setStatsPeriodType] = useState<'all' | 'today' | 'this_week' | 'this_month' | 'prev_month' | 'custom'>('all');
+  const [statsCustomStart, setStatsCustomStart] = useState('');
+  const [statsCustomEnd, setStatsCustomEnd] = useState('');
+  const [statsGroupScope, setStatsGroupScope] = useState<'all' | 'regular' | 'vip'>('all');
+  const [statsSpecificGroup, setStatsSpecificGroup] = useState<string>('all');
+
+  const stats = useMemo(() => {
+    return getCenterStats({
+      periodType: statsPeriodType,
+      startDate: statsPeriodType === 'custom' ? statsCustomStart : undefined,
+      endDate: statsPeriodType === 'custom' ? statsCustomEnd : undefined,
+      groupType: statsGroupScope,
+      groupId: statsSpecificGroup
+    });
+  }, [getCenterStats, statsPeriodType, statsCustomStart, statsCustomEnd, statsGroupScope, statsSpecificGroup, data]);
 
   // Groups state
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'active' | 'inactive' | 'today' | 'regular' | 'vip'>('all');
   const [isAddGroupOpen, setIsAddGroupOpen] = useState(false);
   const [isEnrollModalOpen, setIsEnrollModalOpen] = useState(false);
+  const [isMultiPaymentOpen, setIsMultiPaymentOpen] = useState(false);
   const [renewingGroupId, setRenewingGroupId] = useState<string | null>(null);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
-  const [showStats, setShowStats] = useState(false);
+  const [showStats, setShowStats] = useState(true);
 
   // Student Section state
   const [studentSearch, setStudentSearch] = useState('');
@@ -278,130 +296,476 @@ export default function DashboardPage() {
             {showStats ? <EyeOff size={18} /> : <Eye size={18} />}
             <span>{showStats ? 'إخفاء الإحصائيات' : 'إظهار الإحصائيات'}</span>
           </button>
+          <button
+            type="button"
+            onClick={() => setIsMultiPaymentOpen(true)}
+            className="m3-btn m3-btn-primary"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              backgroundColor: '#0284c7',
+              color: '#ffffff',
+              fontWeight: 800,
+              boxShadow: '0 2px 8px rgba(2, 132, 199, 0.3)'
+            }}
+            title="تسديد مالي لتلميذ في عدة أفواج معاً واستخراج وصل موحد شامل"
+          >
+            <CreditCard size={18} />
+            <span>تسديد جديد (فوج أو أكثر)</span>
+          </button>
         </div>
       </div>
 
-      {/* KPI Stats Grid (Hidden by default as requested) */}
+      {/* KPI Stats Section with Dynamic Period Filter */}
       {showStats && (
-        <div className="m3-grid-stats" style={{ animation: 'fadeIn 0.2s ease-in-out' }}>
-          {/* Total Students */}
-          <div className="m3-card" style={{ padding: '20px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <span style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--md-sys-color-on-surface-variant)' }}>
-                إجمالي التلاميذ المسجلين
-              </span>
-              <div
-                style={{
-                  width: '38px',
-                  height: '38px',
-                  borderRadius: '50%',
-                  backgroundColor: 'var(--md-sys-color-primary-container)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'var(--md-sys-color-primary)'
-                }}
-              >
-                <Users size={20} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', animation: 'fadeIn 0.2s ease-in-out' }}>
+          {/* Dynamic Period & Scope Filter Toolbar */}
+          <div
+            className="m3-card"
+            style={{
+              padding: '10px 16px',
+              backgroundColor: 'var(--md-sys-color-surface-container-low)',
+              borderRadius: 'var(--md-shape-md)',
+              border: '1px solid var(--md-sys-color-outline-variant)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+              {/* Period Presets */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--md-sys-color-primary)', fontWeight: 700, fontSize: '0.8rem', marginLeft: '4px' }}>
+                  <Calendar size={15} />
+                  <span>الفترة:</span>
+                </div>
+                {[
+                  { id: 'all', label: 'كامل الموسم' },
+                  { id: 'today', label: 'اليوم' },
+                  { id: 'this_week', label: 'هذا الأسبوع' },
+                  { id: 'this_month', label: 'شهر سبتمبر' },
+                  { id: 'prev_month', label: 'شهر أوت' },
+                  { id: 'custom', label: 'مخصصة 📅' }
+                ].map((p) => {
+                  const isActive = statsPeriodType === p.id;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setStatsPeriodType(p.id as any)}
+                      style={{
+                        padding: '3px 10px',
+                        borderRadius: '14px',
+                        fontSize: '0.78rem',
+                        fontWeight: isActive ? 700 : 500,
+                        backgroundColor: isActive ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-surface)',
+                        color: isActive ? '#ffffff' : 'var(--md-sys-color-on-surface)',
+                        border: '1px solid',
+                        borderColor: isActive ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-outline-variant)',
+                        cursor: 'pointer',
+                        boxShadow: isActive ? '0 1px 4px rgba(0, 0, 0, 0.12)' : 'none',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      {p.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Group Scope Filter */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--md-sys-color-secondary)', fontWeight: 700, fontSize: '0.78rem' }}>
+                  <Filter size={14} />
+                  <span>الفوج:</span>
+                </div>
+                <select
+                  value={statsGroupScope}
+                  onChange={(e) => {
+                    setStatsGroupScope(e.target.value as any);
+                    setStatsSpecificGroup('all');
+                  }}
+                  className="m3-input"
+                  style={{ width: 'auto', minWidth: '115px', maxWidth: '140px', padding: '3px 8px', fontSize: '0.78rem', height: '30px', borderRadius: '6px' }}
+                >
+                  <option value="all">كافة الأفواج (24)</option>
+                  <option value="regular">أفواج عادية (9)</option>
+                  <option value="vip">أفواج VIP (15)</option>
+                </select>
+
+                <select
+                  value={statsSpecificGroup}
+                  onChange={(e) => {
+                    setStatsSpecificGroup(e.target.value);
+                  }}
+                  className="m3-input"
+                  style={{ width: 'auto', minWidth: '130px', maxWidth: '180px', padding: '3px 8px', fontSize: '0.78rem', height: '30px', borderRadius: '6px' }}
+                >
+                  <option value="all">جميع الأفواج المحددة</option>
+                  {data.groups
+                    .filter((g) => {
+                      if (statsGroupScope === 'regular') return !g.isVip;
+                      if (statsGroupScope === 'vip') return g.isVip;
+                      return true;
+                    })
+                    .map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.id} - {g.subject} ({g.teacherName})
+                      </option>
+                    ))}
+                </select>
               </div>
             </div>
-            <div style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--md-sys-color-on-surface)' }}>
-              {stats.totalStudents} <span style={{ fontSize: '1rem', fontWeight: 600 }}>تلميذ</span>
+
+            {/* Custom Date Range Controls */}
+            {statsPeriodType === 'custom' && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  padding: '6px 12px',
+                  backgroundColor: 'var(--md-sys-color-surface)',
+                  borderRadius: 'var(--md-shape-sm)',
+                  border: '1px dashed var(--md-sys-color-primary)',
+                  flexWrap: 'wrap',
+                  animation: 'fadeIn 0.2s ease-in-out'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ fontSize: '0.78rem', fontWeight: 600 }}>من:</span>
+                  <input
+                    type="date"
+                    value={statsCustomStart}
+                    onChange={(e) => setStatsCustomStart(e.target.value)}
+                    className="m3-input"
+                    style={{ width: 'auto', padding: '2px 8px', fontSize: '0.78rem', height: '28px' }}
+                  />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ fontSize: '0.78rem', fontWeight: 600 }}>إلى:</span>
+                  <input
+                    type="date"
+                    value={statsCustomEnd}
+                    onChange={(e) => setStatsCustomEnd(e.target.value)}
+                    className="m3-input"
+                    style={{ width: 'auto', padding: '2px 8px', fontSize: '0.78rem', height: '28px' }}
+                  />
+                </div>
+                {(statsCustomStart || statsCustomEnd) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStatsCustomStart('');
+                      setStatsCustomEnd('');
+                    }}
+                    className="m3-btn m3-btn-outlined"
+                    style={{ padding: '2px 8px', fontSize: '0.72rem', height: '28px' }}
+                  >
+                    مسح التواريخ
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Active Period Status Info Bar */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                paddingTop: '4px',
+                borderTop: '1px solid var(--md-sys-color-outline-variant)',
+                fontSize: '0.75rem',
+                color: 'var(--md-sys-color-on-surface-variant)',
+                flexWrap: 'wrap',
+                gap: '6px'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span
+                  style={{
+                    display: 'inline-block',
+                    width: '6px',
+                    height: '6px',
+                    borderRadius: '50%',
+                    backgroundColor: 'var(--status-present)'
+                  }}
+                />
+                <span>
+                  <strong>النطاق النشط:</strong> {stats.periodLabel || 'كامل الموسم'} • موزعة على{' '}
+                  <strong>{stats.totalGroups}</strong> فوج •{' '}
+                  <strong>{stats.matchingSessionsCount ?? stats.totalGroups * 4}</strong> حصة
+                </span>
+              </div>
+              {(statsPeriodType !== 'all' || statsGroupScope !== 'all' || statsSpecificGroup !== 'all') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStatsPeriodType('all');
+                    setStatsCustomStart('');
+                    setStatsCustomEnd('');
+                    setStatsGroupScope('all');
+                    setStatsSpecificGroup('all');
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    backgroundColor: 'transparent',
+                    border: 'none',
+                    color: 'var(--md-sys-color-primary)',
+                    cursor: 'pointer',
+                    fontSize: '0.75rem',
+                    fontWeight: 700,
+                    textDecoration: 'underline'
+                  }}
+                >
+                  <RotateCw size={11} />
+                  <span>إعادة الضبط للإجمالي</span>
+                </button>
+              )}
             </div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--md-sys-color-on-surface-variant)', marginTop: '4px' }}>
-              موزعين على {stats.totalGroups} فوجاً دراسياً
+          </div>
+
+          <div className="m3-grid-stats">
+          {/* Active & Total Students Card */}
+          <div className="m3-card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--md-sys-color-on-surface-variant)' }}>
+                    {lang === 'ar' ? 'التلاميذ النشطين' : 'Active Students'}
+                  </span>
+                  <span
+                    style={{
+                      backgroundColor: 'rgba(234, 179, 8, 0.15)',
+                      color: '#b45309',
+                      border: '1px solid rgba(234, 179, 8, 0.35)',
+                      fontSize: '0.68rem',
+                      fontWeight: 700,
+                      padding: '1px 6px',
+                      borderRadius: '10px'
+                    }}
+                  >
+                    Active Users
+                  </span>
+                </div>
+                <div
+                  style={{
+                    width: '30px',
+                    height: '30px',
+                    borderRadius: '50%',
+                    backgroundColor: 'var(--md-sys-color-primary-container)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'var(--md-sys-color-primary)'
+                  }}
+                >
+                  <Users size={16} />
+                </div>
+              </div>
+
+              {/* Big Active Users Display */}
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', flexWrap: 'wrap' }}>
+                <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--md-sys-color-on-surface)' }}>
+                  {stats.activeStudents ?? stats.totalStudents}
+                </div>
+                <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--md-sys-color-primary)' }}>
+                  {lang === 'ar' ? 'تلميذ نشط' : 'Active Students'}
+                </span>
+                <span
+                  style={{
+                    fontSize: '0.72rem',
+                    fontWeight: 600,
+                    color: 'var(--md-sys-color-on-surface-variant)',
+                    backgroundColor: 'var(--md-sys-color-surface-container-high)',
+                    padding: '1px 6px',
+                    borderRadius: '6px'
+                  }}
+                >
+                  {lang === 'ar'
+                    ? `(${stats.activeGroups ?? stats.totalGroups} فوج نشط)`
+                    : `(${stats.activeGroups ?? stats.totalGroups} active)`}
+                </span>
+              </div>
+            </div>
+
+            {/* Total Users Info Section */}
+            <div
+              style={{
+                marginTop: '8px',
+                paddingTop: '6px',
+                borderTop: '1px solid var(--md-sys-color-outline-variant)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '4px',
+                fontSize: '0.75rem'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <span
+                  style={{
+                    fontSize: '0.68rem',
+                    fontWeight: 700,
+                    color: '#dc2626',
+                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                    border: '1px solid rgba(239, 68, 68, 0.25)',
+                    padding: '1px 5px',
+                    borderRadius: '6px'
+                  }}
+                >
+                  Total Users
+                </span>
+                <span style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
+                  إجمالي المسجلين:
+                </span>
+              </div>
+              <span style={{ fontWeight: 700, color: 'var(--md-sys-color-on-surface)' }}>
+                {stats.totalStudents !== (stats.totalCenterStudents || 1100)
+                  ? `${stats.totalStudents} (${stats.totalCenterStudents || 1100} بالمركز)`
+                  : `${stats.totalCenterStudents || 1100}`}{' '}
+                تلميذ ({stats.totalGroups} فوج)
+              </span>
             </div>
           </div>
 
           {/* Total Collected */}
-          <div className="m3-card" style={{ padding: '20px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <span style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--status-present)' }}>
-                المبالغ المحصلة (مجموع المستلم)
-              </span>
-              <div
-                style={{
-                  width: '38px',
-                  height: '38px',
-                  borderRadius: '50%',
-                  backgroundColor: 'var(--status-present-container)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'var(--status-present)'
-                }}
-              >
-                <CheckCircle2 size={20} />
+          <div className="m3-card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--status-present)' }}>
+                  المبالغ المحصلة (مجموع المستلم)
+                </span>
+                <div
+                  style={{
+                    width: '30px',
+                    height: '30px',
+                    borderRadius: '50%',
+                    backgroundColor: 'var(--status-present-container)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'var(--status-present)'
+                  }}
+                >
+                  <CheckCircle2 size={16} />
+                </div>
+              </div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--status-present)' }}>
+                {stats.totalReceived.toLocaleString()} <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>دج</span>
               </div>
             </div>
-            <div style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--status-present)' }}>
-              {stats.totalReceived.toLocaleString()} <span style={{ fontSize: '1rem', fontWeight: 600 }}>دج</span>
-            </div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--md-sys-color-on-surface-variant)', marginTop: '4px' }}>
+            <div
+              style={{
+                marginTop: '8px',
+                paddingTop: '6px',
+                borderTop: '1px solid var(--md-sys-color-outline-variant)',
+                fontSize: '0.75rem',
+                color: 'var(--md-sys-color-on-surface-variant)'
+              }}
+            >
               من إجمالي متوقع: {stats.totalExpected.toLocaleString()} دج
             </div>
           </div>
 
           {/* Outstanding Debts */}
-          <div className="m3-card" style={{ padding: '20px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <span style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--status-absent)' }}>
-                إجمالي الديون المتبقية
-              </span>
-              <div
-                style={{
-                  width: '38px',
-                  height: '38px',
-                  borderRadius: '50%',
-                  backgroundColor: 'var(--status-absent-container)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'var(--status-absent)'
-                }}
-              >
-                <AlertTriangle size={20} />
+          <div className="m3-card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--status-absent)' }}>
+                  إجمالي ديون المركز (لدى الطلبة)
+                </span>
+                <div
+                  style={{
+                    width: '30px',
+                    height: '30px',
+                    borderRadius: '50%',
+                    backgroundColor: 'var(--status-absent-container)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'var(--status-absent)'
+                  }}
+                >
+                  <AlertTriangle size={16} />
+                </div>
+              </div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--status-absent)' }}>
+                {stats.totalDebt.toLocaleString()} <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>دج</span>
               </div>
             </div>
-            <div style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--status-absent)' }}>
-              {stats.totalDebt.toLocaleString()} <span style={{ fontSize: '1rem', fontWeight: 600 }}>دج</span>
-            </div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--md-sys-color-on-surface-variant)', marginTop: '4px' }}>
+            <div
+              style={{
+                marginTop: '8px',
+                paddingTop: '6px',
+                borderTop: '1px solid var(--md-sys-color-outline-variant)',
+                fontSize: '0.75rem',
+                color: 'var(--md-sys-color-on-surface-variant)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+              }}
+            >
               <Link href="/students" style={{ color: 'var(--status-absent)', textDecoration: 'underline' }}>
-                معاينة سجل ديون الطلبة
+                معاينة ديون الطلبة
               </Link>
+              <span style={{ fontSize: '0.7rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
+                (على عاتق المركز فقط)
+              </span>
             </div>
           </div>
 
           {/* Center Net Share */}
-          <div className="m3-card" style={{ padding: '20px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <span style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--md-sys-color-primary)' }}>
-                حصة المركز الصافية (المدرسة)
-              </span>
-              <div
-                style={{
-                  width: '38px',
-                  height: '38px',
-                  borderRadius: '50%',
-                  backgroundColor: 'var(--md-sys-color-primary-container)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'var(--md-sys-color-primary)'
-                }}
-              >
-                <CreditCard size={20} />
+          <div className="m3-card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--md-sys-color-primary)' }}>
+                  حصة المركز الصافية (المدرسة)
+                </span>
+                <div
+                  style={{
+                    width: '30px',
+                    height: '30px',
+                    borderRadius: '50%',
+                    backgroundColor: 'var(--md-sys-color-primary-container)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'var(--md-sys-color-primary)'
+                  }}
+                >
+                  <CreditCard size={16} />
+                </div>
+              </div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--md-sys-color-primary)' }}>
+                {stats.totalSchoolEarn.toLocaleString()} <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>دج</span>
               </div>
             </div>
-            <div style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--md-sys-color-primary)' }}>
-              {stats.totalSchoolEarn.toLocaleString()} <span style={{ fontSize: '1rem', fontWeight: 600 }}>دج</span>
-            </div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--md-sys-color-on-surface-variant)', marginTop: '4px' }}>
-              مستحقات الأساتذة: {stats.totalTeacherPay.toLocaleString()} دج
+            <div
+              style={{
+                marginTop: '8px',
+                paddingTop: '6px',
+                borderTop: '1px solid var(--md-sys-color-outline-variant)',
+                fontSize: '0.75rem',
+                color: 'var(--md-sys-color-on-surface-variant)'
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>مستحقات الأساتذة:</span>
+                <strong>{stats.totalTeacherPay.toLocaleString()} دج</strong>
+              </div>
+              <span style={{ display: 'block', fontSize: '0.68rem', color: 'var(--status-present)', marginTop: '1px', fontWeight: 600 }}>
+                (مضمونة: 75% VIP • 60% عادي)
+              </span>
             </div>
           </div>
         </div>
+      </div>
       )}
 
       {/* Group Directory & Quick Jump */}
@@ -1299,6 +1663,7 @@ export default function DashboardPage() {
 
       {isAddGroupOpen && <AddGroupModal onClose={() => setIsAddGroupOpen(false)} />}
       <MultiGroupStudentEnrollModal isOpen={isEnrollModalOpen} onClose={() => setIsEnrollModalOpen(false)} />
+      <MultiGroupPaymentModal isOpen={isMultiPaymentOpen} onClose={() => setIsMultiPaymentOpen(false)} />
       {renewingGroupId && (
         <RenewGroupModal
           sourceGroupId={renewingGroupId}

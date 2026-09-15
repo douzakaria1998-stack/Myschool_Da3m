@@ -119,3 +119,31 @@ export interface QueuedReceipt {
   isCover?: boolean;
   originalGroup?: string;
 }
+
+export interface CenterStatsFilter {
+  periodType?: 'all' | 'today' | 'this_week' | 'this_month' | 'prev_month' | 'custom';
+  startDate?: string;
+  endDate?: string;
+  groupType?: 'all' | 'regular' | 'vip';
+  groupId?: string;
+}
+
+export interface CenterStatsResult {
+  totalStudents: number;
+  activeStudents?: number;
+  activeGroups?: number;
+  totalCenterStudents?: number;
+  totalCenterGroups?: number;
+  totalCenterActiveStudents?: number;
+  totalCenterActiveGroups?: number;
+  totalGroups: number;
+  totalTeachers: number;
+  totalExpected: number;
+  totalReceived: number;
+  totalTeacherPay: number;
+  totalSchoolEarn: number;
+  totalDebt: number;
+  matchingSessionsCount?: number;
+  periodLabel?: string;
+}
+

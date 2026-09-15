@@ -19,7 +19,11 @@ export default function StudentBadgeModal({ student, groupId, allGroups = [], on
 
   const barcodeValue =
     student.barcode?.trim() ||
-    (groupId ? `${groupId}-${student.rowId}` : `STU-2600${student.rowId.toString().padStart(4, '0')}`);
+    Object.values(data.groupData || {})
+      .flatMap((g) => g.students || [])
+      .find((s) => s.name.trim().toLowerCase() === student.name.trim().toLowerCase() && s.barcode?.trim())
+      ?.barcode?.trim() ||
+    `STU-2600${student.rowId.toString().padStart(4, '0')}`;
 
   useEffect(() => {
     if (barcodeSvgRef.current && barcodeValue) {

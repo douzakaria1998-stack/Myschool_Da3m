@@ -20,7 +20,9 @@ import {
   HelpCircle,
   Sparkles,
   Layers,
-  ChevronDown
+  ChevronDown,
+  Plus,
+  Trash2
 } from 'lucide-react';
 import { playSuccessChime, playWarningAlert } from '../utils/soundUtils';
 import { printSingleThermalReceipt, printBatchThermalReceipts, ThermalReceiptData } from '../utils/printUtils';
@@ -29,8 +31,10 @@ import {
   formatToYYYYMMDD,
   isSessionDateToday,
   detectCurrentActiveGroupAndSession,
-  ActiveGroupDetectionResult
+  ActiveGroupDetectionResult,
+  formatGroupTime
 } from '../utils/sessionUtils';
+import { getBarcodeCandidates, normalizeArabicName } from '../utils/barcodeUtils';
 
 interface Props {
   initialGroupId?: string;
@@ -42,6 +46,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
     data,
     updateAttendance,
     updatePayment,
+    recordAttendanceAndPayment,
     recordCoverAttendance,
     endSessionAndMarkAbsent,
     printQueue,
@@ -51,38 +56,94 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
   } = useApp();
 
   // Smart Session Auto-Detection Engine
-  const [autoDetectSchedule, setAutoDetectSchedule] = useState<boolean>(true);
+  const [autoDetectSchedule, setAutoDetectSchedule] = useState<boolean>(false);
   const [currentDetection, setCurrentDetection] = useState<ActiveGroupDetectionResult>(() =>
     detectCurrentActiveGroupAndSession(data.groupData, data.groups, new Date())
   );
 
-  // Active Group selection (defaults to detected active group or initialGroupId or first group)
-  const [activeGroupId, setActiveGroupId] = useState<string>(() => {
+  // Active Groups configuration (supports multiple concurrent groups running at the same time!)
+  const [activeGroups, setActiveGroups] = useState<{ groupId: string; sessionIndex: number }[]>(() => {
     const initialDetect = detectCurrentActiveGroupAndSession(data.groupData, data.groups, new Date());
-    if (initialDetect.activeGroup) return initialDetect.activeGroup.groupId;
-    return initialGroupId || data.groups[0]?.id || 'BAC01';
+    if (initialDetect.matchingGroups.length > 0) {
+      return initialDetect.matchingGroups.map((m) => ({
+        groupId: m.group.groupId,
+        sessionIndex: m.sessionIndex
+      }));
+    }
+    if (initialDetect.activeGroup) {
+      return [{ groupId: initialDetect.activeGroup.groupId, sessionIndex: initialDetect.activeSessionIndex }];
+    }
+    const defaultGid = initialGroupId || data.groups[0]?.id || 'BAC01';
+    return [{ groupId: defaultGid, sessionIndex: 0 }];
   });
+
+  // Backward-compatible accessors for primary active group
+  const primaryActive = activeGroups[0] || { groupId: initialGroupId || data.groups[0]?.id || 'BAC01', sessionIndex: 0 };
+  const activeGroupId = primaryActive.groupId;
+  const activeSessionIdx = primaryActive.sessionIndex;
   const activeGroup = data.groupData[activeGroupId] as GroupSheet | undefined;
 
-  // Active Session selection (index 0 to sessionCount - 1)
-  const [activeSessionIdx, setActiveSessionIdx] = useState<number>(() => {
-    const initialDetect = detectCurrentActiveGroupAndSession(data.groupData, data.groups, new Date());
-    if (initialDetect.activeGroup) return initialDetect.activeSessionIndex;
-    if (activeGroup?.sessionDates) {
-      const todayIdx = activeGroup.sessionDates.findIndex((d) => isSessionDateToday(formatToYYYYMMDD(d) || d));
-      if (todayIdx !== -1) return todayIdx;
+  // Handlers to manage active groups
+  const handleAddActiveGroup = (defaultGid?: string) => {
+    const existingIds = new Set(activeGroups.map((g) => g.groupId));
+    const candidate = data.groups.find((g) => !existingIds.has(g.id)) || data.groups[0];
+    if (!candidate) return;
+
+    const gid = defaultGid || candidate.id;
+    const groupSheet = data.groupData[gid];
+    let sIdx = 0;
+    if (groupSheet?.sessionDates) {
+      const todayIdx = groupSheet.sessionDates.findIndex((d) => isSessionDateToday(formatToYYYYMMDD(d) || d));
+      if (todayIdx !== -1) sIdx = todayIdx;
     }
-    return 0;
-  });
+    setActiveGroups((prev) => [...prev, { groupId: gid, sessionIndex: sIdx }]);
+  };
+
+  const handleRemoveActiveGroup = (index: number) => {
+    if (activeGroups.length <= 1) {
+      alert('يجب أن يبقى فوج نشط واحد على الأقل في محطة المسح');
+      return;
+    }
+    setActiveGroups((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleUpdateActiveGroup = (index: number, newGroupId: string) => {
+    const groupSheet = data.groupData[newGroupId];
+    let sIdx = 0;
+    if (groupSheet?.sessionDates) {
+      const todayIdx = groupSheet.sessionDates.findIndex((d) => isSessionDateToday(formatToYYYYMMDD(d) || d));
+      if (todayIdx !== -1) sIdx = todayIdx;
+    }
+    setActiveGroups((prev) =>
+      prev.map((item, i) => (i === index ? { groupId: newGroupId, sessionIndex: sIdx } : item))
+    );
+    resetForNextStudent();
+  };
+
+  const handleUpdateActiveSession = (index: number, newSessionIdx: number) => {
+    setActiveGroups((prev) =>
+      prev.map((item, i) => (i === index ? { ...item, sessionIndex: newSessionIdx } : item))
+    );
+  };
 
   // Periodic re-check of active schedule every 25 seconds
   useEffect(() => {
     const checkSchedule = () => {
       const res = detectCurrentActiveGroupAndSession(data.groupData, data.groups, new Date());
       setCurrentDetection(res);
-      if (autoDetectSchedule && res.activeGroup) {
-        setActiveGroupId(res.activeGroup.groupId);
-        setActiveSessionIdx(res.activeSessionIndex);
+      if (autoDetectSchedule && res.matchingGroups.length > 0) {
+        const detectedConfigs = res.matchingGroups.map((m) => ({
+          groupId: m.group.groupId,
+          sessionIndex: m.sessionIndex
+        }));
+        setActiveGroups((prev) => {
+          const prevKeys = prev.map((g) => `${g.groupId}-${g.sessionIndex}`).sort().join(',');
+          const detKeys = detectedConfigs.map((g) => `${g.groupId}-${g.sessionIndex}`).sort().join(',');
+          if (prevKeys !== detKeys && prev.length <= 1) {
+            return detectedConfigs;
+          }
+          return prev;
+        });
       }
     };
     checkSchedule();
@@ -93,6 +154,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
   // Scanner Barcode Input State
   const [barcodeInput, setBarcodeInput] = useState('');
   const scannerInputRef = useRef<HTMLInputElement>(null);
+  const scanTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Scanned Student resolution
   const [scannedResult, setScannedResult] = useState<{
@@ -102,15 +164,44 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
     studentEnrolledGroups: string[];
   } | null>(null);
 
+  // Scan session execution context (records which active group was matched for payment & attendance)
+  const [currentScanContext, setCurrentScanContext] = useState<{
+    groupId: string;
+    sessionIdx: number;
+    isCover: boolean;
+    originalGid?: string;
+    student: StudentRecord;
+  } | null>(null);
+
+  // Multi-Match Candidate state (when student is enrolled in 2+ active groups)
+  const [multiActiveCandidate, setMultiActiveCandidate] = useState<{
+    student: StudentRecord;
+    matchingActiveGroups: { groupId: string; sessionIndex: number }[];
+    result: {
+      student: StudentRecord;
+      homeGroupId: string;
+      isInActiveGroup: boolean;
+      studentEnrolledGroups: string[];
+    };
+  } | null>(null);
+
   // Workflow Dialog States
-  // 1. Covering Dialog: When student is not in active group
+  // 1. Covering Dialog: When student is not in any active group
   const [showCoverDialog, setShowCoverDialog] = useState(false);
   const [selectedOriginalGroup, setSelectedOriginalGroup] = useState('');
+  const [coverTargetActiveGroupId, setCoverTargetActiveGroupId] = useState<string>('');
 
   // 2. Unpaid / Payment Dialog: When student has debt or unpaid session
   const [showUnpaidDialog, setShowUnpaidDialog] = useState(false);
   const [willPayNow, setWillPayNow] = useState<boolean | null>(null);
   const [payAmount, setPayAmount] = useState<string>('');
+  const [unpaidInfo, setUnpaidInfo] = useState<{
+    effectiveDebt: number;
+    expectedCycleFee: number;
+    perSessionPrice: number;
+    totalPaid: number;
+    isNewUnpaid: boolean;
+  } | null>(null);
 
   // 3. Flash Success Message
   const [flashSuccess, setFlashSuccess] = useState<{
@@ -121,10 +212,12 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
 
   // 4. End Session Confirmation Modal
   const [showEndSessionConfirm, setShowEndSessionConfirm] = useState(false);
+  const [endSessionTarget, setEndSessionTarget] = useState<{ groupId: string; sessionIndex: number } | 'ALL' | null>(null);
   const [endSessionStats, setEndSessionStats] = useState<{
     presentCount: number;
     makeupCount: number;
     absentCount: number;
+    groupLabel?: string;
   } | null>(null);
 
   // 5. Print Queue Modal view
@@ -138,77 +231,186 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
         !showUnpaidDialog &&
         !showEndSessionConfirm &&
         !showQueueModal &&
+        !multiActiveCandidate &&
         document.activeElement !== scannerInputRef.current
       ) {
         scannerInputRef.current?.focus();
       }
     }, 400);
     return () => clearInterval(timer);
-  }, [showCoverDialog, showUnpaidDialog, showEndSessionConfirm, showQueueModal]);
+  }, [showCoverDialog, showUnpaidDialog, showEndSessionConfirm, showQueueModal, multiActiveCandidate]);
+
+  // Global scanner keystroke interceptor: captures rapid scanner typing anywhere in the window
+  useEffect(() => {
+    let buffer = '';
+    let lastKeyTime = Date.now();
+
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      // Don't intercept if an interactive modal/dialog or payment input is active
+      if (showCoverDialog || showUnpaidDialog || showEndSessionConfirm || showQueueModal || Boolean(multiActiveCandidate)) {
+        return;
+      }
+
+      // If user is already focused on another input, let them type normally
+      if (
+        document.activeElement &&
+        document.activeElement.tagName === 'INPUT' &&
+        document.activeElement !== scannerInputRef.current
+      ) {
+        return;
+      }
+
+      const now = Date.now();
+      const timeDiff = now - lastKeyTime;
+      lastKeyTime = now;
+
+      // Enter key: finalize scan
+      if (e.key === 'Enter') {
+        const candidate = (document.activeElement === scannerInputRef.current ? barcodeInput : buffer).trim();
+        if (candidate.length >= 1) {
+          e.preventDefault();
+          buffer = '';
+          handleBarcodeSubmit(undefined, candidate);
+        }
+        return;
+      }
+
+      // Ignore navigation keys
+      if (e.key === 'Tab' || e.key === 'Escape' || (e.key.length > 1 && e.key !== 'Backspace')) {
+        return;
+      }
+
+      // Reset buffer on long pauses
+      if (timeDiff > 400 && buffer.length > 0) {
+        buffer = '';
+      }
+
+      if (e.key === 'Backspace') {
+        buffer = buffer.slice(0, -1);
+      } else if (e.key.length === 1) {
+        buffer += e.key;
+      }
+
+      // Sync with input field if it was not focused
+      if (document.activeElement !== scannerInputRef.current && buffer.length > 0) {
+        setBarcodeInput(buffer);
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [showCoverDialog, showUnpaidDialog, showEndSessionConfirm, showQueueModal, multiActiveCandidate, barcodeInput]);
+
+  // Clean up scan timer on unmount
+  useEffect(() => {
+    return () => {
+      if (scanTimeoutRef.current) {
+        clearTimeout(scanTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Reset scanner state for the next student
   const resetForNextStudent = () => {
+    if (scanTimeoutRef.current) {
+      clearTimeout(scanTimeoutRef.current);
+      scanTimeoutRef.current = null;
+    }
     setBarcodeInput('');
     setScannedResult(null);
+    setCurrentScanContext(null);
+    setMultiActiveCandidate(null);
     setShowCoverDialog(false);
     setSelectedOriginalGroup('');
+    setCoverTargetActiveGroupId('');
     setShowUnpaidDialog(false);
     setWillPayNow(null);
     setPayAmount('');
+    setUnpaidInfo(null);
     setTimeout(() => {
       scannerInputRef.current?.focus();
     }, 50);
   };
 
-  // Find student across all groups by barcode, phone, ID or name
-  const findStudentByCode = (code: string) => {
-    const clean = code.trim().toLowerCase();
-    if (!clean) return null;
+  // Find student across all groups by barcode, phone, ID or name using decoded candidate permutations
+  const findStudentByCode = (code: string, targetGroupId: string = activeGroupId) => {
+    if (!code) return null;
+    const cleanRaw = code.trim();
+    const candidates = getBarcodeCandidates(cleanRaw);
+    if (candidates.length === 0) return null;
+
+    const doesStudentMatch = (s: StudentRecord, gid: string): boolean => {
+      if (isSummaryRow(s, gid)) return false;
+
+      const sBarcodeUpper = (s.barcode || '').trim().toUpperCase();
+      const sBarcodeAlpha = sBarcodeUpper.replace(/[^A-Z0-9]/g, '');
+      const sIdUpper = `${gid}-${s.rowId}`.toUpperCase();
+      const sId2 = `${gid}-${String(s.rowId).padStart(2, '0')}`.toUpperCase();
+      const sId3 = `${gid}-${String(s.rowId).padStart(3, '0')}`.toUpperCase();
+      const sIdAlpha = `${gid}${s.rowId}`.toUpperCase();
+      const sRowStr = String(s.rowId);
+      const sPhoneClean = (s.phone || '').replace(/[^0-9]/g, '');
+      const sNameNorm = normalizeArabicName(s.name);
+
+      for (const cand of candidates) {
+        const candUpper = cand.trim().toUpperCase();
+        const candAlpha = candUpper.replace(/[^A-Z0-9]/g, '');
+        const candDigits = cand.replace(/[^0-9]/g, '');
+        const candNorm = normalizeArabicName(cand);
+
+        // 1. Unique Student Barcode match (e.g. STU-26000008 or STU-26000017)
+        if (sBarcodeUpper && (candUpper === sBarcodeUpper || (sBarcodeAlpha && candAlpha === sBarcodeAlpha))) {
+          return true;
+        }
+
+        // 2. Exact Group ID + rowId permutations (e.g. BACV01-8 ONLY matches student in BACV01 with row 8)
+        if (
+          candUpper === sIdUpper ||
+          candUpper === sId2 ||
+          candUpper === sId3 ||
+          (candAlpha && candAlpha === sIdAlpha)
+        ) {
+          return true;
+        }
+
+        // 3. Phone number match
+        if (sPhoneClean && candDigits && candDigits.length >= 8 && (candDigits === sPhoneClean || sPhoneClean.endsWith(candDigits))) {
+          return true;
+        }
+
+        // 4. Name match (normalized)
+        if (sNameNorm && (candNorm === sNameNorm || sNameNorm.includes(candNorm) || candNorm.includes(sNameNorm))) {
+          return true;
+        }
+      }
+
+      // 5. Manual entry of row number ONLY if user typed a short number (1-3 digits) directly
+      if (/^\d{1,3}$/.test(cleanRaw) && gid === targetGroupId && sRowStr === cleanRaw) {
+        return true;
+      }
+
+      return false;
+    };
 
     let foundStudent: StudentRecord | null = null;
     let homeGid = '';
 
-    // 1. Search in active group first
-    if (activeGroup?.students) {
-      const matchInActive = activeGroup.students.find((s) => {
-        if (isSummaryRow(s, activeGroupId)) return false;
-        const sBarcode = s.barcode?.toLowerCase() || '';
-        const sId = `${activeGroupId}-${s.rowId}`.toLowerCase();
-        const sPhone = s.phone?.trim() || '';
-        const sRow = String(s.rowId);
-
-        return (
-          sBarcode === clean ||
-          sId === clean ||
-          sPhone === clean ||
-          sRow === clean ||
-          s.name.toLowerCase() === clean
-        );
-      });
-
+    // 1. Search in target/active group first
+    const targetGroup = data.groupData[targetGroupId] || activeGroup;
+    if (targetGroup?.students) {
+      const matchInActive = targetGroup.students.find((s) => doesStudentMatch(s, targetGroupId));
       if (matchInActive) {
         foundStudent = matchInActive;
-        homeGid = activeGroupId;
+        homeGid = targetGroupId;
       }
     }
 
-    // 2. Search across all other groups if not found in active
+    // 2. Search across all other groups if not found in target
     if (!foundStudent) {
       for (const [gid, sheet] of Object.entries(data.groupData)) {
+        if (gid === targetGroupId) continue;
         for (const s of sheet.students || []) {
-          if (isSummaryRow(s, gid)) continue;
-          const sBarcode = s.barcode?.toLowerCase() || '';
-          const sId = `${gid}-${s.rowId}`.toLowerCase();
-          const sPhone = s.phone?.trim() || '';
-          const sRow = String(s.rowId);
-
-          if (
-            sBarcode === clean ||
-            sId === clean ||
-            sPhone === clean ||
-            sRow === clean ||
-            s.name.toLowerCase() === clean
-          ) {
+          if (doesStudentMatch(s, gid)) {
             foundStudent = s;
             homeGid = gid;
             break;
@@ -220,13 +422,16 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
 
     if (!foundStudent) return null;
 
-    // Collect all groups this student is enrolled in
-    const studentCleanName = foundStudent.name.trim().toLowerCase();
+    // Collect all groups this student is enrolled in (linked by unique barcode and name)
+    const studentCleanName = normalizeArabicName(foundStudent.name);
     const enrolledGroups: string[] = [];
     for (const [gid, sheet] of Object.entries(data.groupData)) {
       if (
         sheet.students.some(
-          (s) => !isSummaryRow(s, gid) && s.name.trim().toLowerCase() === studentCleanName
+          (s) =>
+            !isSummaryRow(s, gid) &&
+            ((foundStudent?.barcode && s.barcode && s.barcode === foundStudent.barcode) ||
+              normalizeArabicName(s.name) === studentCleanName)
         )
       ) {
         enrolledGroups.push(gid);
@@ -236,73 +441,229 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
     return {
       student: foundStudent,
       homeGroupId: homeGid,
-      isInActiveGroup: enrolledGroups.includes(activeGroupId),
+      isInActiveGroup: enrolledGroups.includes(targetGroupId),
       studentEnrolledGroups: enrolledGroups
     };
   };
 
   // Process a scanned card / barcode
-  const handleBarcodeSubmit = (e?: React.FormEvent) => {
+  const handleBarcodeSubmit = (e?: React.FormEvent, directCode?: string) => {
     if (e) e.preventDefault();
-    const rawCode = barcodeInput.trim();
+    if (scanTimeoutRef.current) {
+      clearTimeout(scanTimeoutRef.current);
+      scanTimeoutRef.current = null;
+    }
+
+    const rawCode = (directCode !== undefined ? directCode : barcodeInput).trim();
     if (!rawCode) return;
 
-    // Smart Session Auto-Detection at the moment of scan
-    let effectiveGroupId = activeGroupId;
-    let effectiveSessionIdx = activeSessionIdx;
+    // Use current active groups list
+    let currentActiveGroups = activeGroups;
 
+    // Smart Session Auto-Detection at the moment of scan
     if (autoDetectSchedule) {
       const liveDetect = detectCurrentActiveGroupAndSession(data.groupData, data.groups, new Date());
-      if (liveDetect.activeGroup) {
-        effectiveGroupId = liveDetect.activeGroup.groupId;
-        effectiveSessionIdx = liveDetect.activeSessionIndex;
-        setActiveGroupId(effectiveGroupId);
-        setActiveSessionIdx(effectiveSessionIdx);
+      if (liveDetect.matchingGroups.length > 0) {
+        currentActiveGroups = liveDetect.matchingGroups.map((m) => ({
+          groupId: m.group.groupId,
+          sessionIndex: m.sessionIndex
+        }));
+        setActiveGroups(currentActiveGroups);
       }
     }
 
-    const result = findStudentByCode(rawCode);
+    const primaryGid = currentActiveGroups[0]?.groupId || activeGroupId;
+    const result = findStudentByCode(rawCode, primaryGid);
 
     if (!result) {
       playWarningAlert();
-      alert(`لم يتم العثور على أي تلميذ مسجل بالرمز: "${rawCode}"`);
+      alert(`لم يتم العثور على أي تلميذ مسجل بالرمز أو الاسم: "${rawCode}"\n\nنصيحة: تأكد من تمرير بطاقة الباركود بشكل سليم أو كتابة رقم التلميذ مباشرة.`);
       setBarcodeInput('');
       return;
     }
 
-    setScannedResult(result);
+    // 1. Identify which of the currently active groups this student belongs to
+    const matchingActive = currentActiveGroups.filter((ag) =>
+      result.studentEnrolledGroups.includes(ag.groupId)
+    );
 
-    // 1. Check if student belongs to the currently active group
-    const isEnrolledInActive = result.studentEnrolledGroups.includes(effectiveGroupId);
-
-    if (!isEnrolledInActive) {
-      // Step 2: Session Validation & Covering Logic: Not in active group!
-      setShowCoverDialog(true);
+    if (matchingActive.length === 0) {
+      // Step 2: Session Validation & Covering Logic: Not in ANY active group!
+      setScannedResult(result);
+      setCoverTargetActiveGroupId(currentActiveGroups[0]?.groupId || primaryGid);
       setSelectedOriginalGroup(result.studentEnrolledGroups[0] || result.homeGroupId);
+      setShowCoverDialog(true);
       return;
     }
 
-    // In active group -> proceed directly to payment check
-    proceedToPaymentCheck(result.student, effectiveGroupId, false);
+    if (matchingActive.length === 1) {
+      // Exactly 1 match among active groups -> INSTANT AUTOMATIC ROUTE!
+      const targetAg = matchingActive[0];
+      const targetGroup = data.groupData[targetAg.groupId];
+      const targetStudent = targetGroup?.students?.find(
+        (s) =>
+          !isSummaryRow(s, targetAg.groupId) &&
+          ((result.student.barcode && s.barcode && s.barcode.toUpperCase() === result.student.barcode.toUpperCase()) ||
+            normalizeArabicName(s.name) === normalizeArabicName(result.student.name))
+      ) || result.student;
+
+      const resolvedResult = {
+        ...result,
+        student: targetStudent,
+        homeGroupId: targetAg.groupId,
+        isInActiveGroup: true
+      };
+      setScannedResult(resolvedResult);
+      proceedToPaymentCheck(targetStudent, targetAg.groupId, targetAg.sessionIndex, false);
+      return;
+    }
+
+    // matchingActive.length > 1:
+    // Student enrolled in 2+ groups that are running concurrently at this exact moment!
+    // Check if the student has already been marked 'P' in one of them:
+    const unattendedMatches = matchingActive.filter((ag) => {
+      const g = data.groupData[ag.groupId];
+      const s = g?.students?.find(
+        (st) =>
+          !isSummaryRow(st, ag.groupId) &&
+          ((result.student.barcode && st.barcode && st.barcode.toUpperCase() === result.student.barcode.toUpperCase()) ||
+            normalizeArabicName(st.name) === normalizeArabicName(result.student.name))
+      );
+      return s?.attendance?.[ag.sessionIndex] !== 'P';
+    });
+
+    if (unattendedMatches.length === 1) {
+      // Student already attended the first group, automatically record for the remaining one!
+      const targetAg = unattendedMatches[0];
+      const targetGroup = data.groupData[targetAg.groupId];
+      const targetStudent = targetGroup?.students?.find(
+        (s) =>
+          !isSummaryRow(s, targetAg.groupId) &&
+          ((result.student.barcode && s.barcode && s.barcode.toUpperCase() === result.student.barcode.toUpperCase()) ||
+            normalizeArabicName(s.name) === normalizeArabicName(result.student.name))
+      ) || result.student;
+
+      const resolvedResult = {
+        ...result,
+        student: targetStudent,
+        homeGroupId: targetAg.groupId,
+        isInActiveGroup: true
+      };
+      setScannedResult(resolvedResult);
+      proceedToPaymentCheck(targetStudent, targetAg.groupId, targetAg.sessionIndex, false);
+    } else {
+      // Prompt admin with a quick 1-click modal to choose which group the student is attending
+      setMultiActiveCandidate({
+        student: result.student,
+        matchingActiveGroups: matchingActive,
+        result
+      });
+    }
   };
 
   // Step 3: Payment Verification
-  const proceedToPaymentCheck = (student: StudentRecord, groupId: string, isCover: boolean, originalGid?: string) => {
-    const isPaid = (student.debt || 0) <= 0 || (Number(student.payments?.[activeSessionIdx]) || 0) > 0;
+  const proceedToPaymentCheck = (
+    student: StudentRecord,
+    groupId: string,
+    sessionIdx: number = activeSessionIdx,
+    isCover: boolean = false,
+    originalGid?: string
+  ) => {
+    // Record current scan execution context
+    setCurrentScanContext({
+      groupId,
+      sessionIdx,
+      isCover,
+      originalGid,
+      student
+    });
+
+    const isAlreadyPresent = student.attendance?.[sessionIdx] === 'P';
+
+    // Pricing & financial expectations for this group
+    const targetGroup = data.groupData[groupId] || activeGroup;
+    const targetMeta = data.groups.find((g) => g.id === groupId);
+    const isVipGroup =
+      groupId.toUpperCase().startsWith('BACV') ||
+      groupId.toUpperCase().includes('VIP') ||
+      Boolean(targetGroup?.isVip) ||
+      Boolean(targetMeta?.isVip) ||
+      Boolean(targetGroup?.type?.includes('10000')) ||
+      Boolean(targetMeta?.type?.includes('10000'));
+
+    const targetType = targetGroup?.type || targetMeta?.type || (isVipGroup ? '4-10000' : '4-2500');
+    const tier = data.pricingTiers?.find((t) => t.id === targetType);
+
+    let basePrice = 2500;
+    if (typeof targetGroup?.studentFee === 'number' && targetGroup.studentFee > 0) {
+      basePrice = targetGroup.studentFee;
+    } else if (typeof targetMeta?.studentFee === 'number' && targetMeta.studentFee > 0) {
+      basePrice = targetMeta.studentFee;
+    } else if (tier && typeof tier.price === 'number' && tier.price > 0) {
+      basePrice = tier.price;
+    } else if (isVipGroup) {
+      basePrice = 10000;
+    } else {
+      basePrice = 2500;
+    }
+
+    const cycleSessions = targetGroup?.sessionDates?.length || targetGroup?.sessionCount || tier?.sessions || 4;
+
+    const expectedCycleFee = student.discount === '0'
+      ? 0
+      : (student.discount === '0.8' ? Math.round(basePrice * 0.8) : basePrice);
+    const perSessionPrice = Math.round(expectedCycleFee / cycleSessions);
+
+    // Total payments recorded so far for this student in this group
+    const totalPaid = (student.payments || []).reduce<number>((sum, p) => {
+      const val = typeof p === 'number' ? p : parseFloat(String(p));
+      return sum + (isNaN(val) ? 0 : val);
+    }, 0) || student.totalReceived || 0;
+
+    // Remaining debt or required payment:
+    const effectiveDebt = Math.max(0, expectedCycleFee - totalPaid);
+
+    let isPaid = false;
+    if (student.discount === '0') {
+      // 100% discount / scholarship / exempt
+      isPaid = true;
+    } else if (student.debt > 0) {
+      // Unpaid debt
+      isPaid = false;
+    } else if (totalPaid <= 0 && expectedCycleFee > 0) {
+      // In a new group where student hasn't paid anything: UNPAID!
+      isPaid = false;
+    } else if (totalPaid >= expectedCycleFee && expectedCycleFee > 0) {
+      // Paid full cycle fee
+      isPaid = true;
+    } else if (student.fee > 0 && student.debt <= 0 && totalPaid > 0) {
+      // Fees covered
+      isPaid = true;
+    } else if (Number(student.payments?.[sessionIdx]) > 0) {
+      // Paid for this specific session
+      isPaid = true;
+    } else if (totalPaid >= (sessionIdx + 1) * perSessionPrice && perSessionPrice > 0) {
+      // Sufficient payments to cover up to this session
+      isPaid = true;
+    } else {
+      isPaid = false;
+    }
 
     if (isPaid) {
       // Paid -> Mark Present, Chime, Reset screen
       playSuccessChime();
       if (isCover && originalGid) {
-        recordCoverAttendance(groupId, originalGid, student.rowId, activeSessionIdx);
+        recordCoverAttendance(groupId, originalGid, student.rowId, sessionIdx);
       } else {
-        updateAttendance(groupId, student.rowId, activeSessionIdx, 'P');
+        updateAttendance(groupId, student.rowId, sessionIdx, 'P');
       }
 
       setFlashSuccess({
         name: student.name,
-        statusText: isCover ? 'حاضر (حصة تعويض) ✓' : 'حاضر (مسدد بالكامل) ✓',
-        details: `فوج ${groupId} • الحصة ${activeSessionIdx + 1}`
+        statusText: isAlreadyPresent
+          ? 'التلميذ مسجل حاضر بالفعل ✓'
+          : (isCover ? 'حاضر (حصة تعويض) ✓' : 'حاضر (مسدد بالكامل) ✓'),
+        details: `فوج ${groupId} • الحصة ${sessionIdx + 1}`
       });
 
       setTimeout(() => {
@@ -312,29 +673,36 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
     } else {
       // Not Paid -> Audio alert, Popup appears!
       playWarningAlert();
+      setUnpaidInfo({
+        effectiveDebt,
+        expectedCycleFee,
+        perSessionPrice,
+        totalPaid,
+        isNewUnpaid: totalPaid === 0
+      });
       setShowUnpaidDialog(true);
-      const tierPrice = activeGroup?.type === '4-10000' ? 2500 : 625;
-      const expectedAmount = student.debt > 0 ? Math.min(student.debt, tierPrice) : tierPrice;
-      setPayAmount(String(expectedAmount));
+      setPayAmount(String(effectiveDebt > 0 ? effectiveDebt : perSessionPrice));
     }
   };
 
   // Payment Processing: User chose "No, student will not pay now"
   const handleUnpaidNoPayment = (allowEntryAsDebtor: boolean) => {
-    if (!scannedResult) return;
+    if (!scannedResult || !currentScanContext) return;
+    const { groupId, sessionIdx, isCover, originalGid, student } = currentScanContext;
 
     if (allowEntryAsDebtor) {
       // Mark as present with debt
-      if (showCoverDialog && selectedOriginalGroup) {
-        recordCoverAttendance(activeGroupId, selectedOriginalGroup, scannedResult.student.rowId, activeSessionIdx);
+      if (isCover && originalGid) {
+        recordCoverAttendance(groupId, originalGid, student.rowId, sessionIdx);
       } else {
-        updateAttendance(activeGroupId, scannedResult.student.rowId, activeSessionIdx, 'P');
+        updateAttendance(groupId, student.rowId, sessionIdx, 'P');
       }
 
+      const debtToShow = unpaidInfo?.effectiveDebt || student.debt || 0;
       setFlashSuccess({
-        name: scannedResult.student.name,
+        name: student.name,
         statusText: 'تم تسجيل الدخول (مدين) ⚠️',
-        details: `المتبقي في الذمة: ${scannedResult.student.debt?.toLocaleString() || 0} دج`
+        details: `فوج ${groupId} • المتبقي في الذمة: ${debtToShow.toLocaleString()} دج`
       });
 
       setTimeout(() => {
@@ -349,31 +717,28 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
 
   // Payment Processing: "Save and Print" or "Next and Print Later"
   const handleProcessPayment = (printImmediately: boolean) => {
-    if (!scannedResult) return;
+    if (!scannedResult || !currentScanContext) return;
+    const { groupId, sessionIdx, isCover, originalGid, student } = currentScanContext;
 
     const amountNum = Number(payAmount) || 0;
-    const student = scannedResult.student;
-    const isCover = !scannedResult.isInActiveGroup;
+    const targetGroup = data.groupData[groupId];
 
-    // 1. Save payment & mark attendance
-    if (isCover && selectedOriginalGroup) {
-      recordCoverAttendance(activeGroupId, selectedOriginalGroup, student.rowId, activeSessionIdx, amountNum);
+    // 1. Save payment & mark attendance atomically
+    if (isCover && originalGid) {
+      recordCoverAttendance(groupId, originalGid, student.rowId, sessionIdx, amountNum);
     } else {
-      updateAttendance(activeGroupId, student.rowId, activeSessionIdx, isCover ? 'M' : 'P');
-      if (amountNum > 0) {
-        updatePayment(activeGroupId, student.rowId, activeSessionIdx, amountNum);
-      }
+      recordAttendanceAndPayment(groupId, student.rowId, sessionIdx, isCover ? 'M' : 'P', amountNum);
     }
 
     playSuccessChime();
 
     // Receipt preparation
-    const receiptNo = `${activeGroupId}-${student.rowId.toString().padStart(3, '0')}`;
+    const receiptNo = `${groupId}-${student.rowId.toString().padStart(3, '0')}`;
     const now = new Date();
     const dateStr = now.toLocaleDateString('ar-DZ');
     const timeStr = now.toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' });
 
-    const totalFee = student.fee || 2500;
+    const totalFee = unpaidInfo?.expectedCycleFee || student.fee || (targetGroup?.type?.includes('10000') ? 10000 : 2500);
     const totalPaid = (student.totalReceived || 0) + amountNum;
     const balance = totalPaid - totalFee;
 
@@ -386,15 +751,15 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
       time: timeStr,
       studentName: student.name,
       studentPhone: student.phone,
-      groupId: activeGroupId,
-      subject: activeGroup?.subject || '',
-      teacherName: activeGroup?.teacherName || '',
+      groupId: groupId,
+      subject: targetGroup?.subject || '',
+      teacherName: targetGroup?.teacherName || '',
       amount: amountNum,
       totalFee,
       totalPaid,
       balance,
       isCover,
-      originalGroup: selectedOriginalGroup
+      originalGroup: originalGid
     };
 
     if (printImmediately) {
@@ -405,9 +770,9 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
       addToPrintQueue({
         id: `queue-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
         receiptNo,
-        groupId: activeGroupId,
-        subject: activeGroup?.subject || '',
-        teacherName: activeGroup?.teacherName || '',
+        groupId: groupId,
+        subject: targetGroup?.subject || '',
+        teacherName: targetGroup?.teacherName || '',
         studentRowId: student.rowId,
         studentName: student.name,
         studentPhone: student.phone,
@@ -417,16 +782,16 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
         balance,
         date: dateStr,
         time: timeStr,
-        sessionIndex: activeSessionIdx,
+        sessionIndex: sessionIdx,
         isCover,
-        originalGroup: selectedOriginalGroup
+        originalGroup: originalGid
       });
     }
 
     setFlashSuccess({
       name: student.name,
       statusText: printImmediately ? 'تم الدفع وطباعة الوصل فوراً ✓' : 'تم الدفع وتأجيل الطباعة للطابور ✓',
-      details: `تم استلام: ${amountNum.toLocaleString()} دج`
+      details: `فوج ${groupId} • تم استلام: ${amountNum.toLocaleString()} دج`
     });
 
     setTimeout(() => {
@@ -437,30 +802,70 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
 
   // Automated Absence Tracking: End Session
   const handleConfirmEndSession = () => {
-    const stats = endSessionAndMarkAbsent(activeGroupId, activeSessionIdx);
-    setEndSessionStats(stats);
+    if (endSessionTarget === 'ALL') {
+      let totalPresent = 0;
+      let totalMakeup = 0;
+      let totalAbsent = 0;
+      activeGroups.forEach((ag) => {
+        const stats = endSessionAndMarkAbsent(ag.groupId, ag.sessionIndex);
+        totalPresent += stats.presentCount;
+        totalMakeup += stats.makeupCount;
+        totalAbsent += stats.absentCount;
+      });
+      setEndSessionStats({
+        presentCount: totalPresent,
+        makeupCount: totalMakeup,
+        absentCount: totalAbsent,
+        groupLabel: `جميع الأفواج النشطة (${activeGroups.map((g) => g.groupId).join(' ، ')})`
+      });
+    } else if (endSessionTarget) {
+      const stats = endSessionAndMarkAbsent(endSessionTarget.groupId, endSessionTarget.sessionIndex);
+      setEndSessionStats({
+        ...stats,
+        groupLabel: `فوج ${endSessionTarget.groupId} (الحصة ${endSessionTarget.sessionIndex + 1})`
+      });
+    }
     setShowEndSessionConfirm(false);
   };
 
-  // Real-time live counts in active session
-  const sessionStats = useMemo(() => {
-    if (!activeGroup?.students) return { present: 0, makeup: 0, absent: 0, unmarked: 0, total: 0 };
+  // Helper to compute attendance stats for a specific group & session
+  const getGroupStats = (gid: string, sIdx: number) => {
+    const groupSheet = data.groupData[gid];
+    if (!groupSheet?.students) return { present: 0, makeup: 0, absent: 0, unmarked: 0, total: 0 };
     let present = 0;
     let makeup = 0;
     let absent = 0;
     let unmarked = 0;
-
-    const real = activeGroup.students.filter((s) => !isSummaryRow(s, activeGroupId));
+    const real = groupSheet.students.filter((s) => !isSummaryRow(s, gid));
     real.forEach((s) => {
-      const st = s.attendance?.[activeSessionIdx] || '';
+      const st = s.attendance?.[sIdx] || '';
       if (st === 'P') present++;
       else if (st === 'M') makeup++;
       else if (st === 'A') absent++;
       else unmarked++;
     });
-
     return { present, makeup, absent, unmarked, total: real.length };
-  }, [activeGroup, activeGroupId, activeSessionIdx]);
+  };
+
+  // Real-time aggregate live counts across all active groups
+  const sessionStats = useMemo(() => {
+    let present = 0;
+    let makeup = 0;
+    let absent = 0;
+    let unmarked = 0;
+    let total = 0;
+
+    activeGroups.forEach((ag) => {
+      const st = getGroupStats(ag.groupId, ag.sessionIndex);
+      present += st.present;
+      makeup += st.makeup;
+      absent += st.absent;
+      unmarked += st.unmarked;
+      total += st.total;
+    });
+
+    return { present, makeup, absent, unmarked, total };
+  }, [activeGroups, data.groupData]);
 
   return (
     <div className="m3-dialog-backdrop" onClick={onClose} style={{ zIndex: 110 }}>
@@ -468,52 +873,97 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
         className="m3-dialog"
         onClick={(e) => e.stopPropagation()}
         style={{
-          maxWidth: '750px',
-          width: '100%',
-          padding: '24px',
+          maxWidth: '720px',
+          maxHeight: '88vh',
+          width: '95%',
+          padding: '10px 14px',
           backgroundColor: 'var(--md-sys-color-surface)',
-          borderRadius: 'var(--md-shape-xl)',
+          borderRadius: 'var(--md-shape-lg)',
           boxShadow: 'var(--md-elevation-4)',
-          position: 'relative'
+          position: 'relative',
+          overflowY: 'auto'
         }}
       >
-        {/* Modal Header */}
+        {/* Modal Top Actions */}
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            borderBottom: '1px solid var(--md-sys-color-outline-variant)',
-            paddingBottom: '14px',
-            marginBottom: '18px'
+            gap: '8px',
+            marginBottom: '8px'
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--md-sys-color-on-surface)' }}>
+              الأفواج النشطة ({activeGroups.length}):
+            </span>
+            <span
               style={{
-                width: '42px',
-                height: '42px',
-                borderRadius: '50%',
+                fontSize: '0.66rem',
                 backgroundColor: 'var(--md-sys-color-primary-container)',
                 color: 'var(--md-sys-color-on-primary-container)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center'
+                padding: '2px 6px',
+                borderRadius: '6px',
+                fontWeight: 700
               }}
             >
-              <Scan size={22} />
-            </div>
-            <div>
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--md-sys-color-on-surface)' }}>
-                محطة مسح البطاقات وقارئ الباركود (حضور ودفع سريع)
-              </h2>
-              <p style={{ fontSize: '0.78rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
-                التعرف الفوري على التلميذ، معالجة حصص التعويض، والتسديد وطباعة الإيصال
-              </p>
-            </div>
+              مسح متزامن ⚡
+            </span>
+
+            <button
+              type="button"
+              onClick={() => handleAddActiveGroup()}
+              className="m3-btn m3-btn-sm"
+              style={{
+                backgroundColor: '#059669',
+                color: '#fff',
+                border: 'none',
+                fontWeight: 800,
+                fontSize: '0.72rem',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '3px',
+                padding: '3px 8px',
+                borderRadius: '5px',
+                height: '24px'
+              }}
+              title="إضافة فوج آخر نشط في نفس الوقت"
+            >
+              <Plus size={12} />
+              <span>إضافة فوج نشط</span>
+            </button>
+
+            {activeGroups.length > 1 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setEndSessionTarget('ALL');
+                  setShowEndSessionConfirm(true);
+                }}
+                className="m3-btn m3-btn-sm"
+                style={{
+                  backgroundColor: '#fee2e2',
+                  color: '#b91c1c',
+                  border: '1px solid #fca5a5',
+                  fontWeight: 700,
+                  fontSize: '0.72rem',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '3px',
+                  padding: '3px 7px',
+                  borderRadius: '5px',
+                  height: '24px'
+                }}
+                title="إنهاء وتسجيل الغياب لجميع الأفواج النشطة دفعة واحدة"
+              >
+                <UserX size={11} />
+                <span>إنهاء الكل ({activeGroups.length})</span>
+              </button>
+            )}
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
             {/* Print Queue Button */}
             <button
               onClick={() => setShowQueueModal(true)}
@@ -521,265 +971,354 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '6px',
+                gap: '4px',
+                fontSize: '0.72rem',
+                padding: '2px 7px',
+                height: '26px',
                 borderColor: printQueue.length > 0 ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-outline-variant)',
                 backgroundColor: printQueue.length > 0 ? 'var(--md-sys-color-primary-container)' : 'transparent',
                 color: printQueue.length > 0 ? 'var(--md-sys-color-on-primary-container)' : 'var(--md-sys-color-on-surface)'
               }}
               title="عرض وطباعة الوصلات المؤجلة في قائمة الانتظار"
             >
-              <Printer size={15} />
+              <Printer size={13} />
               <span>طابور الطباعة ({printQueue.length})</span>
             </button>
 
             <button
               onClick={onClose}
               className="m3-btn-text"
-              style={{ borderRadius: '50%', width: '36px', height: '36px', padding: 0 }}
+              style={{ borderRadius: '50%', width: '26px', height: '26px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >
-              <X size={20} />
+              <X size={16} />
             </button>
           </div>
         </div>
 
-        {/* Smart Auto-Detection Status Banner */}
+        {/* Toolbar: Multi-Active Groups Cards Container */}
         <div
           style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '10px 16px',
-            backgroundColor: currentDetection.activeGroup
-              ? 'rgba(16, 185, 129, 0.12)'
-              : 'rgba(245, 158, 11, 0.12)',
-            border: currentDetection.activeGroup ? '1px solid #10b981' : '1px solid #f59e0b',
-            borderRadius: '12px',
-            marginBottom: '14px',
-            flexWrap: 'wrap',
-            gap: '10px'
+            backgroundColor: 'var(--md-sys-color-surface-container)',
+            padding: '6px 8px',
+            borderRadius: 'var(--md-shape-md)',
+            marginBottom: '8px',
+            border: '1px solid var(--md-sys-color-outline-variant)'
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '1.2rem' }}>
-              {currentDetection.activeGroup ? '🟢' : '🟡'}
-            </span>
-            <div>
-              <div
-                style={{
-                  fontSize: '0.85rem',
-                  fontWeight: 800,
-                  color: currentDetection.activeGroup ? '#065f46' : '#92400e'
-                }}
-              >
-                {autoDetectSchedule ? 'الكشف التلقائي الذكي مفعّل:' : 'الكشف التلقائي معطل (يدوي):'}{' '}
-                {currentDetection.activeGroup ? (
-                  <span>
-                    فوج {currentDetection.activeGroup.groupId} ({currentDetection.activeGroup.subject}) • الحصة{' '}
-                    {currentDetection.activeSessionIndex + 1}
-                  </span>
-                ) : (
-                  <span>لا يوجد فوج نشط مجدول في هذا التوقيت حالياً</span>
-                )}
-              </div>
-              <div style={{ fontSize: '0.74rem', color: '#475569', marginTop: '1px' }}>
-                {currentDetection.activeGroup ? (
-                  <>
-                    التوقيت المجدول: <strong>{currentDetection.timeWindowStr}</strong> • الحالة:{' '}
-                    <span style={{ color: '#059669', fontWeight: 700 }}>
-                      {currentDetection.statusLabel}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    أفواج اليوم المجدولة:{' '}
-                    {currentDetection.allTodayGroups.length > 0
-                      ? currentDetection.allTodayGroups
-                          .map((g) => `${g.group.groupId} (${g.timeStr})`)
-                          .join(' ، ')
-                      : 'لا توجد أفواج مجدولة لليوم'}
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <label
+          {/* Active Group Cards Grid */}
+          <div
             style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              fontSize: '0.78rem',
-              fontWeight: 700,
-              cursor: 'pointer',
-              color: 'var(--md-sys-color-primary)',
-              backgroundColor: 'var(--md-sys-color-surface)',
-              padding: '4px 10px',
-              borderRadius: 'var(--md-shape-full)',
-              border: '1px solid var(--md-sys-color-outline-variant)'
+              display: 'grid',
+              gridTemplateColumns: activeGroups.length > 1 ? 'repeat(auto-fit, minmax(240px, 1fr))' : '1fr',
+              gap: '6px'
             }}
           >
-            <input
-              type="checkbox"
-              checked={autoDetectSchedule}
-              onChange={(e) => {
-                setAutoDetectSchedule(e.target.checked);
-                if (e.target.checked && currentDetection.activeGroup) {
-                  setActiveGroupId(currentDetection.activeGroup.groupId);
-                  setActiveSessionIdx(currentDetection.activeSessionIndex);
-                }
-              }}
-              style={{ cursor: 'pointer' }}
-            />
-            <span>تحديد الفوج تلقائياً حسب الوقت ⚡</span>
-          </label>
+            {activeGroups.map((ag, idx) => {
+              const gSheet = data.groupData[ag.groupId];
+              const gStats = getGroupStats(ag.groupId, ag.sessionIndex);
+              return (
+                <div
+                  key={`${ag.groupId}-${idx}`}
+                  style={{
+                    backgroundColor: 'var(--md-sys-color-surface)',
+                    borderRadius: '8px',
+                    border: '1px solid var(--md-sys-color-outline-variant)',
+                    padding: '8px 10px',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    gap: '6px',
+                    position: 'relative'
+                  }}
+                >
+                  {/* Card Header */}
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '6px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+                      <span
+                        style={{
+                          width: '20px',
+                          height: '20px',
+                          borderRadius: '50%',
+                          backgroundColor: 'var(--md-sys-color-primary)',
+                          color: '#fff',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '0.7rem',
+                          fontWeight: 900,
+                          flexShrink: 0
+                        }}
+                      >
+                        {idx + 1}
+                      </span>
+                      <div style={{ minWidth: 0 }}>
+                        <div
+                          style={{
+                            fontWeight: 800,
+                            fontSize: '0.82rem',
+                            color: 'var(--md-sys-color-on-surface)',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis'
+                          }}
+                        >
+                          فوج {ag.groupId} ({gSheet?.subject || ''})
+                        </div>
+                        <div
+                          style={{
+                            fontSize: '0.68rem',
+                            color: 'var(--md-sys-color-on-surface-variant)',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis'
+                          }}
+                        >
+                          الأستاذ: {gSheet?.teacherName || '—'}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                      {activeGroups.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveActiveGroup(idx)}
+                          className="m3-btn-text"
+                          style={{
+                            color: '#dc2626',
+                            borderRadius: '50%',
+                            width: '22px',
+                            height: '22px',
+                            padding: 0,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}
+                          title="إزالة هذا الفوج من المحطة"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Card Selectors */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '6px' }}>
+                    <div>
+                      <span style={{ fontSize: '0.66rem', fontWeight: 700, color: 'var(--md-sys-color-on-surface-variant)', display: 'block', marginBottom: '1px' }}>
+                        الفوج:
+                      </span>
+                      <select
+                        value={ag.groupId}
+                        onChange={(e) => handleUpdateActiveGroup(idx, e.target.value)}
+                        className="m3-input"
+                        style={{ padding: '3px 6px', fontSize: '0.78rem', fontWeight: 700, width: '100%', height: '28px' }}
+                      >
+                        {data.groups.map((g) => (
+                          <option key={g.id} value={g.id}>
+                            فوج {g.id} ({g.subject})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <span style={{ fontSize: '0.66rem', fontWeight: 700, color: 'var(--md-sys-color-on-surface-variant)', display: 'block', marginBottom: '1px' }}>
+                        الحصة المستهدفة:
+                      </span>
+                      <select
+                        value={ag.sessionIndex}
+                        onChange={(e) => handleUpdateActiveSession(idx, Number(e.target.value))}
+                        className="m3-input"
+                        style={{ padding: '3px 6px', fontSize: '0.78rem', fontWeight: 700, width: '100%', height: '28px' }}
+                      >
+                        {Array.from({ length: gSheet?.sessionCount || 4 }).map((_, sIdx) => (
+                          <option key={sIdx} value={sIdx}>
+                            الحصة {sIdx + 1}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Card Footer: Live Badges + End Session Button */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      borderTop: '1px dashed var(--md-sys-color-outline-variant)',
+                      paddingTop: '5px',
+                      marginTop: '1px',
+                      gap: '4px',
+                      flexWrap: 'nowrap'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'nowrap' }}>
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          padding: '1px 5px',
+                          borderRadius: '5px',
+                          backgroundColor: '#f0fdf4',
+                          border: '1px solid #bbf7d0',
+                          fontSize: '0.68rem',
+                          fontWeight: 800,
+                          color: '#166534',
+                          whiteSpace: 'nowrap'
+                        }}
+                      >
+                        حاضر: {gStats.present}/{gStats.total}
+                      </span>
+
+                      {gStats.unmarked > 0 && (
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            padding: '1px 5px',
+                            borderRadius: '5px',
+                            backgroundColor: '#f8fafc',
+                            border: '1px solid #cbd5e1',
+                            fontSize: '0.66rem',
+                            fontWeight: 700,
+                            color: '#475569',
+                            whiteSpace: 'nowrap'
+                          }}
+                        >
+                          لم يمسح: {gStats.unmarked}
+                        </span>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEndSessionTarget({ groupId: ag.groupId, sessionIndex: ag.sessionIndex });
+                        setShowEndSessionConfirm(true);
+                      }}
+                      className="m3-btn m3-btn-sm"
+                      style={{
+                        backgroundColor: '#fee2e2',
+                        color: '#b91c1c',
+                        border: '1px solid #fca5a5',
+                        fontWeight: 800,
+                        fontSize: '0.68rem',
+                        padding: '2px 6px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '3px',
+                        whiteSpace: 'nowrap',
+                        flexShrink: 0,
+                        borderRadius: '5px',
+                        height: '24px'
+                      }}
+                      title={`إنهاء حصة فوج ${ag.groupId} وتسجيل الغياب`}
+                    >
+                      <UserX size={11} />
+                      <span style={{ whiteSpace: 'nowrap' }}>إنهاء الحصة (A)</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
 
-        {/* Toolbar: Active Group & Active Session Selectors */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            flexWrap: 'wrap',
-            gap: '12px',
-            backgroundColor: 'var(--md-sys-color-surface-container)',
-            padding: '12px 16px',
-            borderRadius: 'var(--md-shape-lg)',
-            marginBottom: '18px'
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-            <div>
-              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--md-sys-color-on-surface-variant)', display: 'block', marginBottom: '4px' }}>
-                الفوج النشط حالياً:
-              </span>
-              <select
-                value={activeGroupId}
-                onChange={(e) => {
-                  setActiveGroupId(e.target.value);
-                  resetForNextStudent();
-                }}
-                className="m3-input"
-                style={{ padding: '6px 12px', fontSize: '0.85rem', fontWeight: 700, minWidth: '180px' }}
-              >
-                {data.groups.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    فوج {g.id} ({g.subject})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--md-sys-color-on-surface-variant)', display: 'block', marginBottom: '4px' }}>
-                الحصة المستهدفة:
-              </span>
-              <select
-                value={activeSessionIdx}
-                onChange={(e) => setActiveSessionIdx(Number(e.target.value))}
-                className="m3-input"
-                style={{ padding: '6px 12px', fontSize: '0.85rem', fontWeight: 700, width: '130px' }}
-              >
-                {Array.from({ length: activeGroup?.sessionCount || 4 }).map((_, idx) => (
-                  <option key={idx} value={idx}>
-                    الحصة {idx + 1}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* End Session Button */}
-          <div>
-            <button
-              onClick={() => setShowEndSessionConfirm(true)}
-              className="m3-btn m3-btn-sm"
-              style={{
-                backgroundColor: '#fee2e2',
-                color: '#b91c1c',
-                border: '1px solid #fca5a5',
-                fontWeight: 700,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '8px 14px'
-              }}
-              title="إنهاء الحصة وتسجيل جميع من لم يحضروا كغائب (A) تلقائياً"
-            >
-              <UserX size={15} />
-              <span>إنهاء الحصة وتسجيل الغياب التلقائي</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Live Session Counter Banner */}
+        {/* Live Session Counter Banner (Slim Single-Line) */}
         <div
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(4, 1fr)',
-            gap: '8px',
-            marginBottom: '18px',
+            gap: '6px',
+            marginBottom: '8px',
             textAlign: 'center'
           }}
         >
-          <div style={{ backgroundColor: '#dcfce7', color: '#15803d', padding: '8px', borderRadius: 'var(--md-shape-md)' }}>
-            <div style={{ fontSize: '0.72rem', fontWeight: 700 }}>حاضر (P)</div>
-            <div style={{ fontSize: '1.2rem', fontWeight: 900 }}>{sessionStats.present}</div>
+          <div style={{ backgroundColor: '#dcfce7', color: '#15803d', padding: '3px 6px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+            <span style={{ fontSize: '0.7rem', fontWeight: 700 }}>حاضر (P):</span>
+            <span style={{ fontSize: '0.92rem', fontWeight: 900 }}>{sessionStats.present}</span>
           </div>
-          <div style={{ backgroundColor: '#fef3c7', color: '#b45309', padding: '8px', borderRadius: 'var(--md-shape-md)' }}>
-            <div style={{ fontSize: '0.72rem', fontWeight: 700 }}>تعويض (M)</div>
-            <div style={{ fontSize: '1.2rem', fontWeight: 900 }}>{sessionStats.makeup}</div>
+          <div style={{ backgroundColor: '#fef3c7', color: '#b45309', padding: '3px 6px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+            <span style={{ fontSize: '0.7rem', fontWeight: 700 }}>تعويض (M):</span>
+            <span style={{ fontSize: '0.92rem', fontWeight: 900 }}>{sessionStats.makeup}</span>
           </div>
-          <div style={{ backgroundColor: '#fee2e2', color: '#b91c1c', padding: '8px', borderRadius: 'var(--md-shape-md)' }}>
-            <div style={{ fontSize: '0.72rem', fontWeight: 700 }}>غائب (A)</div>
-            <div style={{ fontSize: '1.2rem', fontWeight: 900 }}>{sessionStats.absent}</div>
+          <div style={{ backgroundColor: '#fee2e2', color: '#b91c1c', padding: '3px 6px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+            <span style={{ fontSize: '0.7rem', fontWeight: 700 }}>غائب (A):</span>
+            <span style={{ fontSize: '0.92rem', fontWeight: 900 }}>{sessionStats.absent}</span>
           </div>
-          <div style={{ backgroundColor: 'var(--md-sys-color-surface-container)', color: 'var(--md-sys-color-on-surface)', padding: '8px', borderRadius: 'var(--md-shape-md)' }}>
-            <div style={{ fontSize: '0.72rem', fontWeight: 700 }}>لم يمسح بعد</div>
-            <div style={{ fontSize: '1.2rem', fontWeight: 900 }}>{sessionStats.unmarked}</div>
+          <div style={{ backgroundColor: 'var(--md-sys-color-surface-container)', color: 'var(--md-sys-color-on-surface)', padding: '3px 6px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+            <span style={{ fontSize: '0.7rem', fontWeight: 700 }}>لم يمسح:</span>
+            <span style={{ fontSize: '0.92rem', fontWeight: 900 }}>{sessionStats.unmarked}</span>
           </div>
         </div>
 
-        {/* Barcode Scanner Box Area */}
-        <form onSubmit={handleBarcodeSubmit} style={{ marginBottom: '18px' }}>
+        {/* Barcode Scanner Box Area (Ultra-Compact & Sleek) */}
+        <form onSubmit={handleBarcodeSubmit} style={{ marginBottom: '6px' }}>
           <div
             style={{
-              border: '2px dashed var(--md-sys-color-primary)',
-              borderRadius: 'var(--md-shape-lg)',
-              padding: '24px',
+              border: '1.5px dashed var(--md-sys-color-primary)',
+              borderRadius: 'var(--md-shape-md)',
+              padding: '8px 12px',
               textAlign: 'center',
               backgroundColor: 'var(--md-sys-color-primary-container)',
               position: 'relative'
             }}
           >
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-              <Scan size={36} color="var(--md-sys-color-primary)" className="animate-pulse" />
-              <div style={{ fontWeight: 800, fontSize: '1.1rem', color: 'var(--md-sys-color-on-primary-container)' }}>
-                وجّه قارئ الباركود نحو بطاقة التلميذ
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Scan size={18} color="var(--md-sys-color-primary)" className="animate-pulse" />
+                <span style={{ fontWeight: 800, fontSize: '0.84rem', color: 'var(--md-sys-color-on-primary-container)' }}>
+                  وجّه قارئ الباركود نحو بطاقة التلميذ
+                </span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', backgroundColor: 'rgba(21, 128, 61, 0.12)', color: '#15803d', padding: '1px 6px', borderRadius: '8px', fontSize: '0.66rem', fontWeight: 700 }}>
+                  <span style={{ width: '5px', height: '5px', borderRadius: '50%', backgroundColor: '#22c55e', display: 'inline-block' }} className="animate-pulse" />
+                  <span>جاهز للمسح</span>
+                </span>
               </div>
-              <p style={{ fontSize: '0.8rem', color: 'var(--md-sys-color-on-primary-container)', opacity: 0.85 }}>
-                القارئ يتصرف كلوحة مفاتيح ويرسل الرمز متبوعاً بـ Enter تلقائياً
-              </p>
 
-              <div style={{ display: 'flex', gap: '8px', width: '100%', maxWidth: '420px', marginTop: '10px' }}>
+              <div style={{ display: 'flex', gap: '6px', width: '100%', maxWidth: '340px', marginTop: '2px' }}>
                 <input
                   ref={scannerInputRef}
                   type="text"
                   value={barcodeInput}
-                  onChange={(e) => setBarcodeInput(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setBarcodeInput(val);
+                    if (scanTimeoutRef.current) clearTimeout(scanTimeoutRef.current);
+                    if (val.trim().length >= 1) {
+                      scanTimeoutRef.current = setTimeout(() => {
+                        handleBarcodeSubmit(undefined, val);
+                      }, 350);
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (scanTimeoutRef.current) {
+                        clearTimeout(scanTimeoutRef.current);
+                        scanTimeoutRef.current = null;
+                      }
+                      handleBarcodeSubmit();
+                    }
+                  }}
                   placeholder="امسح البطاقة أو اكتب الرمز هنا..."
                   className="m3-input"
                   style={{
                     textAlign: 'center',
-                    fontSize: '1rem',
+                    fontSize: '0.84rem',
                     fontWeight: 700,
+                    padding: '4px 8px',
+                    height: '32px',
                     backgroundColor: '#fff',
                     borderColor: 'var(--md-sys-color-primary)',
-                    boxShadow: '0 2px 6px rgba(0,0,0,0.06)'
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
                   }}
                   autoFocus
                 />
-                <button type="submit" className="m3-btn m3-btn-primary" style={{ fontWeight: 700, minWidth: '85px' }}>
+                <button type="submit" className="m3-btn m3-btn-primary" style={{ fontWeight: 700, padding: '4px 12px', fontSize: '0.8rem', height: '32px' }}>
                   تأكيد
                 </button>
               </div>
@@ -792,24 +1331,28 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
           <div
             style={{
               backgroundColor: '#dcfce7',
-              border: '2px solid #86efac',
-              borderRadius: 'var(--md-shape-lg)',
-              padding: '16px',
+              border: '1.5px solid #86efac',
+              borderRadius: 'var(--md-shape-md)',
+              padding: '8px 12px',
               textAlign: 'center',
               animation: 'fadeIn 0.2s ease',
-              marginBottom: '16px'
+              marginBottom: '6px'
             }}
           >
-            <CheckCircle2 size={36} color="#15803d" style={{ margin: '0 auto 6px' }} />
-            <div style={{ fontWeight: 900, fontSize: '1.25rem', color: '#15803d' }}>
-              {flashSuccess.name}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+              <CheckCircle2 size={20} color="#15803d" />
+              <span style={{ fontWeight: 900, fontSize: '1rem', color: '#15803d' }}>
+                {flashSuccess.name}
+              </span>
+              <span style={{ fontWeight: 700, fontSize: '0.85rem', color: '#166534' }}>
+                — {flashSuccess.statusText}
+              </span>
             </div>
-            <div style={{ fontWeight: 700, fontSize: '1rem', color: '#166534', marginTop: '2px' }}>
-              {flashSuccess.statusText}
-            </div>
-            <div style={{ fontSize: '0.82rem', color: '#14532d', marginTop: '2px' }}>
-              {flashSuccess.details}
-            </div>
+            {flashSuccess.details && (
+              <div style={{ fontSize: '0.76rem', color: '#14532d', marginTop: '2px' }}>
+                {flashSuccess.details}
+              </div>
+            )}
           </div>
         )}
 
@@ -818,68 +1361,93 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
           <div
             style={{
               backgroundColor: '#fffbeb',
-              border: '2px solid #fde68a',
-              borderRadius: 'var(--md-shape-lg)',
-              padding: '18px',
-              marginBottom: '16px'
+              border: '1.5px solid #fde68a',
+              borderRadius: 'var(--md-shape-md)',
+              padding: '8px 12px',
+              marginBottom: '6px'
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#b45309', marginBottom: '8px' }}>
-              <AlertTriangle size={24} />
-              <h3 style={{ fontSize: '1.05rem', fontWeight: 800 }}>
-                تنبيه: التلميذ ليس مسجلاً في هذا الفوج ({activeGroupId})
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#b45309', marginBottom: '6px' }}>
+              <AlertTriangle size={18} />
+              <h3 style={{ fontSize: '0.88rem', fontWeight: 800 }}>
+                تنبيه: التلميذ ليس مسجلاً في أي من الأفواج النشطة حالياً
               </h3>
             </div>
 
-            <p style={{ fontSize: '0.9rem', color: '#92400e', marginBottom: '12px' }}>
-              التلميذ <strong>&quot;{scannedResult.student.name}&quot;</strong> مسجل في فوج ({scannedResult.studentEnrolledGroups?.join(' ، ') || scannedResult.homeGroupId}).
-              <br />
-              <strong>هل التلميذ في حصة تعويض لفوج {activeGroupId} ({activeGroup?.subject})؟</strong>
+            <p style={{ fontSize: '0.78rem', color: '#92400e', marginBottom: '8px', lineHeight: 1.4 }}>
+              التلميذ <strong>&quot;{scannedResult.student.name}&quot;</strong> مسجل في أفواج ({scannedResult.studentEnrolledGroups?.join(' ، ') || scannedResult.homeGroupId}).
+              {' '}<strong>هل التلميذ في حصة تعويض؟</strong>
             </p>
 
-            <div style={{ marginBottom: '14px' }}>
-              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: '#92400e', marginBottom: '4px' }}>
-                حدد الفوج الأصلي الذي تغيب فيه التلميذ:
-              </label>
-              <select
-                value={selectedOriginalGroup}
-                onChange={(e) => setSelectedOriginalGroup(e.target.value)}
-                className="m3-input"
-                style={{ width: '100%', maxWidth: '340px', fontWeight: 700 }}
-              >
-                {scannedResult.studentEnrolledGroups && scannedResult.studentEnrolledGroups.length > 0 && (
-                  <optgroup label="أفواج التلميذ المسجل بها">
-                    {scannedResult.studentEnrolledGroups.map((gid) => {
-                      const gMeta = data.groups.find((g) => g.id === gid);
-                      return (
-                        <option key={gid} value={gid}>
-                          فوج {gid} ★ ({gMeta?.subject || data.groupData[gid]?.subject || ''})
-                        </option>
-                      );
-                    })}
-                  </optgroup>
-                )}
-                <optgroup label="باقي أفواج المركز">
-                  {data.groups
-                    .filter((g) => !scannedResult.studentEnrolledGroups?.includes(g.id))
-                    .map((g) => (
-                      <option key={g.id} value={g.id}>
-                        فوج {g.id} ({g.subject})
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
+              <div style={{ flex: 1, minWidth: '180px' }}>
+                <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 700, color: '#92400e', marginBottom: '2px' }}>
+                  الفوج النشط المراد حضوره (تعويض):
+                </label>
+                <select
+                  value={coverTargetActiveGroupId || activeGroups[0]?.groupId}
+                  onChange={(e) => setCoverTargetActiveGroupId(e.target.value)}
+                  className="m3-input"
+                  style={{ width: '100%', fontWeight: 700, padding: '3px 6px', fontSize: '0.76rem', height: '28px' }}
+                >
+                  {activeGroups.map((ag) => {
+                    const gSheet = data.groupData[ag.groupId];
+                    return (
+                      <option key={ag.groupId} value={ag.groupId}>
+                        فوج {ag.groupId} ({gSheet?.subject || ''}) • الحصة {ag.sessionIndex + 1}
                       </option>
-                    ))}
-                </optgroup>
-              </select>
+                    );
+                  })}
+                </select>
+              </div>
+
+              <div style={{ flex: 1, minWidth: '180px' }}>
+                <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 700, color: '#92400e', marginBottom: '2px' }}>
+                  الفوج الأصلي الذي تغيب فيه:
+                </label>
+                <select
+                  value={selectedOriginalGroup}
+                  onChange={(e) => setSelectedOriginalGroup(e.target.value)}
+                  className="m3-input"
+                  style={{ width: '100%', fontWeight: 700, padding: '3px 6px', fontSize: '0.76rem', height: '28px' }}
+                >
+                  {scannedResult.studentEnrolledGroups && scannedResult.studentEnrolledGroups.length > 0 && (
+                    <optgroup label="أفواج التلميذ المسجل بها">
+                      {scannedResult.studentEnrolledGroups.map((gid) => {
+                        const gMeta = data.groups.find((g) => g.id === gid);
+                        return (
+                          <option key={gid} value={gid}>
+                            فوج {gid} ★ ({gMeta?.subject || data.groupData[gid]?.subject || ''})
+                          </option>
+                        );
+                      })}
+                    </optgroup>
+                  )}
+                  <optgroup label="باقي أفواج المركز">
+                    {data.groups
+                      .filter((g) => !scannedResult.studentEnrolledGroups?.includes(g.id))
+                      .map((g) => (
+                        <option key={g.id} value={g.id}>
+                          فوج {g.id} ({g.subject})
+                        </option>
+                      ))}
+                  </optgroup>
+                </select>
+              </div>
             </div>
 
-            <div style={{ display: 'flex', gap: '10px' }}>
+            <div style={{ display: 'flex', gap: '8px' }}>
               <button
                 type="button"
                 onClick={() => {
+                  const targetGid = coverTargetActiveGroupId || activeGroups[0]?.groupId || activeGroupId;
+                  const targetAg = activeGroups.find((g) => g.groupId === targetGid);
+                  const targetSessionIdx = targetAg ? targetAg.sessionIndex : activeSessionIdx;
                   setShowCoverDialog(false);
-                  proceedToPaymentCheck(scannedResult.student, activeGroupId, true, selectedOriginalGroup);
+                  proceedToPaymentCheck(scannedResult.student, targetGid, targetSessionIdx, true, selectedOriginalGroup);
                 }}
                 className="m3-btn m3-btn-primary"
-                style={{ backgroundColor: '#d97706', borderColor: '#d97706', fontWeight: 700 }}
+                style={{ backgroundColor: '#d97706', borderColor: '#d97706', fontWeight: 700, fontSize: '0.74rem', height: '28px', padding: '3px 10px' }}
               >
                 نعم (تسجيل كحصة تعويض)
               </button>
@@ -887,7 +1455,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
                 type="button"
                 onClick={resetForNextStudent}
                 className="m3-btn m3-btn-outlined"
-                style={{ borderColor: '#d97706', color: '#b45309' }}
+                style={{ borderColor: '#d97706', color: '#b45309', fontSize: '0.74rem', height: '28px', padding: '3px 8px' }}
               >
                 لا (إلغاء العملية)
               </button>
@@ -895,41 +1463,125 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
           </div>
         )}
 
-        {/* DIALOG 2: UNPAID / PAYMENT VERIFICATION POPUP */}
+        {/* DIALOG 2: UNPAID / PAYMENT VERIFICATION POPUP (Ultra-Compact) */}
         {showUnpaidDialog && scannedResult && (
           <div
             style={{
               backgroundColor: '#fef2f2',
-              border: '2px solid #fecaca',
-              borderRadius: 'var(--md-shape-lg)',
-              padding: '18px',
-              marginBottom: '16px'
+              border: '1.5px solid #f87171',
+              borderRadius: 'var(--md-shape-md)',
+              padding: '8px 12px',
+              marginBottom: '6px',
+              boxShadow: '0 2px 8px rgba(239, 68, 68, 0.1)'
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#b91c1c', marginBottom: '8px' }}>
-              <Volume2 size={24} className="animate-pulse" />
-              <h3 style={{ fontSize: '1.1rem', fontWeight: 800 }}>
-                تنبيه صوتي: التلميذ غير مسدد (عليه مستحقات مالية)
-              </h3>
+            {/* Alert Header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', marginBottom: '6px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#b91c1c' }}>
+                <Volume2 size={18} className="animate-pulse" />
+                <span style={{ fontSize: '0.84rem', fontWeight: 900 }}>
+                  تنبيه: التلميذ غير مسدد (عليه مستحقات مالية)
+                </span>
+              </div>
+
+              <span
+                style={{
+                  backgroundColor: '#fee2e2',
+                  border: '1px solid #fca5a5',
+                  color: '#b91c1c',
+                  padding: '2px 8px',
+                  borderRadius: '5px',
+                  fontWeight: 900,
+                  fontSize: '0.84rem',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                المطلوب للتسديد: {(unpaidInfo?.effectiveDebt || scannedResult.student.debt || 0).toLocaleString()} دج
+              </span>
             </div>
 
-            <div style={{ fontSize: '0.9rem', color: '#991b1b', marginBottom: '14px' }}>
-              التلميذ: <strong>{scannedResult.student.name}</strong>
-              <br />
-              المبلغ المتبقي في الذمة: <strong style={{ fontSize: '1.1rem' }}>{scannedResult.student.debt?.toLocaleString() || 'غير مسدد'} دج</strong>
+            {/* Compact Student & Group Info Card */}
+            <div
+              style={{
+                fontSize: '0.78rem',
+                color: '#991b1b',
+                marginBottom: '8px',
+                lineHeight: 1.5,
+                backgroundColor: '#fff',
+                padding: '6px 10px',
+                borderRadius: '6px',
+                border: '1px solid #fecaca'
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                <div>
+                  التلميذ: <strong style={{ fontSize: '0.88rem', color: '#7f1d1d' }}>{scannedResult.student.name}</strong>
+                </div>
+                <div>
+                  الفوج:{' '}
+                  <strong>
+                    {currentScanContext?.groupId || activeGroupId} (
+                    {data.groupData[currentScanContext?.groupId || activeGroupId]?.subject || ''} -{' '}
+                    {data.groupData[currentScanContext?.groupId || activeGroupId]?.teacherName || ''})
+                  </strong>{' '}
+                  • الحصة {(currentScanContext?.sessionIdx ?? activeSessionIdx) + 1}
+                </div>
+              </div>
+
+              <div style={{ marginTop: '3px' }}>
+                {unpaidInfo?.isNewUnpaid ? (
+                  <span
+                    style={{
+                      display: 'inline-block',
+                      backgroundColor: '#fee2e2',
+                      color: '#991b1b',
+                      padding: '1px 8px',
+                      borderRadius: '4px',
+                      fontWeight: 700,
+                      fontSize: '0.72rem',
+                      border: '1px solid #fca5a5'
+                    }}
+                  >
+                    ⚠️ تلميذ مسجل في هذا الفوج ولم يسدد أي مبلغ بعد (فوج جديد)
+                  </span>
+                ) : (
+                  <span
+                    style={{
+                      display: 'inline-block',
+                      backgroundColor: '#fff7ed',
+                      color: '#c2410c',
+                      padding: '1px 8px',
+                      borderRadius: '4px',
+                      fontWeight: 700,
+                      fontSize: '0.72rem',
+                      border: '1px solid #fdba74'
+                    }}
+                  >
+                    تم تسديد: {(unpaidInfo?.totalPaid || 0).toLocaleString()} دج من أصل {(unpaidInfo?.expectedCycleFee || 0).toLocaleString()} دج (متبقي كدين)
+                  </span>
+                )}
+              </div>
             </div>
 
             {willPayNow === null ? (
-              <div>
-                <div style={{ fontWeight: 800, fontSize: '0.95rem', color: '#7f1d1d', marginBottom: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+                <span style={{ fontWeight: 800, fontSize: '0.8rem', color: '#7f1d1d' }}>
                   هل يريد التلميذ الدفع الآن؟
-                </div>
-                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                </span>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                   <button
                     type="button"
                     onClick={() => setWillPayNow(true)}
                     className="m3-btn m3-btn-primary"
-                    style={{ backgroundColor: '#15803d', borderColor: '#15803d', fontWeight: 700 }}
+                    style={{
+                      backgroundColor: '#15803d',
+                      borderColor: '#15803d',
+                      fontWeight: 800,
+                      padding: '3px 12px',
+                      height: '28px',
+                      fontSize: '0.76rem',
+                      borderRadius: '5px'
+                    }}
                   >
                     نعم (يريد الدفع الآن)
                   </button>
@@ -937,14 +1589,24 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
                     type="button"
                     onClick={() => handleUnpaidNoPayment(true)}
                     className="m3-btn m3-btn-outlined"
-                    style={{ borderColor: '#b91c1c', color: '#b91c1c', fontWeight: 700 }}
+                    style={{
+                      borderColor: '#b91c1c',
+                      color: '#b91c1c',
+                      backgroundColor: '#fff',
+                      fontWeight: 800,
+                      padding: '3px 10px',
+                      height: '28px',
+                      fontSize: '0.76rem',
+                      borderRadius: '5px'
+                    }}
                   >
-                    لا (تسجيل الدخول كمدين)
+                    لا (تسجيل الدخول كمدين ⚠️)
                   </button>
                   <button
                     type="button"
                     onClick={() => handleUnpaidNoPayment(false)}
                     className="m3-btn m3-btn-text"
+                    style={{ fontWeight: 700, fontSize: '0.74rem', height: '28px', padding: '3px 8px' }}
                   >
                     إلغاء وتخطي
                   </button>
@@ -952,22 +1614,54 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
               </div>
             ) : (
               <div>
-                <div style={{ marginBottom: '12px' }}>
-                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#991b1b', marginBottom: '4px' }}>
-                    المبلغ المستلم الآن (دج):
-                  </label>
-                  <input
-                    type="number"
-                    value={payAmount}
-                    onChange={(e) => setPayAmount(e.target.value)}
-                    className="m3-input"
-                    style={{ width: '100%', maxWidth: '240px', fontWeight: 800, fontSize: '1.1rem' }}
-                    autoFocus
-                  />
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap', marginBottom: '6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                    <label style={{ fontSize: '0.76rem', fontWeight: 700, color: '#991b1b' }}>
+                      المبلغ المستلم (دج):
+                    </label>
+
+                    <input
+                      type="number"
+                      value={payAmount}
+                      onChange={(e) => setPayAmount(e.target.value)}
+                      className="m3-input"
+                      style={{
+                        width: '120px',
+                        height: '28px',
+                        fontWeight: 900,
+                        fontSize: '0.92rem',
+                        padding: '2px 6px',
+                        color: '#15803d'
+                      }}
+                      autoFocus
+                    />
+
+                    {/* Quick selection pills */}
+                    {unpaidInfo && unpaidInfo.effectiveDebt > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setPayAmount(String(unpaidInfo.effectiveDebt))}
+                        className="m3-btn m3-btn-outlined"
+                        style={{ fontSize: '0.7rem', padding: '2px 7px', height: '24px', borderColor: '#b91c1c', color: '#991b1b', fontWeight: 800, borderRadius: '4px' }}
+                      >
+                        كامل المبلغ ({unpaidInfo.effectiveDebt.toLocaleString()} دج)
+                      </button>
+                    )}
+                    {unpaidInfo && unpaidInfo.perSessionPrice > 0 && unpaidInfo.perSessionPrice !== unpaidInfo.effectiveDebt && (
+                      <button
+                        type="button"
+                        onClick={() => setPayAmount(String(unpaidInfo.perSessionPrice))}
+                        className="m3-btn m3-btn-outlined"
+                        style={{ fontSize: '0.7rem', padding: '2px 7px', height: '24px', borderColor: '#b91c1c', color: '#991b1b', fontWeight: 800, borderRadius: '4px' }}
+                      >
+                        حصة واحدة ({unpaidInfo.perSessionPrice.toLocaleString()} دج)
+                      </button>
+                    )}
+                  </div>
                 </div>
 
-                {/* THE 2 MANDATORY BUTTONS: Save & Print, Next & Print Later */}
-                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                {/* Compact Action buttons */}
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                   <button
                     type="button"
                     onClick={() => handleProcessPayment(true)}
@@ -976,13 +1670,17 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
                       backgroundColor: '#00639b',
                       borderColor: '#00639b',
                       fontWeight: 800,
-                      display: 'flex',
+                      fontSize: '0.74rem',
+                      height: '28px',
+                      padding: '3px 10px',
+                      display: 'inline-flex',
                       alignItems: 'center',
-                      gap: '6px'
+                      gap: '4px',
+                      borderRadius: '5px'
                     }}
                     title="حفظ الدفعة، تسجيل الحضور وطباعة الوصل الحراري فوراً"
                   >
-                    <Printer size={16} />
+                    <Printer size={13} />
                     <span>حفظ وطباعة الوصل فوراً</span>
                   </button>
 
@@ -994,13 +1692,17 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
                       backgroundColor: '#0284c7',
                       color: '#fff',
                       fontWeight: 800,
-                      display: 'flex',
+                      fontSize: '0.74rem',
+                      height: '28px',
+                      padding: '3px 10px',
+                      display: 'inline-flex',
                       alignItems: 'center',
-                      gap: '6px'
+                      gap: '4px',
+                      borderRadius: '5px'
                     }}
                     title="حفظ الدفعة، تسجيل الحضور وإضافة الوصل إلى طابور الطباعة لطباعته لاحقاً"
                   >
-                    <ArrowRight size={16} />
+                    <ArrowRight size={13} />
                     <span>التالي وطباعة لاحقاً</span>
                   </button>
 
@@ -1008,6 +1710,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
                     type="button"
                     onClick={() => setWillPayNow(null)}
                     className="m3-btn m3-btn-text"
+                    style={{ fontWeight: 700, fontSize: '0.74rem', height: '28px', padding: '3px 8px' }}
                   >
                     رجوع
                   </button>
@@ -1050,10 +1753,23 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
               </div>
 
               <p style={{ fontSize: '0.9rem', color: '#444', lineHeight: 1.6, marginBottom: '16px' }}>
-                أنت على وشك إنهاء <strong>الحصة {activeSessionIdx + 1}</strong> لفوج <strong>{activeGroupId}</strong>.
-                <br />
-                سيقوم النظام بالبحث عن جميع التلاميذ المسجلين بهذا الفوج الذين لم يمسحوا بطاقاتهم، وتسجيلهم كـ{' '}
-                <strong style={{ color: '#b91c1c' }}>غائب (A)</strong> تلقائياً وإعادة حساب المستحقات والديون.
+                {endSessionTarget === 'ALL' ? (
+                  <>
+                    أنت على وشك إنهاء الحصص لجميع الأفواج النشطة حالياً:{' '}
+                    <strong>({activeGroups.map((g) => g.groupId).join(' ، ')})</strong>.
+                    <br />
+                    سيقوم النظام بتسجيل جميع التلاميذ الذين لم يحضروا في هذه الأفواج كـ{' '}
+                    <strong style={{ color: '#b91c1c' }}>غائب (A)</strong> تلقائياً.
+                  </>
+                ) : (
+                  <>
+                    أنت على وشك إنهاء <strong>الحصة {(endSessionTarget?.sessionIndex ?? activeSessionIdx) + 1}</strong> لفوج{' '}
+                    <strong>{endSessionTarget?.groupId || activeGroupId}</strong>.
+                    <br />
+                    سيقوم النظام بالبحث عن جميع التلاميذ المسجلين بهذا الفوج الذين لم يمسحوا بطاقاتهم، وتسجيلهم كـ{' '}
+                    <strong style={{ color: '#b91c1c' }}>غائب (A)</strong> تلقائياً وإعادة حساب المستحقات والديون.
+                  </>
+                )}
               </p>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
@@ -1070,7 +1786,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
                   className="m3-btn m3-btn-primary"
                   style={{ backgroundColor: '#b91c1c', borderColor: '#b91c1c', fontWeight: 700 }}
                 >
-                  نعم، أنهِ الحصة وسجل الغياب الآن
+                  نعم، أنهِ وسجل الغياب الآن
                 </button>
               </div>
             </div>
@@ -1091,7 +1807,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
           >
             <CheckCircle2 size={32} color="#059669" style={{ margin: '0 auto 6px' }} />
             <h4 style={{ fontWeight: 800, fontSize: '1.1rem', color: '#065f46' }}>
-              تم إنهاء الحصة بنجاح وحساب الغياب التلقائي!
+              تم إنهاء {endSessionStats.groupLabel ? `حصة ${endSessionStats.groupLabel}` : 'الحصة'} بنجاح وحساب الغياب التلقائي!
             </h4>
             <div style={{ fontSize: '0.85rem', color: '#047857', marginTop: '4px' }}>
               تم تسجيل: <strong>{endSessionStats.presentCount} حاضر</strong> •{' '}
@@ -1105,6 +1821,134 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
             >
               إغلاق
             </button>
+          </div>
+        )}
+
+        {/* MODAL: MULTIPLE ACTIVE GROUPS CANDIDATE RESOLUTION */}
+        {multiActiveCandidate && (
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              backgroundColor: 'rgba(0,0,0,0.6)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 170
+            }}
+            onClick={() => setMultiActiveCandidate(null)}
+          >
+            <div
+              style={{
+                backgroundColor: '#fff',
+                padding: '24px',
+                borderRadius: 'var(--md-shape-xl)',
+                maxWidth: '520px',
+                width: '90%',
+                boxShadow: 'var(--md-elevation-4)',
+                textAlign: 'center'
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div
+                style={{
+                  width: '50px',
+                  height: '50px',
+                  borderRadius: '50%',
+                  backgroundColor: 'var(--md-sys-color-primary-container)',
+                  color: 'var(--md-sys-color-on-primary-container)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  margin: '0 auto 12px'
+                }}
+              >
+                <Layers size={26} />
+              </div>
+
+              <h3 style={{ fontSize: '1.2rem', fontWeight: 900, marginBottom: '6px', color: 'var(--md-sys-color-on-surface)' }}>
+                تحديد الفوج المطلوب للتلميذ
+              </h3>
+
+              <p style={{ fontSize: '0.88rem', color: 'var(--md-sys-color-on-surface-variant)', marginBottom: '16px' }}>
+                التلميذ <strong style={{ color: 'var(--md-sys-color-primary)', fontSize: '1rem' }}>{multiActiveCandidate.student.name}</strong> مسجل في أكثر من فوج نشط في نفس الوقت.
+                <br />
+                يرجى الضغط على الفوج الذي يحضره التلميذ الآن:
+              </p>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '18px' }}>
+                {multiActiveCandidate.matchingActiveGroups.map((ag) => {
+                  const gSheet = data.groupData[ag.groupId];
+                  return (
+                    <button
+                      key={ag.groupId}
+                      type="button"
+                      onClick={() => {
+                        const targetStudent = gSheet?.students?.find(
+                          (s) =>
+                            !isSummaryRow(s, ag.groupId) &&
+                            ((multiActiveCandidate.result.student.barcode && s.barcode && s.barcode.toUpperCase() === multiActiveCandidate.result.student.barcode.toUpperCase()) ||
+                              normalizeArabicName(s.name) === normalizeArabicName(multiActiveCandidate.result.student.name))
+                        ) || multiActiveCandidate.result.student;
+
+                        const resolved = {
+                          ...multiActiveCandidate.result,
+                          student: targetStudent,
+                          homeGroupId: ag.groupId,
+                          isInActiveGroup: true
+                        };
+                        setScannedResult(resolved);
+                        setMultiActiveCandidate(null);
+                        proceedToPaymentCheck(targetStudent, ag.groupId, ag.sessionIndex, false);
+                      }}
+                      className="m3-btn"
+                      style={{
+                        backgroundColor: 'var(--md-sys-color-surface-container-high)',
+                        color: 'var(--md-sys-color-on-surface)',
+                        border: '2px solid var(--md-sys-color-primary)',
+                        borderRadius: '12px',
+                        padding: '12px 16px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        fontWeight: 800,
+                        fontSize: '0.95rem',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ color: 'var(--md-sys-color-primary)', fontWeight: 900 }}>
+                          فوج {ag.groupId} ({gSheet?.subject || ''})
+                        </div>
+                        <div style={{ fontSize: '0.78rem', color: 'var(--md-sys-color-on-surface-variant)', fontWeight: 600 }}>
+                          الأستاذ: {gSheet?.teacherName || '—'} • الحصة {ag.sessionIndex + 1}
+                        </div>
+                      </div>
+                      <span
+                        style={{
+                          backgroundColor: 'var(--md-sys-color-primary)',
+                          color: '#fff',
+                          padding: '4px 12px',
+                          borderRadius: '20px',
+                          fontSize: '0.78rem'
+                        }}
+                      >
+                        حضور هذا الفوج ✓
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setMultiActiveCandidate(null)}
+                className="m3-btn m3-btn-text"
+                style={{ fontWeight: 700 }}
+              >
+                إلغاء
+              </button>
+            </div>
           </div>
         )}
 
