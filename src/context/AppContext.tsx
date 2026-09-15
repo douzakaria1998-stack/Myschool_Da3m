@@ -2243,12 +2243,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     let totalCenterActiveStudents = 0;
     let totalCenterActiveGroups = 0;
     Object.entries(data.groupData).forEach(([gid, g]) => {
-      const groupMeta = data.groups.find((gm) => gm.id === gid) || {
+      const groupMeta: GroupMeta = data.groups.find((gm) => gm.id === gid) || {
         id: gid,
-        name: gid,
-        subject: g.subject,
-        teacherName: g.teacherName,
-        type: g.type,
+        teacherId: '',
+        teacherName: g.teacherName || '',
+        subject: g.subject || '',
+        day1: g.day1 || '',
+        time1: g.time1 || '',
+        day2: g.day2,
+        time2: g.time2,
+        type: g.type || 'normal',
         isVip: gid.startsWith('BACV') || Boolean(g.isVip),
         sessionCount: g.sessionCount || 4
       };
@@ -2268,16 +2272,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     Object.entries(data.groupData).forEach(([gid, g]) => {
       if (targetGroupId && gid !== targetGroupId) return;
 
-      const isVipGroup = gid.startsWith('BACV') || Boolean(g.isVip) || (g.type && g.type.includes('10000'));
+      const isVipGroup = Boolean(gid.startsWith('BACV') || g.isVip || (g.type && g.type.includes('10000')));
       if (targetGroupType === 'regular' && isVipGroup) return;
       if (targetGroupType === 'vip' && !isVipGroup) return;
 
-      const groupMeta = data.groups.find((gm) => gm.id === gid) || {
+      const groupMeta: GroupMeta = data.groups.find((gm) => gm.id === gid) || {
         id: gid,
-        name: gid,
-        subject: g.subject,
-        teacherName: g.teacherName,
-        type: g.type,
+        teacherId: '',
+        teacherName: g.teacherName || '',
+        subject: g.subject || '',
+        day1: g.day1 || '',
+        time1: g.time1 || '',
+        day2: g.day2,
+        time2: g.time2,
+        type: g.type || 'normal',
         isVip: isVipGroup,
         sessionCount: g.sessionCount || 4
       };
