@@ -929,7 +929,7 @@ export function generateUniqueStudentBarcode(
     }
   });
 
-  const yearPrefix = new Date().getFullYear().toString().slice(-2); // "26"
+  const yearPrefix = '27'; // BAC 2027 academic year prefix (STU-27...)
 
   // Attempt up to 50 times with random digits
   for (let i = 0; i < 50; i++) {

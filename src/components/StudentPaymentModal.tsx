@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { StudentRecord, DiscountType } from '../types';
-import { useApp } from '../context/AppContext';
+import { useApp, calcStudentFinancesPure } from '../context/AppContext';
 import { X, Check, Printer, AlertCircle, Receipt } from 'lucide-react';
 import { formatToYYYYMMDD } from '../utils/sessionUtils';
 
@@ -22,6 +22,20 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
   );
   const [successMsg, setSuccessMsg] = useState('');
 
+  // Live pure recalculation of finances on every keystroke and discount change
+  const livePreview = useMemo(() => {
+    return calcStudentFinancesPure(
+      {
+        ...student,
+        discount,
+        payments: payments.map((p) => (p === '' ? '' : Number(p) || 0))
+      },
+      group?.type || '4-2500',
+      data.pricingTiers,
+      group
+    );
+  }, [student, discount, payments, group, data.pricingTiers]);
+
   const handlePaymentChange = (index: number, val: string) => {
     const next = [...payments];
     next[index] = val;
@@ -29,14 +43,9 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
   };
 
   const handleSave = () => {
-    // Save payments and discount atomically to localStorage
+    // Save payments and discount atomically
     updateStudentFullFinances(groupId, student.rowId, payments, discount);
-
-    setSuccessMsg('تم حفظ وتحديث بيانات التسديد بنجاح');
-    setTimeout(() => {
-      setSuccessMsg('');
-      onClose();
-    }, 800);
+    onClose();
   };
 
   // Printable A4 receipt trigger
@@ -47,8 +56,8 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
     const printWindow = window.open('', '', 'width=600,height=700');
     if (!printWindow) return;
 
-    const totalPaid = payments.reduce<number>((s, p) => s + (Number(p) || 0), 0);
-    const balance = Math.max(0, student.fee - totalPaid);
+    const totalPaid = livePreview.totalReceived;
+    const balance = livePreview.debt;
 
     printWindow.document.write(`
       <!DOCTYPE html>
@@ -91,7 +100,7 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
             <tbody>
               <tr>
                 <td>المبلغ الإجمالي للدورة (${discount === '0' ? 'معفى' : discount === '0.8' ? 'تخفيض 20%' : 'تسعيرة عادية'})</td>
-                <td>${student.fee} دج</td>
+                <td>${livePreview.fee} دج</td>
               </tr>
               <tr>
                 <td>مجموع المبالغ المسددة</td>
@@ -126,8 +135,8 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
     const printWindow = window.open('', '_blank', 'width=400,height=550');
     if (!printWindow) return;
 
-    const totalPaid = payments.reduce<number>((s, p) => s + (Number(p) || 0), 0);
-    const balance = Math.max(0, student.fee - totalPaid);
+    const totalPaid = livePreview.totalReceived;
+    const balance = livePreview.debt;
     const receiptNo = `${group?.groupId || 'REC'}-${(student.rowId || 1).toString().padStart(3, '0')}`;
     const printDate = new Date().toLocaleDateString('ar-DZ');
     const printTime = new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' });
@@ -191,7 +200,7 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
           <div class="divider"></div>
           <div class="flex-row">
             <span>المبلغ الإجمالي (الدورة):</span>
-            <span>${student.fee} دج</span>
+            <span>${livePreview.fee} دج</span>
           </div>
           <div class="flex-row bold" style="font-size: 12px;">
             <span>مجموع المسدد:</span>
@@ -217,8 +226,8 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
     printWindow.document.close();
   };
 
-  const currentTotalPaid = payments.reduce<number>((s, p) => s + (Number(p) || 0), 0);
-  const currentDebt = Math.max(0, student.fee - currentTotalPaid);
+  const currentTotalPaid = livePreview.totalReceived;
+  const currentDebt = livePreview.debt;
 
   return (
     <div className="m3-dialog-backdrop" onClick={onClose}>
@@ -285,7 +294,7 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
           >
             <span style={{ fontSize: '0.8rem', color: 'var(--md-sys-color-on-surface-variant)' }}>المطلوب (المجموع)</span>
             <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--md-sys-color-on-surface)' }}>
-              {student.fee} <span style={{ fontSize: '0.8rem' }}>دج</span>
+              {livePreview.fee.toLocaleString()} <span style={{ fontSize: '0.8rem' }}>دج</span>
             </div>
           </div>
           <div
@@ -297,7 +306,7 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
           >
             <span style={{ fontSize: '0.8rem', color: 'var(--status-present)' }}>مجموع المسدد</span>
             <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--status-present)' }}>
-              {currentTotalPaid} <span style={{ fontSize: '0.8rem' }}>دج</span>
+              {currentTotalPaid.toLocaleString()} <span style={{ fontSize: '0.8rem' }}>دج</span>
             </div>
           </div>
           <div
@@ -317,7 +326,7 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
                 color: currentDebt > 0 ? 'var(--status-absent)' : 'var(--status-present)'
               }}
             >
-              {currentDebt} <span style={{ fontSize: '0.8rem' }}>دج</span>
+              {currentDebt.toLocaleString()} <span style={{ fontSize: '0.8rem' }}>دج</span>
             </div>
           </div>
         </div>

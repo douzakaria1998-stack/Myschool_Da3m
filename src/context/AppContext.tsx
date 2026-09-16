@@ -118,6 +118,7 @@ interface AppContextType {
     attendanceRate: number;
   };
   getCenterStats: (filter?: CenterStatsFilter) => CenterStatsResult;
+  updateCenterSettings: (settings: Partial<{ centerName: string; cycle: string; academicYear: string }>) => void;
 }
 
 const STORAGE_KEY = 'da3m_center_management_data_v1';
@@ -224,19 +225,38 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
   const newGroupData: Record<string, GroupSheet> = {};
   const idMap: Record<string, string> = {};
 
-  // Build global map of student names to unique barcodes
+  // Build global 1-to-1 bijection of student names to unique barcodes
   const existingBarcodeByNameMap = new Map<string, string>();
+  const existingNameByBarcodeMap = new Map<string, string>();
   const existingBarcodeSet = new Set<string>();
 
   for (const sheet of Object.values(centerData.groupData || {})) {
     for (const s of sheet.students || []) {
       if (s.barcode?.trim()) {
-        const b = s.barcode.trim();
-        existingBarcodeSet.add(b.toUpperCase());
+        let b = s.barcode.trim();
+        if (b.startsWith('STU-26')) {
+          b = 'STU-27' + b.slice(6);
+          s.barcode = b;
+          changed = true;
+        }
+        const upperB = b.toUpperCase();
+        existingBarcodeSet.add(upperB);
         if (s.name?.trim()) {
-          const norm = s.name.trim().toLowerCase();
+          const norm = s.name.trim().toLowerCase().replace(/\s+/g, ' ');
           if (!existingBarcodeByNameMap.has(norm)) {
-            existingBarcodeByNameMap.set(norm, b);
+            // Check if this barcode is already claimed by a DIFFERENT student
+            if (!existingNameByBarcodeMap.has(upperB)) {
+              existingBarcodeByNameMap.set(norm, b);
+              existingNameByBarcodeMap.set(upperB, norm);
+            } else if (existingNameByBarcodeMap.get(upperB) !== norm) {
+              // Collision detected! Generate a fresh, guaranteed-unique barcode for this student
+              const newB = generateUniqueStudentBarcode(Array.from(existingBarcodeSet), 'STU');
+              existingBarcodeSet.add(newB.toUpperCase());
+              existingBarcodeByNameMap.set(norm, newB);
+              existingNameByBarcodeMap.set(newB.toUpperCase(), norm);
+              s.barcode = newB;
+              changed = true;
+            }
           }
         }
       }
@@ -334,17 +354,22 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
       if ((s.attendance || []).length !== 4) changed = true;
 
       let barcode = s.barcode?.trim();
-      const normName = s.name?.trim().toLowerCase();
+      if (barcode && barcode.startsWith('STU-26')) {
+        barcode = 'STU-27' + barcode.slice(6);
+        changed = true;
+      }
+      const normName = s.name?.trim().toLowerCase().replace(/\s+/g, ' ');
       if (normName && existingBarcodeByNameMap.has(normName)) {
         const canonicalBarcode = existingBarcodeByNameMap.get(normName)!;
         if (barcode !== canonicalBarcode) {
           barcode = canonicalBarcode;
           changed = true;
         }
-      } else if (!barcode && s.name && !isSummaryRow(s, finalGid)) {
+      } else if (normName && !isSummaryRow(s, finalGid)) {
         barcode = generateUniqueStudentBarcode(Array.from(existingBarcodeSet), 'STU');
         existingBarcodeSet.add(barcode.toUpperCase());
-        if (normName) existingBarcodeByNameMap.set(normName, barcode);
+        existingBarcodeByNameMap.set(normName, barcode);
+        existingNameByBarcodeMap.set(barcode.toUpperCase(), normName);
         changed = true;
       }
 
@@ -499,9 +524,16 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
     }
   }
 
+  let finalAcademicYear = centerData.academicYear || '2026/2027';
+  if (finalAcademicYear !== '2026/2027') {
+    finalAcademicYear = '2026/2027';
+    changed = true;
+  }
+
   return {
     cleaned: {
       ...centerData,
+      academicYear: finalAcademicYear,
       groups: cleanGroups,
       groupData: newGroupData
     },
@@ -1290,37 +1322,32 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     payments: (number | string)[],
     discount?: DiscountType
   ) => {
-    setData((prevData) => {
-      const group = prevData.groupData[groupId];
-      if (!group) return prevData;
+    const currentData = dataRef.current;
+    const group = currentData.groupData[groupId];
+    if (!group) return;
 
-      const updatedStudents = group.students.map((student) => {
-        if (student.rowId !== rowId) return student;
-        const sessionCount = group.sessionDates?.length || group.sessionCount || 8;
-        const newPayments = payments.map((p) => (p === '' ? '' : Number(p) || 0));
-        while (newPayments.length < sessionCount) newPayments.push('');
-        const updated = {
-          ...student,
-          payments: newPayments,
-          ...(discount !== undefined ? { discount } : {})
-        };
-        return calculateStudentFinances(updated, group.type, prevData.pricingTiers, group);
-      });
+    const sessionCount = group.sessionDates?.length || group.sessionCount || 4;
+    const newPayments = payments.map((p) => (p === '' ? '' : Number(p) || 0));
+    while (newPayments.length < sessionCount) newPayments.push('');
 
-      const updatedData: CenterData = {
-        ...prevData,
-        groupData: {
-          ...prevData.groupData,
-          [groupId]: { ...group, students: updatedStudents }
-        }
+    const updatedStudents = group.students.map((student) => {
+      if (student.rowId !== rowId) return student;
+      const updated = {
+        ...student,
+        payments: newPayments,
+        ...(discount !== undefined ? { discount } : {})
       };
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedData));
-      } catch (e) {
-        console.error('Failed to persist student finances:', e);
-      }
-      return updatedData;
+      return calculateStudentFinances(updated, group.type, currentData.pricingTiers, group);
     });
+
+    const updatedData: CenterData = {
+      ...currentData,
+      groupData: {
+        ...currentData.groupData,
+        [groupId]: { ...group, students: updatedStudents }
+      }
+    };
+    persistData(updatedData);
   };
 
   // Batch update payments for multiple students for a specific session/day
@@ -1329,47 +1356,42 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     sessionIndex: number,
     studentPayments: { rowId: number; amount: number | string }[]
   ) => {
-    setData((prevData) => {
-      const group = prevData.groupData[groupId];
-      if (!group) return prevData;
+    const currentData = dataRef.current;
+    const group = currentData.groupData[groupId];
+    if (!group) return;
 
-      const paymentMap = new Map<number, number | string>();
-      studentPayments.forEach((sp) => paymentMap.set(sp.rowId, sp.amount));
+    const paymentMap = new Map<number, number | string>();
+    studentPayments.forEach((sp) => paymentMap.set(sp.rowId, sp.amount));
 
-      const updatedStudents = group.students.map((student) => {
-        if (!paymentMap.has(student.rowId)) return student;
-        const val = paymentMap.get(student.rowId);
-        const sessionCount = group.sessionDates?.length || group.sessionCount || 8;
-        const newPayments = [...(student.payments || [])];
-        while (newPayments.length < sessionCount) newPayments.push('');
-        newPayments[sessionIndex] = val === '' ? '' : Number(val) || 0;
-        return calculateStudentFinances(
-          { ...student, payments: newPayments },
-          group.type,
-          prevData.pricingTiers,
-          group
-        );
-      });
-
-      const updatedData: CenterData = {
-        ...prevData,
-        groupData: {
-          ...prevData.groupData,
-          [groupId]: { ...group, students: updatedStudents }
-        }
-      };
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedData));
-      } catch (e) {
-        console.error('Failed to persist batch payments:', e);
-      }
-      return updatedData;
+    const sessionCount = group.sessionDates?.length || group.sessionCount || 4;
+    const updatedStudents = group.students.map((student) => {
+      if (!paymentMap.has(student.rowId)) return student;
+      const val = paymentMap.get(student.rowId);
+      const newPayments = [...(student.payments || [])];
+      while (newPayments.length < sessionCount) newPayments.push('');
+      newPayments[sessionIndex] = val === '' ? '' : Number(val) || 0;
+      return calculateStudentFinances(
+        { ...student, payments: newPayments },
+        group.type,
+        currentData.pricingTiers,
+        group
+      );
     });
+
+    const updatedData: CenterData = {
+      ...currentData,
+      groupData: {
+        ...currentData.groupData,
+        [groupId]: { ...group, students: updatedStudents }
+      }
+    };
+    persistData(updatedData);
   };
 
   // Update discount
   const updateDiscount = (groupId: string, rowId: number, discount: DiscountType) => {
-    const group = data.groupData[groupId];
+    const currentData = dataRef.current;
+    const group = currentData.groupData[groupId];
     if (!group) return;
 
     const updatedStudents = group.students.map((student) => {
@@ -1377,15 +1399,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return calculateStudentFinances(
         { ...student, discount },
         group.type,
-        data.pricingTiers,
+        currentData.pricingTiers,
         group
       );
     });
 
     const updatedData: CenterData = {
-      ...data,
+      ...currentData,
       groupData: {
-        ...data.groupData,
+        ...currentData.groupData,
         [groupId]: { ...group, students: updatedStudents }
       }
     };
@@ -1397,16 +1419,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     groupId: string,
     studentInfo: { name: string; phone: string; discount?: DiscountType; barcode?: string }
   ): StudentRecord | null => {
-    const group = data.groupData[groupId];
+    const currentData = dataRef.current;
+    const group = currentData.groupData[groupId];
     if (!group) return null;
 
-    const sessionCount = group.sessionDates?.length || group.sessionCount || 8;
+    const sessionCount = group.sessionDates?.length || group.sessionCount || 4;
     const maxRowId = group.students.reduce((max, s) => Math.max(max, s.rowId || 0), 0);
     const rowId = maxRowId + 1;
 
     // Collect all existing barcodes across the center
     const allStudentsList: StudentRecord[] = [];
-    Object.values(data.groupData).forEach((g) => allStudentsList.push(...g.students));
+    Object.values(currentData.groupData).forEach((g) => allStudentsList.push(...g.students));
 
     // If student already has a barcode in another group, reuse it; otherwise generate a new unique one
     const existingSameName = allStudentsList.find(
@@ -1433,12 +1456,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       totalAttendance: 0
     };
 
-    const calculatedStudent = calculateStudentFinances(newStudentRaw, group.type, data.pricingTiers, group);
+    const calculatedStudent = calculateStudentFinances(newStudentRaw, group.type, currentData.pricingTiers, group);
 
     const updatedData: CenterData = {
-      ...data,
+      ...currentData,
       groupData: {
-        ...data.groupData,
+        ...currentData.groupData,
         [groupId]: {
           ...group,
           students: [...group.students, calculatedStudent]
@@ -1454,7 +1477,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     studentInfo: { name: string; phone: string; discount?: DiscountType; barcode?: string },
     enrollments: { groupId: string; paymentAmount: number | string }[]
   ): { groupId: string; rowId: number; fee: number; paid: number; debt: number }[] => {
-    const updatedGroupData = { ...data.groupData };
+    const currentData = dataRef.current;
+    const updatedGroupData = { ...currentData.groupData };
     const results: { groupId: string; rowId: number; fee: number; paid: number; debt: number }[] = [];
 
     // Collect existing barcodes across the center
@@ -1473,7 +1497,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const group = updatedGroupData[groupId];
       if (!group) return;
 
-      const sessionCount = group.sessionDates?.length || group.sessionCount || 8;
+      const sessionCount = group.sessionDates?.length || group.sessionCount || 4;
       const maxRowId = group.students.reduce((max, s) => Math.max(max, s.rowId || 0), 0);
       const rowId = maxRowId + 1;
 
@@ -1499,7 +1523,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         totalAttendance: 0
       };
 
-      const calculatedStudent = calculateStudentFinances(newStudentRaw, group.type, data.pricingTiers, group);
+      const calculatedStudent = calculateStudentFinances(newStudentRaw, group.type, currentData.pricingTiers, group);
 
       updatedGroupData[groupId] = {
         ...group,
@@ -1516,7 +1540,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
 
     const updatedData: CenterData = {
-      ...data,
+      ...currentData,
       groupData: updatedGroupData
     };
     persistData(updatedData);
@@ -1529,7 +1553,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     studentIdentifier: { name: string; barcode?: string; phone?: string; discount?: DiscountType },
     payments: { groupId: string; paymentAmount: number | string }[]
   ): { groupId: string; rowId: number; fee: number; paidNow: number; totalReceived: number; debt: number }[] => {
-    const updatedGroupData = { ...data.groupData };
+    const currentData = dataRef.current;
+    const updatedGroupData = { ...currentData.groupData };
     const results: { groupId: string; rowId: number; fee: number; paidNow: number; totalReceived: number; debt: number }[] = [];
     const cleanName = studentIdentifier.name.trim();
     const cleanNormName = normalizeArabicName(cleanName);
@@ -1582,7 +1607,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const calculated = calculateStudentFinances(
           { ...currentStudent, payments: newPayments },
           group.type,
-          data.pricingTiers,
+          currentData.pricingTiers,
           { ...group, groupId }
         );
 
@@ -1624,7 +1649,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           totalAttendance: 0
         };
 
-        const calculated = calculateStudentFinances(newStudentRaw, group.type, data.pricingTiers, { ...group, groupId });
+        const calculated = calculateStudentFinances(newStudentRaw, group.type, currentData.pricingTiers, { ...group, groupId });
 
         updatedGroupData[groupId] = {
           ...group,
@@ -1643,7 +1668,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
 
     const updatedData: CenterData = {
-      ...data,
+      ...currentData,
       groupData: updatedGroupData
     };
     persistData(updatedData);
@@ -1653,14 +1678,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Delete student
   const deleteStudent = (groupId: string, rowId: number) => {
-    const group = data.groupData[groupId];
+    const currentData = dataRef.current;
+    const group = currentData.groupData[groupId];
     if (!group) return;
 
     const updatedStudents = group.students.filter((s) => s.rowId !== rowId);
     const updatedData: CenterData = {
-      ...data,
+      ...currentData,
       groupData: {
-        ...data.groupData,
+        ...currentData.groupData,
         [groupId]: { ...group, students: updatedStudents }
       }
     };
@@ -1669,7 +1695,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Update student arbitrary fields
   const updateStudent = (groupId: string, rowId: number, fields: Partial<StudentRecord>) => {
-    const group = data.groupData[groupId];
+    const currentData = dataRef.current;
+    const group = currentData.groupData[groupId];
     if (!group) return;
 
     const updatedStudents = group.students.map((student) => {
@@ -1677,15 +1704,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return calculateStudentFinances(
         { ...student, ...fields },
         group.type,
-        data.pricingTiers,
+        currentData.pricingTiers,
         group
       );
     });
 
     const updatedData: CenterData = {
-      ...data,
+      ...currentData,
       groupData: {
-        ...data.groupData,
+        ...currentData.groupData,
         [groupId]: { ...group, students: updatedStudents }
       }
     };
@@ -2492,6 +2519,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
   };
 
+  // Update center settings (center name, cycle, academic year)
+  const updateCenterSettings = (settings: Partial<{ centerName: string; cycle: string; academicYear: string }>) => {
+    const currentData = dataRef.current;
+    const updatedData: CenterData = {
+      ...currentData,
+      ...(settings.centerName ? { centerName: settings.centerName } : {}),
+      ...(settings.cycle ? { cycle: settings.cycle } : {}),
+      ...(settings.academicYear ? { academicYear: settings.academicYear } : {})
+    };
+    persistData(updatedData);
+  };
+
   return (
     <AppContext.Provider
       value={{
@@ -2542,7 +2581,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         exportDataJson,
         importDataJson,
         getGroupStats,
-        getCenterStats
+        getCenterStats,
+        updateCenterSettings
       }}
     >
       {children}

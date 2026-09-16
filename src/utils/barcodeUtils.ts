@@ -194,18 +194,32 @@ export function getBarcodeCandidates(raw: string): string[] {
       candidates.add(`${gid1}${rNum}`);
     }
 
-    // Pattern: STU prefix with serial (e.g. STU-26000008, STU26000008)
+    // Pattern: STU prefix with serial (e.g. STU-27000008, STU-26000008, STU27000008)
     const mStu = upper.match(/^STU[-_]?(\d+)$/);
     if (mStu) {
       candidates.add(`STU-${mStu[1]}`);
       candidates.add(`STU${mStu[1]}`);
+      if (mStu[1].startsWith('27')) {
+        candidates.add(`STU-26${mStu[1].slice(2)}`);
+        candidates.add(`STU26${mStu[1].slice(2)}`);
+      } else if (mStu[1].startsWith('26')) {
+        candidates.add(`STU-27${mStu[1].slice(2)}`);
+        candidates.add(`STU27${mStu[1].slice(2)}`);
+      }
     }
 
-    // Pattern: Plain digit serial (e.g. 26000008 or 26000262)
+    // Pattern: Plain digit serial (e.g. 27000008 or 26000008)
     const mDigitsOnly = upper.match(/^(\d{7,10})$/);
     if (mDigitsOnly) {
       candidates.add(`STU-${mDigitsOnly[1]}`);
       candidates.add(`STU${mDigitsOnly[1]}`);
+      if (mDigitsOnly[1].startsWith('27')) {
+        candidates.add(`STU-26${mDigitsOnly[1].slice(2)}`);
+        candidates.add(`STU26${mDigitsOnly[1].slice(2)}`);
+      } else if (mDigitsOnly[1].startsWith('26')) {
+        candidates.add(`STU-27${mDigitsOnly[1].slice(2)}`);
+        candidates.add(`STU27${mDigitsOnly[1].slice(2)}`);
+      }
     }
   }
 

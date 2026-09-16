@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
-import { useApp } from '../../context/AppContext';
+import { useApp, calcStudentFinancesPure } from '../../context/AppContext';
 import { StudentRecord } from '../../types';
 import {
   Users,
@@ -25,6 +25,8 @@ import {
 import StudentPaymentModal from '../../components/StudentPaymentModal';
 import StudentProfileModal from '../../components/StudentProfileModal';
 import StudentBadgeModal from '../../components/StudentBadgeModal';
+import MultiGroupPaymentModal from '../../components/MultiGroupPaymentModal';
+import { normalizeArabicName } from '../../utils/barcodeUtils';
 import { isSummaryRow } from '../../utils/sessionUtils';
 
 export interface GroupEnrollment {
@@ -61,6 +63,11 @@ export default function StudentsPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [activePaymentStudent, setActivePaymentStudent] = useState<{ groupId: string; student: StudentRecord } | null>(null);
+  const [activeMultiGroupStudent, setActiveMultiGroupStudent] = useState<{
+    name: string;
+    barcode?: string;
+    phone?: string;
+  } | null>(null);
   const [selectedProfileStudent, setSelectedProfileStudent] = useState<{ student: StudentRecord; groupId: string } | null>(null);
   const [activeBadgeStudent, setActiveBadgeStudent] = useState<{
     student: StudentRecord;
@@ -73,20 +80,36 @@ export default function StudentsPage() {
     const map = new Map<string, UnifiedStudent>();
 
     Object.entries(data.groupData).forEach(([gid, gSheet]) => {
+      const isVipGroup =
+        gid.toUpperCase().startsWith('BACV') ||
+        gid.toUpperCase().includes('VIP') ||
+        Boolean(gSheet.isVip) ||
+        Boolean(gSheet.type?.includes('10000'));
+      const targetType = gSheet.type || (isVipGroup ? '4-10000' : '4-2500');
+
       gSheet.students.forEach((s) => {
         if (isSummaryRow(s, gid) || !s.name || !s.name.trim()) return;
         const cleanName = s.name.trim();
         const phone = s.phone ? s.phone.trim() : '';
-        const key = cleanName.toLowerCase();
+        const norm = normalizeArabicName(cleanName);
+        const key = norm || cleanName.toLowerCase();
+
+        // Dynamically compute exact finances for this student in this group
+        const finances = calcStudentFinancesPure(
+          s,
+          targetType,
+          data.pricingTiers,
+          { ...gSheet, groupId: gid, isVip: isVipGroup }
+        );
 
         const enrollment: GroupEnrollment = {
           groupId: gid,
-          groupType: gSheet.type,
+          groupType: targetType,
           subject: gSheet.subject,
           teacherName: gSheet.teacherName,
-          isVip: gSheet.isVip,
+          isVip: isVipGroup,
           sessionCount: gSheet.sessionDates?.length || gSheet.sessionCount || 4,
-          student: s
+          student: finances
         };
 
         if (!map.has(key)) {
@@ -95,25 +118,42 @@ export default function StudentsPage() {
             name: cleanName,
             phone,
             groups: [enrollment],
-            totalFee: s.fee || 0,
-            totalReceived: s.totalReceived || 0,
-            totalDebt: s.debt || 0,
-            balance: (s.totalReceived || 0) - (s.fee || 0),
-            totalAttended: s.totalAttendance || 0,
+            totalFee: finances.fee,
+            totalReceived: finances.totalReceived,
+            totalDebt: finances.debt,
+            balance: finances.totalReceived - finances.fee,
+            totalAttended: finances.totalAttendance || 0,
             totalPossibleSessions: enrollment.sessionCount,
             primaryGroupId: gid,
-            primaryStudentRecord: s
+            primaryStudentRecord: finances
           });
         } else {
           const item = map.get(key)!;
           if (phone && !item.phone) item.phone = phone;
-          item.groups.push(enrollment);
-          item.totalFee += (s.fee || 0);
-          item.totalReceived += (s.totalReceived || 0);
-          item.totalDebt += (s.debt || 0);
-          item.balance = item.totalReceived - item.totalFee;
-          item.totalAttended += (s.totalAttendance || 0);
-          item.totalPossibleSessions += enrollment.sessionCount;
+
+          // Prevent duplicate enrollment if a student appears more than once in the same group
+          const existingGroupIndex = item.groups.findIndex((eg) => eg.groupId === gid);
+          if (existingGroupIndex >= 0) {
+            const existingEnrollment = item.groups[existingGroupIndex];
+            // If the new record has payments or attendance, prefer it
+            if (finances.totalReceived > existingEnrollment.student.totalReceived || (finances.totalAttendance || 0) > (existingEnrollment.student.totalAttendance || 0)) {
+              item.groups[existingGroupIndex] = enrollment;
+            }
+          } else {
+            item.groups.push(enrollment);
+            item.totalFee += finances.fee;
+            item.totalReceived += finances.totalReceived;
+            item.totalDebt += finances.debt;
+            item.balance = item.totalReceived - item.totalFee;
+            item.totalAttended += (finances.totalAttendance || 0);
+            item.totalPossibleSessions += enrollment.sessionCount;
+          }
+
+          // Prefer primary group that has debt so quick pay targets the group in debt
+          if (finances.debt > 0 && item.primaryStudentRecord.debt === 0) {
+            item.primaryGroupId = gid;
+            item.primaryStudentRecord = finances;
+          }
         }
       });
     });
@@ -605,12 +645,12 @@ export default function StudentsPage() {
                     {/* Groups enrolled */}
                     <td style={{ padding: '8px 8px' }}>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center' }}>
-                        {item.groups.map((g) => (
+                        {item.groups.map((g, gIdx) => (
                           <span
-                            key={g.groupId}
+                            key={`${g.groupId}-${g.student.rowId || gIdx}`}
                             onClick={(e) => {
                               e.stopPropagation();
-                              setSelectedProfileStudent({
+                              setActivePaymentStudent({
                                 student: g.student,
                                 groupId: g.groupId
                               });
@@ -629,11 +669,16 @@ export default function StudentsPage() {
                               border: g.isVip ? '1px solid #fde68a' : '1px solid var(--md-sys-color-outline-variant)',
                               cursor: 'pointer'
                             }}
-                            title={`فوج ${g.groupId}: ${g.subject} (${g.teacherName}) - اضغط للمعاينة`}
+                            title={`فوج ${g.groupId}: ${g.subject} (${g.teacherName}) - المطلوب: ${g.student.fee} دج | الدين: ${g.student.debt} دج - اضغط لتسجيل دفع لهذا الفوج`}
                           >
                             <strong>{g.groupId}</strong>
                             <span>•</span>
                             <span>{g.subject}</span>
+                            {g.student.debt > 0 && (
+                              <span style={{ fontSize: '0.68rem', color: '#b91c1c', fontWeight: 800 }}>
+                                ({g.student.debt.toLocaleString()} دج)
+                              </span>
+                            )}
                           </span>
                         ))}
                       </div>
@@ -752,15 +797,22 @@ export default function StudentsPage() {
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            // If user has multiple groups, default to first or open payment modal
-                            setActivePaymentStudent({
-                              groupId: item.primaryGroupId,
-                              student: item.primaryStudentRecord
-                            });
+                            if (item.groups.length > 1) {
+                              setActiveMultiGroupStudent({
+                                name: item.name,
+                                barcode: item.primaryStudentRecord.barcode,
+                                phone: item.phone
+                              });
+                            } else {
+                              setActivePaymentStudent({
+                                groupId: item.primaryGroupId,
+                                student: item.primaryStudentRecord
+                              });
+                            }
                           }}
                           className="m3-btn m3-btn-primary m3-btn-sm"
                           style={{ padding: '3px 8px', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '3px', whiteSpace: 'nowrap' }}
-                          title="تسجيل دفعة جديدة"
+                          title={item.groups.length > 1 ? `تسجيل دفع متعدد (${item.groups.length} أفواج)` : 'تسجيل دفع'}
                         >
                           <Receipt size={13} />
                           <span>دفع</span>
@@ -858,6 +910,15 @@ export default function StudentsPage() {
           student={selectedProfileStudent.student}
           groupId={selectedProfileStudent.groupId}
           onClose={() => setSelectedProfileStudent(null)}
+        />
+      )}
+
+      {/* Multi-Group Payment Modal */}
+      {activeMultiGroupStudent && (
+        <MultiGroupPaymentModal
+          isOpen={Boolean(activeMultiGroupStudent)}
+          onClose={() => setActiveMultiGroupStudent(null)}
+          initialStudent={activeMultiGroupStudent}
         />
       )}
 

@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { StudentRecord, GroupSheet } from '../types';
-import { useApp } from '../context/AppContext';
+import { useApp, calcStudentFinancesPure } from '../context/AppContext';
 import {
   X,
   User,
@@ -17,12 +17,15 @@ import {
   Receipt,
   GraduationCap,
   Sparkles,
-  ExternalLink
+  ExternalLink,
+  IdCard
 } from 'lucide-react';
 import Link from 'next/link';
 import StudentPaymentModal from './StudentPaymentModal';
 import ThermalReceiptsModal from './ThermalReceiptsModal';
-import { formatGroupTime } from '../utils/sessionUtils';
+import StudentBadgeModal from './StudentBadgeModal';
+import { formatGroupTime, isSummaryRow } from '../utils/sessionUtils';
+import { normalizeArabicName } from '../utils/barcodeUtils';
 
 interface Props {
   student: StudentRecord;
@@ -37,23 +40,44 @@ export default function StudentProfileModal({ student, groupId, onClose }: Props
 
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isThermalModalOpen, setIsThermalModalOpen] = useState(false);
+  const [isBadgeModalOpen, setIsBadgeModalOpen] = useState(false);
 
-  // Find all enrollments for this student across all groups (matching by name or phone)
+  // Find all enrollments for this student across all groups with live pure finances
   const allEnrollments = React.useMemo(() => {
     const list: { groupId: string; groupSheet: GroupSheet; studentRecord: StudentRecord }[] = [];
+    const normStudentName = normalizeArabicName(student.name);
+    const barcodeUpper = (student.barcode || '').toUpperCase();
+
     Object.entries(data.groupData).forEach(([gid, gSheet]) => {
       const match = gSheet.students.find(
         (s) =>
-          s.rowId === student.rowId && gid === groupId // Exact current record
-          || (s.name.trim() === student.name.trim() && s.name.trim().length > 2)
+          !isSummaryRow(s, gid) &&
+          ((s.rowId === student.rowId && gid === groupId) ||
+           (barcodeUpper && s.barcode && s.barcode.toUpperCase() === barcodeUpper) ||
+           (s.name && normalizeArabicName(s.name) === normStudentName))
       );
       if (match) {
-        list.push({ groupId: gid, groupSheet: gSheet, studentRecord: match });
+        const isVipGroup =
+          gid.toUpperCase().startsWith('BACV') ||
+          gid.toUpperCase().includes('VIP') ||
+          Boolean(gSheet.isVip) ||
+          Boolean(gSheet.type?.includes('10000'));
+        const targetType = gSheet.type || (isVipGroup ? '4-10000' : '4-2500');
+
+        const liveFinances = calcStudentFinancesPure(
+          match,
+          targetType,
+          data.pricingTiers,
+          { ...gSheet, groupId: gid, isVip: isVipGroup }
+        );
+
+        list.push({ groupId: gid, groupSheet: gSheet, studentRecord: liveFinances });
       }
     });
     return list;
-  }, [data.groupData, student, groupId]);
+  }, [data.groupData, data.pricingTiers, student, groupId]);
 
+  const currentStudent = allEnrollments.find((e) => e.groupId === groupId)?.studentRecord || student;
   const totalCenterPaid = allEnrollments.reduce((sum, item) => sum + (item.studentRecord.totalReceived || 0), 0);
   const totalCenterRequired = allEnrollments.reduce((sum, item) => sum + (item.studentRecord.fee || 0), 0);
   const totalCenterDebt = allEnrollments.reduce((sum, item) => sum + (item.studentRecord.debt || 0), 0);
@@ -113,12 +137,12 @@ export default function StudentProfileModal({ student, groupId, onClose }: Props
                     fontWeight: 800,
                     padding: '2px 8px',
                     borderRadius: 'var(--md-shape-sm)',
-                    backgroundColor: student.debt > 0 ? 'var(--status-absent-container)' : 'var(--status-present-container)',
-                    color: student.debt > 0 ? 'var(--status-absent)' : 'var(--status-present)',
-                    border: `1px solid ${student.debt > 0 ? 'var(--status-absent)' : 'var(--status-present)'}`
+                    backgroundColor: totalCenterDebt > 0 ? 'var(--status-absent-container)' : 'var(--status-present-container)',
+                    color: totalCenterDebt > 0 ? 'var(--status-absent)' : 'var(--status-present)',
+                    border: `1px solid ${totalCenterDebt > 0 ? 'var(--status-absent)' : 'var(--status-present)'}`
                   }}
                 >
-                  {student.debt > 0 ? `دين متبقي: ${student.debt.toLocaleString()} دج` : 'مسدد بالكامل ✓'}
+                  {totalCenterDebt > 0 ? `إجمالي الدين: ${totalCenterDebt.toLocaleString()} دج` : 'مسدد بالكامل ✓'}
                 </span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '3px', fontSize: '0.8rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
@@ -446,6 +470,16 @@ export default function StudentProfileModal({ student, groupId, onClose }: Props
           <div style={{ display: 'flex', gap: '8px' }}>
             <button
               type="button"
+              onClick={() => setIsBadgeModalOpen(true)}
+              className="m3-btn m3-btn-outlined m3-btn-sm"
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#ea580c', borderColor: '#fdba74' }}
+              title="معاينة وطباعة بطاقة وشارة التلميذ المعتمدة CR80 PVC"
+            >
+              <IdCard size={15} />
+              <span>بطاقة التلميذ</span>
+            </button>
+            <button
+              type="button"
               onClick={() => setIsThermalModalOpen(true)}
               className="m3-btn m3-btn-outlined m3-btn-sm"
               style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
@@ -487,6 +521,15 @@ export default function StudentProfileModal({ student, groupId, onClose }: Props
         <ThermalReceiptsModal
           group={group}
           onClose={() => setIsThermalModalOpen(false)}
+        />
+      )}
+
+      {isBadgeModalOpen && (
+        <StudentBadgeModal
+          student={currentStudent}
+          groupId={groupId}
+          allGroups={allEnrollments.map((e) => e.groupId)}
+          onClose={() => setIsBadgeModalOpen(false)}
         />
       )}
     </div>

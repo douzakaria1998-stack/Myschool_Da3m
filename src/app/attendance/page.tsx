@@ -25,7 +25,8 @@ import {
   EyeOff,
   CheckCheck,
   Scan,
-  UserX
+  UserX,
+  IdCard
 } from 'lucide-react';
 import StudentPaymentModal from '../../components/StudentPaymentModal';
 import AddStudentModal from '../../components/AddStudentModal';
@@ -34,6 +35,7 @@ import EditGroupModal from '../../components/EditGroupModal';
 import RenewGroupModal from '../../components/RenewGroupModal';
 import GroupSearchSelect from '../../components/GroupSearchSelect';
 import BarcodeScannerModal from '../../components/BarcodeScannerModal';
+import GroupBadgesModal from '../../components/GroupBadgesModal';
 import {
   isSessionDateToday,
   isGroupToday,
@@ -73,6 +75,7 @@ export default function AttendancePage() {
   const [isThermalModalOpen, setIsThermalModalOpen] = useState(false);
   const [isEditFinancesOpen, setIsEditFinancesOpen] = useState(false);
   const [isRenewModalOpen, setIsRenewModalOpen] = useState(false);
+  const [isGroupBadgesModalOpen, setIsGroupBadgesModalOpen] = useState(false);
   const [isEditingDates, setIsEditingDates] = useState(false);
   const [showFinancialStats, setShowFinancialStats] = useState(false);
   const [editableDates, setEditableDates] = useState<string[]>(
@@ -669,6 +672,31 @@ export default function AttendancePage() {
               </button>
             ))}
           </div>
+
+          {/* Print All Group Badges Button (Matching user screenshot red rectangle) */}
+          <button
+            type="button"
+            onClick={() => setIsGroupBadgesModalOpen(true)}
+            className="m3-btn m3-btn-sm"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 14px',
+              borderRadius: 'var(--md-shape-full)',
+              backgroundColor: '#fff7ed',
+              color: '#ea580c',
+              border: '1px solid #fdba74',
+              fontWeight: 700,
+              fontSize: '0.8rem',
+              cursor: 'pointer',
+              boxShadow: '0 1px 3px rgba(234, 88, 12, 0.12)'
+            }}
+            title="طباعة بطاقات وشارات جميع تلاميذ الفوج دفعة واحدة"
+          >
+            <IdCard size={16} color="#ea580c" />
+            <span>طباعة بطاقات الفوج ({realStudents.length})</span>
+          </button>
         </div>
 
         {/* Edit Dates Toggle */}
@@ -1376,6 +1404,15 @@ export default function AttendancePage() {
         <BarcodeScannerModal
           initialGroupId={group.groupId}
           onClose={() => setIsBarcodeScannerOpen(false)}
+        />
+      )}
+
+      {/* Batch Print All Student Badges of Current Group */}
+      {isGroupBadgesModalOpen && (
+        <GroupBadgesModal
+          groupId={group.groupId}
+          students={realStudents}
+          onClose={() => setIsGroupBadgesModalOpen(false)}
         />
       )}
     </div>

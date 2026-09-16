@@ -319,7 +319,7 @@ newGroupsMeta.sort((a, b) => a.id.localeCompare(b.id));
 // Build final CenterData
 const updatedCenterData = {
   ...currentData,
-  academicYear: '2025/2026',
+  academicYear: '2026/2027',
   cycle: 'الدورة الأولى - بكالوريا 2026',
   groups: newGroupsMeta,
   groupData: newGroupData

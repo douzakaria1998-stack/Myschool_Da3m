@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { useApp } from '../context/AppContext';
+import { useApp, calcStudentFinancesPure } from '../context/AppContext';
 import { StudentRecord, GroupMeta } from '../types';
 import {
   X,
@@ -170,31 +170,16 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
           Boolean(groupMeta?.type?.includes('10000'));
 
         const targetType = group.type || groupMeta?.type || (isVipGroup ? '4-10000' : '4-2500');
-        const tier = data.pricingTiers?.find((t) => t.id === targetType);
+        const finances = calcStudentFinancesPure(
+          found,
+          targetType,
+          data.pricingTiers,
+          { ...group, groupId: gid, isVip: isVipGroup }
+        );
 
-        let basePrice = 2500;
-        if (typeof group.studentFee === 'number' && group.studentFee > 0) {
-          basePrice = group.studentFee;
-        } else if (typeof groupMeta?.studentFee === 'number' && groupMeta.studentFee > 0) {
-          basePrice = groupMeta.studentFee;
-        } else if (tier && typeof tier.price === 'number' && tier.price > 0) {
-          basePrice = tier.price;
-        } else if (isVipGroup) {
-          basePrice = 10000;
-        } else {
-          basePrice = 2500;
-        }
-
-        const expectedFee = found.discount === '0'
-          ? 0
-          : (found.discount === '0.8' ? Math.round(basePrice * 0.8) : basePrice);
-
-        const totalPaid = (found.payments || []).reduce<number>((sum, p) => {
-          const val = typeof p === 'number' ? p : parseFloat(String(p));
-          return sum + (isNaN(val) ? 0 : val);
-        }, 0) || found.totalReceived || 0;
-
-        const effectiveDebt = Math.max(0, expectedFee - totalPaid);
+        const expectedFee = finances.fee;
+        const totalPaid = finances.totalReceived;
+        const effectiveDebt = finances.debt;
 
         items.push({
           groupId: gid,
@@ -407,14 +392,14 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
 
     if (shouldPrint) {
       handlePrintReceipt(results);
-    }
-
-    setSuccessMsg(`تم بنجاح حفظ دفعات ${payingItems.length} فوج بمبلغ إجمالي ${totalPaidNow.toLocaleString()} دج`);
-
-    setTimeout(() => {
+      setTimeout(() => {
+        setIsSaving(false);
+        onClose();
+      }, 300);
+    } else {
       setIsSaving(false);
       onClose();
-    }, shouldPrint ? 500 : 1200);
+    }
   };
 
   // Print Combined Unified Receipt
