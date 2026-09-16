@@ -32,7 +32,8 @@ import {
   isSessionDateToday,
   detectCurrentActiveGroupAndSession,
   ActiveGroupDetectionResult,
-  formatGroupTime
+  formatGroupTime,
+  getDefaultSessionIndex
 } from '../utils/sessionUtils';
 import { getBarcodeCandidates, normalizeArabicName } from '../utils/barcodeUtils';
 
@@ -61,8 +62,19 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
     detectCurrentActiveGroupAndSession(data.groupData, data.groups, new Date())
   );
 
+  // Fast continuous scan mode: automatically marks attendance and warns of debt without blocking the scanner
+  const [fastScanMode, setFastScanMode] = useState<boolean>(false);
+
   // Active Groups configuration (supports multiple concurrent groups running at the same time!)
   const [activeGroups, setActiveGroups] = useState<{ groupId: string; sessionIndex: number }[]>(() => {
+    // 1. If initialGroupId is explicitly passed, ALWAYS prioritize it as the primary active group!
+    if (initialGroupId && data.groupData[initialGroupId]) {
+      const gSheet = data.groupData[initialGroupId];
+      const sIdx = getDefaultSessionIndex(gSheet, new Date());
+      return [{ groupId: initialGroupId, sessionIndex: sIdx }];
+    }
+
+    // 2. Otherwise try auto-detection based on current schedule
     const initialDetect = detectCurrentActiveGroupAndSession(data.groupData, data.groups, new Date());
     if (initialDetect.matchingGroups.length > 0) {
       return initialDetect.matchingGroups.map((m) => ({
@@ -73,12 +85,36 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
     if (initialDetect.activeGroup) {
       return [{ groupId: initialDetect.activeGroup.groupId, sessionIndex: initialDetect.activeSessionIndex }];
     }
+
+    // 3. Fallback to first available group with smart default session
     const defaultGid = initialGroupId || data.groups[0]?.id || 'BAC01';
-    return [{ groupId: defaultGid, sessionIndex: 0 }];
+    const gSheet = data.groupData[defaultGid];
+    const sIdx = gSheet ? getDefaultSessionIndex(gSheet, new Date()) : 0;
+    return [{ groupId: defaultGid, sessionIndex: sIdx }];
   });
 
+  // Keep primary active group synced if initialGroupId prop changes
+  useEffect(() => {
+    if (initialGroupId && data.groupData[initialGroupId]) {
+      const gSheet = data.groupData[initialGroupId];
+      const sIdx = getDefaultSessionIndex(gSheet, new Date());
+      setActiveGroups((prev) => {
+        if (prev.length > 0 && prev[0].groupId === initialGroupId && prev[0].sessionIndex === sIdx) {
+          return prev;
+        }
+        const filtered = prev.filter((ag) => ag.groupId !== initialGroupId);
+        return [{ groupId: initialGroupId, sessionIndex: sIdx }, ...filtered];
+      });
+    }
+  }, [initialGroupId]);
+
   // Backward-compatible accessors for primary active group
-  const primaryActive = activeGroups[0] || { groupId: initialGroupId || data.groups[0]?.id || 'BAC01', sessionIndex: 0 };
+  const primaryActive = activeGroups[0] || {
+    groupId: initialGroupId || data.groups[0]?.id || 'BAC01',
+    sessionIndex: data.groupData[initialGroupId || 'BAC01']
+      ? getDefaultSessionIndex(data.groupData[initialGroupId || 'BAC01'], new Date())
+      : 0
+  };
   const activeGroupId = primaryActive.groupId;
   const activeSessionIdx = primaryActive.sessionIndex;
   const activeGroup = data.groupData[activeGroupId] as GroupSheet | undefined;
@@ -91,11 +127,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
 
     const gid = defaultGid || candidate.id;
     const groupSheet = data.groupData[gid];
-    let sIdx = 0;
-    if (groupSheet?.sessionDates) {
-      const todayIdx = groupSheet.sessionDates.findIndex((d) => isSessionDateToday(formatToYYYYMMDD(d) || d));
-      if (todayIdx !== -1) sIdx = todayIdx;
-    }
+    const sIdx = groupSheet ? getDefaultSessionIndex(groupSheet, new Date()) : 0;
     setActiveGroups((prev) => [...prev, { groupId: gid, sessionIndex: sIdx }]);
   };
 
@@ -109,11 +141,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
 
   const handleUpdateActiveGroup = (index: number, newGroupId: string) => {
     const groupSheet = data.groupData[newGroupId];
-    let sIdx = 0;
-    if (groupSheet?.sessionDates) {
-      const todayIdx = groupSheet.sessionDates.findIndex((d) => isSessionDateToday(formatToYYYYMMDD(d) || d));
-      if (todayIdx !== -1) sIdx = todayIdx;
-    }
+    const sIdx = groupSheet ? getDefaultSessionIndex(groupSheet, new Date()) : 0;
     setActiveGroups((prev) =>
       prev.map((item, i) => (i === index ? { groupId: newGroupId, sessionIndex: sIdx } : item))
     );
@@ -457,6 +485,14 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
     const rawCode = (directCode !== undefined ? directCode : barcodeInput).trim();
     if (!rawCode) return;
 
+    // If an unpaid dialog was currently open, dismiss it (previous student is already recorded as Present)
+    if (showUnpaidDialog) {
+      setShowUnpaidDialog(false);
+      setWillPayNow(null);
+      setPayAmount('');
+      setUnpaidInfo(null);
+    }
+
     // Use current active groups list
     let currentActiveGroups = activeGroups;
 
@@ -649,15 +685,16 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
       isPaid = false;
     }
 
-    if (isPaid) {
-      // Paid -> Mark Present, Chime, Reset screen
-      playSuccessChime();
-      if (isCover && originalGid) {
-        recordCoverAttendance(groupId, originalGid, student.rowId, sessionIdx);
-      } else {
-        updateAttendance(groupId, student.rowId, sessionIdx, 'P');
-      }
+    // CRITICAL: Always record attendance as Present ('P') immediately upon barcode scan!
+    if (isCover && originalGid) {
+      recordCoverAttendance(groupId, originalGid, student.rowId, sessionIdx);
+    } else {
+      updateAttendance(groupId, student.rowId, sessionIdx, 'P');
+    }
 
+    if (isPaid) {
+      // Paid -> Chime, Flash Success, Reset for next student
+      playSuccessChime();
       setFlashSuccess({
         name: student.name,
         statusText: isAlreadyPresent
@@ -669,50 +706,55 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
       setTimeout(() => {
         setFlashSuccess(null);
         resetForNextStudent();
-      }, 1300);
+      }, 1200);
     } else {
-      // Not Paid -> Audio alert, Popup appears!
+      // Not Paid -> Student IS ALREADY marked Present ('P')!
       playWarningAlert();
-      setUnpaidInfo({
-        effectiveDebt,
-        expectedCycleFee,
-        perSessionPrice,
-        totalPaid,
-        isNewUnpaid: totalPaid === 0
-      });
-      setShowUnpaidDialog(true);
-      setPayAmount(String(effectiveDebt > 0 ? effectiveDebt : perSessionPrice));
+
+      if (fastScanMode) {
+        // Fast Scan Mode: notify of debt via prominent banner without blocking the barcode scanner
+        setFlashSuccess({
+          name: student.name,
+          statusText: `حاضر ⚠️ (مدين: ${effectiveDebt.toLocaleString()} دج)`,
+          details: `فوج ${groupId} • الحصة ${sessionIdx + 1}`
+        });
+
+        setTimeout(() => {
+          setFlashSuccess(null);
+          resetForNextStudent();
+        }, 1400);
+      } else {
+        // Standard Mode: display dialog to collect payment or confirm debtor status
+        setUnpaidInfo({
+          effectiveDebt,
+          expectedCycleFee,
+          perSessionPrice,
+          totalPaid,
+          isNewUnpaid: totalPaid === 0
+        });
+        setShowUnpaidDialog(true);
+        setPayAmount(String(effectiveDebt > 0 ? effectiveDebt : perSessionPrice));
+      }
     }
   };
 
-  // Payment Processing: User chose "No, student will not pay now"
-  const handleUnpaidNoPayment = (allowEntryAsDebtor: boolean) => {
+  // Payment Processing: User chose "No, student will not pay now" (Confirm debtor presence)
+  const handleUnpaidNoPayment = (allowEntryAsDebtor: boolean = true) => {
     if (!scannedResult || !currentScanContext) return;
     const { groupId, sessionIdx, isCover, originalGid, student } = currentScanContext;
 
-    if (allowEntryAsDebtor) {
-      // Mark as present with debt
-      if (isCover && originalGid) {
-        recordCoverAttendance(groupId, originalGid, student.rowId, sessionIdx);
-      } else {
-        updateAttendance(groupId, student.rowId, sessionIdx, 'P');
-      }
+    // Student attendance has already been recorded as Present ('P').
+    const debtToShow = unpaidInfo?.effectiveDebt || student.debt || 0;
+    setFlashSuccess({
+      name: student.name,
+      statusText: 'تم تأكيد الحضور كمدين ⚠️',
+      details: `فوج ${groupId} • المتبقي في الذمة: ${debtToShow.toLocaleString()} دج`
+    });
 
-      const debtToShow = unpaidInfo?.effectiveDebt || student.debt || 0;
-      setFlashSuccess({
-        name: student.name,
-        statusText: 'تم تسجيل الدخول (مدين) ⚠️',
-        details: `فوج ${groupId} • المتبقي في الذمة: ${debtToShow.toLocaleString()} دج`
-      });
-
-      setTimeout(() => {
-        setFlashSuccess(null);
-        resetForNextStudent();
-      }, 1500);
-    } else {
-      // Deny entry / Cancel scan
+    setTimeout(() => {
+      setFlashSuccess(null);
       resetForNextStudent();
-    }
+    }, 1200);
   };
 
   // Payment Processing: "Save and Print" or "Next and Print Later"
@@ -838,10 +880,11 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
     let unmarked = 0;
     const real = groupSheet.students.filter((s) => !isSummaryRow(s, gid));
     real.forEach((s) => {
-      const st = s.attendance?.[sIdx] || '';
-      if (st === 'P') present++;
-      else if (st === 'M') makeup++;
-      else if (st === 'A') absent++;
+      const val = s.attendance?.[sIdx];
+      const st = typeof val === 'string' ? val.trim().toUpperCase() : '';
+      if (st === 'P' || st === 'ح') present++;
+      else if (st === 'M' || st === 'م') makeup++;
+      else if (st === 'A' || st === 'غ') absent++;
       else unmarked++;
     });
     return { present, makeup, absent, unmarked, total: real.length };
@@ -1173,6 +1216,25 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
                         حاضر: {gStats.present}/{gStats.total}
                       </span>
 
+                      {gStats.absent > 0 && (
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            padding: '1px 5px',
+                            borderRadius: '5px',
+                            backgroundColor: '#fee2e2',
+                            border: '1px solid #fca5a5',
+                            fontSize: '0.66rem',
+                            fontWeight: 800,
+                            color: '#b91c1c',
+                            whiteSpace: 'nowrap'
+                          }}
+                        >
+                          غائب: {gStats.absent}
+                        </span>
+                      )}
+
                       {gStats.unmarked > 0 && (
                         <span
                           style={{
@@ -1268,7 +1330,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
             }}
           >
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', justifyContent: 'center' }}>
                 <Scan size={18} color="var(--md-sys-color-primary)" className="animate-pulse" />
                 <span style={{ fontWeight: 800, fontSize: '0.84rem', color: 'var(--md-sys-color-on-primary-container)' }}>
                   وجّه قارئ الباركود نحو بطاقة التلميذ
@@ -1277,6 +1339,29 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
                   <span style={{ width: '5px', height: '5px', borderRadius: '50%', backgroundColor: '#22c55e', display: 'inline-block' }} className="animate-pulse" />
                   <span>جاهز للمسح</span>
                 </span>
+                <button
+                  type="button"
+                  onClick={() => setFastScanMode((prev) => !prev)}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    padding: '2px 8px',
+                    borderRadius: '12px',
+                    fontSize: '0.68rem',
+                    fontWeight: 800,
+                    border: '1px solid',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    backgroundColor: fastScanMode ? '#16a34a' : 'rgba(0,0,0,0.04)',
+                    borderColor: fastScanMode ? '#15803d' : 'var(--md-sys-color-outline-variant)',
+                    color: fastScanMode ? '#ffffff' : 'var(--md-sys-color-on-surface-variant)'
+                  }}
+                  title="تفعيل وضع المسح الفوري المتواصل: تسجيل الحضور مباشرة للجميع فوراً دون توقف"
+                >
+                  <Sparkles size={11} />
+                  <span>مسح فوري متواصل: {fastScanMode ? 'مفعّل ⚡' : 'معطل'}</span>
+                </button>
               </div>
 
               <div style={{ display: 'flex', gap: '6px', width: '100%', maxWidth: '340px', marginTop: '2px' }}>
@@ -1477,10 +1562,13 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
           >
             {/* Alert Header */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', marginBottom: '6px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#b91c1c' }}>
-                <Volume2 size={18} className="animate-pulse" />
-                <span style={{ fontSize: '0.84rem', fontWeight: 900 }}>
-                  تنبيه: التلميذ غير مسدد (عليه مستحقات مالية)
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                <Volume2 size={18} color="#b91c1c" className="animate-pulse" />
+                <span style={{ backgroundColor: '#dcfce7', color: '#15803d', border: '1px solid #bbf7d0', padding: '1px 6px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 800 }}>
+                  ✓ مسجل حاضر الآن
+                </span>
+                <span style={{ fontSize: '0.84rem', fontWeight: 900, color: '#b91c1c' }}>
+                  تنبيه: على التلميذ مستحقات مالية
                 </span>
               </div>
 
@@ -1583,7 +1671,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
                       borderRadius: '5px'
                     }}
                   >
-                    نعم (يريد الدفع الآن)
+                    نعم (تسديد الآن وطباعة وصل)
                   </button>
                   <button
                     type="button"
@@ -1600,15 +1688,15 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
                       borderRadius: '5px'
                     }}
                   >
-                    لا (تسجيل الدخول كمدين ⚠️)
+                    متابعة كمدين (حاضر بالفعل ✓)
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleUnpaidNoPayment(false)}
+                    onClick={resetForNextStudent}
                     className="m3-btn m3-btn-text"
                     style={{ fontWeight: 700, fontSize: '0.74rem', height: '28px', padding: '3px 8px' }}
                   >
-                    إلغاء وتخطي
+                    إغلاق ومتابعة المسح
                   </button>
                 </div>
               </div>

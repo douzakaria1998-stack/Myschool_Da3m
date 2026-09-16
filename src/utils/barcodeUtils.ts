@@ -200,6 +200,13 @@ export function getBarcodeCandidates(raw: string): string[] {
       candidates.add(`STU-${mStu[1]}`);
       candidates.add(`STU${mStu[1]}`);
     }
+
+    // Pattern: Plain digit serial (e.g. 26000008 or 26000262)
+    const mDigitsOnly = upper.match(/^(\d{7,10})$/);
+    if (mDigitsOnly) {
+      candidates.add(`STU-${mDigitsOnly[1]}`);
+      candidates.add(`STU${mDigitsOnly[1]}`);
+    }
   }
 
   // Filter out empty strings

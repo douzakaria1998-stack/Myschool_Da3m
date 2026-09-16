@@ -851,13 +851,8 @@ export function detectCurrentActiveGroupAndSession(
     const meta = groupsMeta?.find((g) => g.id === group.groupId);
     const isToday = isGroupToday(meta || group, group, now);
 
-    // Calculate the active session index for this group
-    const todayIndex = group.sessionDates?.findIndex((d) => isSessionDateToday(d, now)) ?? -1;
-    let sessionIndex = todayIndex;
-    if (sessionIndex === -1) {
-      const lastWithAtt = getLastSessionWithAttendance(group.students, group.sessionDates?.length || 4);
-      sessionIndex = lastWithAtt === -1 ? 0 : Math.min(lastWithAtt + 1, (group.sessionDates?.length || 4) - 1);
-    }
+    // Calculate the active session index for this group using smart default resolution
+    const sessionIndex = getDefaultSessionIndex(group, now);
 
     const todayDayName = normalizeArabicText(getTodayArabicDayName(now));
     const day2Name = normalizeArabicText(meta?.day2 || group.day2 || '');
