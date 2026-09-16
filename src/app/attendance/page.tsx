@@ -44,7 +44,8 @@ import {
   formatToYYYYMMDD,
   generateSessionDates,
   getStudentSessionInfo,
-  recalculateSubsequentDates
+  recalculateSubsequentDates,
+  getDefaultSessionIndex
 } from '../../utils/sessionUtils';
 
 export default function AttendancePage() {
@@ -110,6 +111,20 @@ export default function AttendancePage() {
 
   const todaySessionIndex = group.sessionDates.findIndex((d) => isSessionDateToday(formatToYYYYMMDD(d) || d));
 
+  // Dynamic Session Attendance Stats Selector (defaults to today or latest session with attendance)
+  const [selectedSessionStatsIndex, setSelectedSessionStatsIndex] = useState<number>(() => {
+    return todaySessionIndex !== -1 ? todaySessionIndex : getDefaultSessionIndex(group, new Date());
+  });
+
+  // Keep selectedSessionStatsIndex in sync when group changes
+  React.useEffect(() => {
+    if (group?.sessionDates) {
+      const todayIdx = group.sessionDates.findIndex((d) => isSessionDateToday(formatToYYYYMMDD(d) || d));
+      const defaultIdx = todayIdx !== -1 ? todayIdx : getDefaultSessionIndex(group, new Date());
+      setSelectedSessionStatsIndex(defaultIdx >= 0 && defaultIdx < group.sessionDates.length ? defaultIdx : 0);
+    }
+  }, [group?.groupId, group?.sessionDates]);
+
   // Filter students
   const filteredStudents = realStudents.filter((s) => {
     const matchesSearch =
@@ -121,6 +136,31 @@ export default function AttendancePage() {
     if (filterDebt === 'exempt') return matchesSearch && s.discount === '0';
     return matchesSearch;
   });
+
+  // Calculate live aggregate attendance statistics for the selected session
+  const sessionAttendanceStats = React.useMemo(() => {
+    if (!group || selectedSessionStatsIndex < 0) {
+      return { present: 0, absent: 0, makeup: 0, unmarked: 0, total: 0, rate: 0 };
+    }
+    const targetStudents = filteredStudents.length > 0 ? filteredStudents : realStudents;
+    let present = 0;
+    let absent = 0;
+    let makeup = 0;
+    let unmarked = 0;
+
+    targetStudents.forEach((s) => {
+      const val = s.attendance?.[selectedSessionStatsIndex];
+      const st = typeof val === 'string' ? val.trim().toUpperCase() : '';
+      if (st === 'P' || st === 'ح') present++;
+      else if (st === 'A' || st === 'غ') absent++;
+      else if (st === 'M' || st === 'م') makeup++;
+      else unmarked++;
+    });
+
+    const total = targetStudents.length;
+    const rate = total > 0 ? Math.round((present / total) * 100) : 0;
+    return { present, absent, makeup, unmarked, total, rate };
+  }, [group, selectedSessionStatsIndex, filteredStudents, realStudents]);
 
   // Toggle attendance status (P -> A -> M -> S -> empty -> P)
   const cycleAttendance = (rowId: number, sessionIndex: number, current: AttendanceStatus) => {
@@ -808,6 +848,142 @@ export default function AttendancePage() {
           </button>
         )}
 
+        {/* Live Total Attendance for Selected Session with Session Switcher */}
+        <div
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '8px',
+            backgroundColor: 'var(--md-sys-color-surface-container-high)',
+            border: '1.5px solid var(--md-sys-color-outline-variant)',
+            padding: '3px 10px',
+            borderRadius: 'var(--md-shape-full)',
+            flexWrap: 'wrap'
+          }}
+        >
+          {/* Interactive Session Switcher */}
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+            <span style={{ fontSize: '0.74rem', fontWeight: 800, color: 'var(--md-sys-color-on-surface)' }}>
+              إحصائيات الحصة:
+            </span>
+            <select
+              value={selectedSessionStatsIndex}
+              onChange={(e) => setSelectedSessionStatsIndex(Number(e.target.value))}
+              style={{
+                padding: '2px 8px',
+                fontSize: '0.75rem',
+                fontWeight: 800,
+                borderRadius: '6px',
+                border: '1px solid var(--md-sys-color-outline)',
+                backgroundColor: 'var(--md-sys-color-surface)',
+                color: 'var(--md-sys-color-on-surface)',
+                cursor: 'pointer',
+                outline: 'none'
+              }}
+              title="اختر أي حصة لعرض إجمالي الحضور والغياب الخاص بها فوراً"
+            >
+              {group.sessionDates.map((d, sIdx) => {
+                const formattedDate = formatToYYYYMMDD(d);
+                const isToday = isSessionDateToday(formattedDate || d);
+                return (
+                  <option key={sIdx} value={sIdx}>
+                    الحصة {sIdx + 1} {isToday ? '★ (اليوم)' : ''} ({formattedDate || d || `ح${sIdx + 1}`})
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+
+          {/* Present Total Badge */}
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              padding: '2px 8px',
+              borderRadius: 'var(--md-shape-full)',
+              backgroundColor: '#dcfce7',
+              color: '#15803d',
+              border: '1px solid #86efac',
+              fontWeight: 800,
+              fontSize: '0.76rem',
+              whiteSpace: 'nowrap'
+            }}
+            title={`عدد الحاضرين في الحصة ${selectedSessionStatsIndex + 1}: ${sessionAttendanceStats.present} من أصل ${sessionAttendanceStats.total} (${sessionAttendanceStats.rate}%)`}
+          >
+            <span>حاضر:</span>
+            <strong style={{ fontSize: '0.84rem' }}>{sessionAttendanceStats.present}</strong>
+            <span style={{ fontSize: '0.68rem', opacity: 0.85 }}>/ {sessionAttendanceStats.total}</span>
+          </span>
+
+          {/* Absent Total Badge */}
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              padding: '2px 8px',
+              borderRadius: 'var(--md-shape-full)',
+              backgroundColor: '#fee2e2',
+              color: '#b91c1c',
+              border: '1px solid #fca5a5',
+              fontWeight: 800,
+              fontSize: '0.76rem',
+              whiteSpace: 'nowrap'
+            }}
+            title={`عدد الغائبين في الحصة ${selectedSessionStatsIndex + 1}: ${sessionAttendanceStats.absent}`}
+          >
+            <span>غائب:</span>
+            <strong style={{ fontSize: '0.84rem' }}>{sessionAttendanceStats.absent}</strong>
+          </span>
+
+          {/* Makeup Badge (if any) */}
+          {sessionAttendanceStats.makeup > 0 && (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                padding: '2px 8px',
+                borderRadius: 'var(--md-shape-full)',
+                backgroundColor: '#fef3c7',
+                color: '#b45309',
+                border: '1px solid #fde68a',
+                fontWeight: 800,
+                fontSize: '0.76rem',
+                whiteSpace: 'nowrap'
+              }}
+              title={`عدد تلاميذ التعويض في الحصة ${selectedSessionStatsIndex + 1}: ${sessionAttendanceStats.makeup}`}
+            >
+              <span>تعويض:</span>
+              <strong style={{ fontSize: '0.84rem' }}>{sessionAttendanceStats.makeup}</strong>
+            </span>
+          )}
+
+          {/* Unmarked Badge (if any) */}
+          {sessionAttendanceStats.unmarked > 0 && (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                padding: '2px 8px',
+                borderRadius: 'var(--md-shape-full)',
+                backgroundColor: 'var(--md-sys-color-surface-container)',
+                color: 'var(--md-sys-color-on-surface-variant)',
+                border: '1px solid var(--md-sys-color-outline-variant)',
+                fontWeight: 700,
+                fontSize: '0.76rem',
+                whiteSpace: 'nowrap'
+              }}
+              title={`تلاميذ لم تُسجل حالتهم بعد في الحصة ${selectedSessionStatsIndex + 1}: ${sessionAttendanceStats.unmarked}`}
+            >
+              <span>لم يمسح:</span>
+              <strong style={{ fontSize: '0.84rem' }}>{sessionAttendanceStats.unmarked}</strong>
+            </span>
+          )}
+        </div>
+
         <span style={{ marginInlineStart: 'auto', fontStyle: 'italic' }}>
           عرض {filteredStudents.length} من أصل {realStudents.length} تلميذ
         </span>
@@ -828,27 +1004,40 @@ export default function AttendancePage() {
                 const targetStudents = filteredStudents.length > 0 ? filteredStudents : realStudents;
                 const isAllPresent = targetStudents.length > 0 && targetStudents.every((s) => s.attendance[i] === 'P');
                 const presentCount = targetStudents.filter((s) => s.attendance[i] === 'P').length;
+                const isSelected = selectedSessionStatsIndex === i;
 
                 return (
                   <th
                     key={i}
+                    onClick={() => setSelectedSessionStatsIndex(i)}
                     style={{
                       textAlign: 'center',
                       minWidth: '86px',
                       padding: '8px 4px',
-                      backgroundColor: isToday ? 'var(--md-sys-color-primary-container)' : 'var(--md-sys-color-surface-container-high)',
-                      outline: isToday ? '2px solid var(--md-sys-color-primary)' : undefined,
-                      outlineOffset: '-2px'
+                      cursor: 'pointer',
+                      backgroundColor: isToday
+                        ? 'var(--md-sys-color-primary-container)'
+                        : isSelected
+                        ? 'var(--md-sys-color-surface-container-highest)'
+                        : 'var(--md-sys-color-surface-container-high)',
+                      outline: isSelected
+                        ? '2.5px solid var(--md-sys-color-primary)'
+                        : isToday
+                        ? '2px dashed var(--md-sys-color-primary)'
+                        : undefined,
+                      outlineOffset: '-2px',
+                      transition: 'all 0.15s ease'
                     }}
+                    title={`انقر لاختيار الحصة ${i + 1} وعرض إجمالي حضورها`}
                   >
                     <div style={{ fontSize: '0.75rem', fontWeight: 700, color: isToday ? 'var(--md-sys-color-on-primary-container)' : undefined }}>
-                      ح {i + 1} {isToday ? '★' : ''}
+                      ح {i + 1} {isToday ? '★' : ''} {isSelected && !isToday ? '●' : ''}
                     </div>
                     <div
                       style={{
                         fontSize: '0.68rem',
                         color: isToday ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-outline)',
-                        fontWeight: isToday ? 700 : 500,
+                        fontWeight: isToday || isSelected ? 700 : 500,
                         direction: 'ltr',
                         unicodeBidi: 'plaintext',
                         fontFamily: 'monospace',
@@ -864,6 +1053,17 @@ export default function AttendancePage() {
                         (اليوم)
                       </div>
                     )}
+                    <div
+                      style={{
+                        fontSize: '0.66rem',
+                        fontWeight: 800,
+                        color: presentCount > 0 ? '#15803d' : 'var(--md-sys-color-outline)',
+                        marginTop: '2px'
+                      }}
+                      title={`حاضر: ${presentCount} من ${targetStudents.length}`}
+                    >
+                      {presentCount}/{targetStudents.length} حاضر
+                    </div>
                     {/* Mark All Present and End Session Buttons */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', marginTop: '6px' }}>
                       <button
