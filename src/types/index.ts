@@ -70,6 +70,8 @@ export interface GroupMeta {
   isVip: boolean;
   status?: 'active' | 'inactive'; // Group status: 'active' or 'inactive' (reached last session)
   sessionCount?: number; // Total sessions in cycle (e.g. 4, 8, 10, 12)
+  customStart?: string; // Starting session date (YYYY/MM/DD)
+  sessionDates?: string[]; // Optional explicit session dates
   studentFee?: number; // Payment amount for each student (المبلغ المطلوب من كل تلميذ)
   teacherPayPerStudent?: number; // Teacher payout per student (حصة الأستاذ من كل تلميذ)
   schoolSharePerStudent?: number; // Rest of amount for the school (الباقي للمدرسة)

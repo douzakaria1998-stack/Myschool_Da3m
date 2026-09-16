@@ -45,7 +45,8 @@ import {
   getGroupStatus,
   isGroupActive,
   formatGroupTime,
-  isSummaryRow
+  isSummaryRow,
+  sortGroupsActiveFirstOldToNew
 } from '../utils/sessionUtils';
 
 export default function DashboardPage() {
@@ -92,20 +93,24 @@ export default function DashboardPage() {
   const activeGroupsCount = data.groups.filter((g) => isGroupActive(g, data.groupData[g.id], data.pricingTiers)).length;
   const inactiveGroupsCount = data.groups.length - activeGroupsCount;
 
-  // Filter groups
-  const filteredGroups = data.groups.filter((g) => {
-    const matchesSearch =
-      g.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      g.subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      g.teacherName.toLowerCase().includes(searchQuery.toLowerCase());
+  // Filter and sort groups: ALWAYS start with active groups from oldest to newest ID
+  const filteredGroups = useMemo(() => {
+    const matched = data.groups.filter((g) => {
+      const matchesSearch =
+        g.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        g.subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        g.teacherName.toLowerCase().includes(searchQuery.toLowerCase());
 
-    if (filterType === 'active') return matchesSearch && isGroupActive(g, data.groupData[g.id], data.pricingTiers);
-    if (filterType === 'inactive') return matchesSearch && !isGroupActive(g, data.groupData[g.id], data.pricingTiers);
-    if (filterType === 'today') return matchesSearch && isGroupToday(g, data.groupData[g.id]);
-    if (filterType === 'regular') return matchesSearch && !g.isVip;
-    if (filterType === 'vip') return matchesSearch && g.isVip;
-    return matchesSearch;
-  });
+      if (filterType === 'active') return matchesSearch && isGroupActive(g, data.groupData[g.id], data.pricingTiers);
+      if (filterType === 'inactive') return matchesSearch && !isGroupActive(g, data.groupData[g.id], data.pricingTiers);
+      if (filterType === 'today') return matchesSearch && isGroupToday(g, data.groupData[g.id]);
+      if (filterType === 'regular') return matchesSearch && !g.isVip;
+      if (filterType === 'vip') return matchesSearch && g.isVip;
+      return matchesSearch;
+    });
+
+    return sortGroupsActiveFirstOldToNew(matched, data.groupData, data.pricingTiers);
+  }, [data.groups, data.groupData, data.pricingTiers, searchQuery, filterType]);
 
   // Flatten all students across all groups
   interface FlatStudent {

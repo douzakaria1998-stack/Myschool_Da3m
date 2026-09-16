@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import Link from 'next/link';
 import { useApp } from '../../context/AppContext';
 import {
@@ -19,7 +19,14 @@ import {
 import AddGroupModal from '../../components/AddGroupModal';
 import EditGroupModal from '../../components/EditGroupModal';
 import RenewGroupModal from '../../components/RenewGroupModal';
-import { isGroupToday, getTodayArabicDayName, formatGroupTime, getGroupStatus, isGroupActive } from '../../utils/sessionUtils';
+import {
+  isGroupToday,
+  getTodayArabicDayName,
+  formatGroupTime,
+  getGroupStatus,
+  isGroupActive,
+  sortGroupsActiveFirstOldToNew
+} from '../../utils/sessionUtils';
 
 export default function GroupsPage() {
   const { data, setSelectedGroup, getGroupStats } = useApp();
@@ -35,19 +42,24 @@ export default function GroupsPage() {
   const activeGroupsCount = data.groups.filter((g) => isGroupActive(g, data.groupData[g.id], data.pricingTiers)).length;
   const inactiveGroupsCount = data.groups.length - activeGroupsCount;
 
-  const filteredGroups = data.groups.filter((g) => {
-    const matchesSearch =
-      g.id.toLowerCase().includes(search.toLowerCase()) ||
-      g.subject.toLowerCase().includes(search.toLowerCase()) ||
-      g.teacherName.toLowerCase().includes(search.toLowerCase());
+  // Filter and sort groups: ALWAYS start with active groups from oldest to newest ID
+  const filteredGroups = useMemo(() => {
+    const matched = data.groups.filter((g) => {
+      const matchesSearch =
+        g.id.toLowerCase().includes(search.toLowerCase()) ||
+        g.subject.toLowerCase().includes(search.toLowerCase()) ||
+        g.teacherName.toLowerCase().includes(search.toLowerCase());
 
-    if (filterType === 'active') return matchesSearch && isGroupActive(g, data.groupData[g.id], data.pricingTiers);
-    if (filterType === 'inactive') return matchesSearch && !isGroupActive(g, data.groupData[g.id], data.pricingTiers);
-    if (filterType === 'today') return matchesSearch && isGroupToday(g, data.groupData[g.id]);
-    if (filterType === 'regular') return matchesSearch && !g.isVip;
-    if (filterType === 'vip') return matchesSearch && g.isVip;
-    return matchesSearch;
-  });
+      if (filterType === 'active') return matchesSearch && isGroupActive(g, data.groupData[g.id], data.pricingTiers);
+      if (filterType === 'inactive') return matchesSearch && !isGroupActive(g, data.groupData[g.id], data.pricingTiers);
+      if (filterType === 'today') return matchesSearch && isGroupToday(g, data.groupData[g.id]);
+      if (filterType === 'regular') return matchesSearch && !g.isVip;
+      if (filterType === 'vip') return matchesSearch && g.isVip;
+      return matchesSearch;
+    });
+
+    return sortGroupsActiveFirstOldToNew(matched, data.groupData, data.pricingTiers);
+  }, [data.groups, data.groupData, data.pricingTiers, search, filterType]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>

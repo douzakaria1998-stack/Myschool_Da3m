@@ -3,8 +3,16 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { StudentRecord } from '../types';
-import { isSummaryRow, isVipGroupId, isValidGroupId, getNextGroupId, getSuggestedGroupIds } from '../utils/sessionUtils';
-import { X, RotateCw, Check, Users, Search, AlertCircle, Sparkles } from 'lucide-react';
+import {
+  isSummaryRow,
+  isVipGroupId,
+  isValidGroupId,
+  getNextGroupId,
+  getSuggestedGroupIds,
+  getNextSessionDateAfter,
+  formatToYYYYMMDD
+} from '../utils/sessionUtils';
+import { X, RotateCw, Check, Users, Search, AlertCircle, Sparkles, Calendar } from 'lucide-react';
 
 interface Props {
   sourceGroupId: string;
@@ -104,11 +112,29 @@ export default function RenewGroupModal({ sourceGroupId, onClose, onCreated }: P
     return matchesSearch;
   });
 
+  // Source group session dates and last session date
+  const sourceDates = useMemo(() => {
+    return (sourceGroup?.sessionDates || []).filter((d) => Boolean(d && typeof d === 'string' && d.trim()));
+  }, [sourceGroup?.sessionDates]);
+
+  const lastSessionDateStr = sourceDates.length > 0 ? sourceDates[sourceDates.length - 1] : null;
+
+  // New cycle first session date - defaults to the next session date after lastSessionDateStr
+  // User rule: "ex if the last session for inactive group was wednesday 16/09/2026, the new group first session should be next wednesday 23/09/2026"
+  const defaultFirstSessionDate = useMemo(() => {
+    const nextDate = getNextSessionDateAfter(lastSessionDateStr, sourceGroup?.day1 || 'السبت', sourceGroup?.day2);
+    return formatToYYYYMMDD(nextDate);
+  }, [lastSessionDateStr, sourceGroup?.day1, sourceGroup?.day2]);
+
+  const [firstSessionDate, setFirstSessionDate] = useState<string>(defaultFirstSessionDate);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!isValid) return;
 
-    renewGroupWithStudents(sourceGroupId, trimmedNewId, Array.from(selectedRowIds));
+    renewGroupWithStudents(sourceGroupId, trimmedNewId, Array.from(selectedRowIds), {
+      customStart: firstSessionDate
+    });
     if (onCreated) {
       onCreated(trimmedNewId);
     }
@@ -286,6 +312,55 @@ export default function RenewGroupModal({ sourceGroupId, onClose, onCreated }: P
             <div>
               <span style={{ color: 'var(--md-sys-color-on-surface-variant)', display: 'block' }}>الدورة الجديدة:</span>
               <strong>{sessionCount} حصص</strong>
+            </div>
+          </div>
+
+          {/* New Cycle First Session Date Banner */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              backgroundColor: '#ecfdf5',
+              border: '1px solid #a7f3d0',
+              padding: '6px 12px',
+              borderRadius: 'var(--md-shape-sm)',
+              marginBottom: '8px',
+              fontSize: '0.76rem',
+              flexWrap: 'wrap',
+              gap: '6px'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+              <Calendar size={15} color="#059669" />
+              <span style={{ fontWeight: 800, color: '#065f46' }}>
+                تاريخ انطلاق الحصة الأولى للدورة الجديدة:
+              </span>
+              {lastSessionDateStr && (
+                <span style={{ fontSize: '0.7rem', color: '#047857' }}>
+                  (تلقائياً بعد آخر حصة: {formatToYYYYMMDD(lastSessionDateStr) || lastSessionDateStr})
+                </span>
+              )}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <input
+                type="text"
+                value={firstSessionDate}
+                onChange={(e) => setFirstSessionDate(e.target.value)}
+                placeholder="YYYY/MM/DD"
+                className="m3-input"
+                style={{
+                  width: '125px',
+                  padding: '3px 8px',
+                  fontSize: '0.8rem',
+                  fontWeight: 800,
+                  color: '#065f46',
+                  textAlign: 'center',
+                  backgroundColor: '#ffffff',
+                  borderColor: '#6ee7b7'
+                }}
+                title="تاريخ انطلاق الحصة الأولى للدورة الجديدة"
+              />
             </div>
           </div>
 

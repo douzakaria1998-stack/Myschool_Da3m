@@ -2,9 +2,9 @@
 
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { X, FolderPlus, Coins, Sparkles } from 'lucide-react';
+import { X, FolderPlus, Coins, Sparkles, Calendar } from 'lucide-react';
 import { GroupMeta } from '../types';
-import { getNextGroupId, isValidGroupId, getSuggestedGroupIds } from '../utils/sessionUtils';
+import { getNextGroupId, isValidGroupId, getSuggestedGroupIds, getUpcomingSessionDate, formatToYYYYMMDD } from '../utils/sessionUtils';
 
 interface Props {
   onClose: () => void;
@@ -21,6 +21,9 @@ export default function AddGroupModal({ onClose }: Props) {
   const [time1, setTime1] = useState('08:00');
   const [day2, setDay2] = useState('');
   const [time2, setTime2] = useState('');
+  const [startDate, setStartDate] = useState<string>(() => {
+    return formatToYYYYMMDD(getUpcomingSessionDate('السبت', new Date(), false));
+  });
   const [type, setType] = useState('4-2500');
   const [sessionCount, setSessionCount] = useState<number>(8);
   const [studentFee, setStudentFee] = useState<number>(2500);
@@ -29,6 +32,11 @@ export default function AddGroupModal({ onClose }: Props) {
   const [error, setError] = useState('');
 
   const daysList = ['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة'];
+
+  const handleDay1Change = (newDay: string) => {
+    setDay1(newDay);
+    setStartDate(formatToYYYYMMDD(getUpcomingSessionDate(newDay, new Date(), false)));
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,6 +70,7 @@ export default function AddGroupModal({ onClose }: Props) {
       time2: time2 || undefined,
       type,
       isVip,
+      customStart: startDate,
       sessionCount: Number(sessionCount) || 8,
       studentFee: Number(studentFee) || 0,
       teacherPayPerStudent: Number(teacherPay) || 0,
@@ -190,12 +199,12 @@ export default function AddGroupModal({ onClose }: Props) {
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
             <div>
               <label style={{ display: 'block', fontWeight: 600, fontSize: '0.85rem', marginBottom: '6px' }}>
                 اليوم الأساسي
               </label>
-              <select value={day1} onChange={(e) => setDay1(e.target.value)} className="m3-input">
+              <select value={day1} onChange={(e) => handleDay1Change(e.target.value)} className="m3-input">
                 {daysList.map((d) => (
                   <option key={d} value={d}>
                     {d}
@@ -214,6 +223,22 @@ export default function AddGroupModal({ onClose }: Props) {
                 onChange={(e) => setTime1(e.target.value)}
                 placeholder="08:00 - 10:00"
                 className="m3-input"
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600, fontSize: '0.85rem', marginBottom: '6px' }}>
+                <Calendar size={13} color="var(--md-sys-color-primary)" />
+                <span>تاريخ الحصة 1</span>
+              </label>
+              <input
+                type="text"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                placeholder="YYYY/MM/DD"
+                className="m3-input"
+                style={{ textAlign: 'center', fontWeight: 700 }}
+                title="تاريخ انطلاق الحصة الأولى للفوج (افتراضياً: أقرب موعد قادم)"
               />
             </div>
           </div>

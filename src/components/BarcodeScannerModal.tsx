@@ -33,6 +33,7 @@ import {
   detectCurrentActiveGroupAndSession,
   ActiveGroupDetectionResult,
   formatGroupTime,
+  getTodayArabicDayName,
   getDefaultSessionIndex
 } from '../utils/sessionUtils';
 import { getBarcodeCandidates, normalizeArabicName } from '../utils/barcodeUtils';
@@ -56,8 +57,8 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
     clearPrintQueue
   } = useApp();
 
-  // Smart Session Auto-Detection Engine
-  const [autoDetectSchedule, setAutoDetectSchedule] = useState<boolean>(false);
+  // Smart Session Auto-Detection Engine (Active by default)
+  const [autoDetectSchedule, setAutoDetectSchedule] = useState<boolean>(true);
   const [currentDetection, setCurrentDetection] = useState<ActiveGroupDetectionResult>(() =>
     detectCurrentActiveGroupAndSession(data.groupData, data.groups, new Date())
   );
@@ -65,16 +66,8 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
   // Fast continuous scan mode: automatically marks attendance and warns of debt without blocking the scanner
   const [fastScanMode, setFastScanMode] = useState<boolean>(false);
 
-  // Active Groups configuration (supports multiple concurrent groups running at the same time!)
+  // Active Groups configuration (ONLY shows groups scheduled at the current time: 1h before to 1h after start time)
   const [activeGroups, setActiveGroups] = useState<{ groupId: string; sessionIndex: number }[]>(() => {
-    // 1. If initialGroupId is explicitly passed, ALWAYS prioritize it as the primary active group!
-    if (initialGroupId && data.groupData[initialGroupId]) {
-      const gSheet = data.groupData[initialGroupId];
-      const sIdx = getDefaultSessionIndex(gSheet, new Date());
-      return [{ groupId: initialGroupId, sessionIndex: sIdx }];
-    }
-
-    // 2. Otherwise try auto-detection based on current schedule
     const initialDetect = detectCurrentActiveGroupAndSession(data.groupData, data.groups, new Date());
     if (initialDetect.matchingGroups.length > 0) {
       return initialDetect.matchingGroups.map((m) => ({
@@ -85,39 +78,15 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
     if (initialDetect.activeGroup) {
       return [{ groupId: initialDetect.activeGroup.groupId, sessionIndex: initialDetect.activeSessionIndex }];
     }
-
-    // 3. Fallback to first available group with smart default session
-    const defaultGid = initialGroupId || data.groups[0]?.id || 'BAC01';
-    const gSheet = data.groupData[defaultGid];
-    const sIdx = gSheet ? getDefaultSessionIndex(gSheet, new Date()) : 0;
-    return [{ groupId: defaultGid, sessionIndex: sIdx }];
+    // If no group is scheduled right now, do NOT show any group!
+    return [];
   });
 
-  // Keep primary active group synced if initialGroupId prop changes
-  useEffect(() => {
-    if (initialGroupId && data.groupData[initialGroupId]) {
-      const gSheet = data.groupData[initialGroupId];
-      const sIdx = getDefaultSessionIndex(gSheet, new Date());
-      setActiveGroups((prev) => {
-        if (prev.length > 0 && prev[0].groupId === initialGroupId && prev[0].sessionIndex === sIdx) {
-          return prev;
-        }
-        const filtered = prev.filter((ag) => ag.groupId !== initialGroupId);
-        return [{ groupId: initialGroupId, sessionIndex: sIdx }, ...filtered];
-      });
-    }
-  }, [initialGroupId]);
-
   // Backward-compatible accessors for primary active group
-  const primaryActive = activeGroups[0] || {
-    groupId: initialGroupId || data.groups[0]?.id || 'BAC01',
-    sessionIndex: data.groupData[initialGroupId || 'BAC01']
-      ? getDefaultSessionIndex(data.groupData[initialGroupId || 'BAC01'], new Date())
-      : 0
-  };
-  const activeGroupId = primaryActive.groupId;
-  const activeSessionIdx = primaryActive.sessionIndex;
-  const activeGroup = data.groupData[activeGroupId] as GroupSheet | undefined;
+  const primaryActive = activeGroups[0] || null;
+  const activeGroupId = primaryActive?.groupId || '';
+  const activeSessionIdx = primaryActive?.sessionIndex ?? 0;
+  const activeGroup = activeGroupId ? (data.groupData[activeGroupId] as GroupSheet | undefined) : undefined;
 
   // Handlers to manage active groups
   const handleAddActiveGroup = (defaultGid?: string) => {
@@ -154,28 +123,29 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
     );
   };
 
-  // Periodic re-check of active schedule every 25 seconds
+  // Periodic re-check of active schedule every 20 seconds
   useEffect(() => {
     const checkSchedule = () => {
       const res = detectCurrentActiveGroupAndSession(data.groupData, data.groups, new Date());
       setCurrentDetection(res);
-      if (autoDetectSchedule && res.matchingGroups.length > 0) {
-        const detectedConfigs = res.matchingGroups.map((m) => ({
-          groupId: m.group.groupId,
-          sessionIndex: m.sessionIndex
-        }));
-        setActiveGroups((prev) => {
-          const prevKeys = prev.map((g) => `${g.groupId}-${g.sessionIndex}`).sort().join(',');
-          const detKeys = detectedConfigs.map((g) => `${g.groupId}-${g.sessionIndex}`).sort().join(',');
-          if (prevKeys !== detKeys && prev.length <= 1) {
-            return detectedConfigs;
-          }
-          return prev;
-        });
+      if (autoDetectSchedule) {
+        if (res.matchingGroups.length > 0) {
+          const detectedConfigs = res.matchingGroups.map((m) => ({
+            groupId: m.group.groupId,
+            sessionIndex: m.sessionIndex
+          }));
+          setActiveGroups((prev) => {
+            const prevKeys = prev.map((g) => `${g.groupId}-${g.sessionIndex}`).sort().join(',');
+            const detKeys = detectedConfigs.map((g) => `${g.groupId}-${g.sessionIndex}`).sort().join(',');
+            return prevKeys !== detKeys ? detectedConfigs : prev;
+          });
+        } else {
+          setActiveGroups((prev) => (prev.length > 0 ? [] : prev));
+        }
       }
     };
     checkSchedule();
-    const timer = setInterval(checkSchedule, 25000);
+    const timer = setInterval(checkSchedule, 20000);
     return () => clearInterval(timer);
   }, [data.groupData, data.groups, autoDetectSchedule]);
 
@@ -506,6 +476,13 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
         }));
         setActiveGroups(currentActiveGroups);
       }
+    }
+
+    if (currentActiveGroups.length === 0) {
+      playWarningAlert();
+      alert('تنبيه: لا يوجد أي فوج دراسي مجدول في هذا الوقت.\n\nتظهر الأفواج تلقائياً قبل ساعة من موعد بدايتها وحتى ساعة بعد البداية، أو يمكنك الضغط على "تحديد وتفعيل فوج يدوياً" لبدء تسجيل الحضور.');
+      setBarcodeInput('');
+      return;
     }
 
     const primaryGid = currentActiveGroups[0]?.groupId || activeGroupId;
@@ -939,20 +916,36 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
             <span style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--md-sys-color-on-surface)' }}>
-              الأفواج النشطة ({activeGroups.length}):
+              {activeGroups.length > 0 ? `الأفواج النشطة (${activeGroups.length}):` : 'حالة المحطة:'}
             </span>
-            <span
-              style={{
-                fontSize: '0.66rem',
-                backgroundColor: 'var(--md-sys-color-primary-container)',
-                color: 'var(--md-sys-color-on-primary-container)',
-                padding: '2px 6px',
-                borderRadius: '6px',
-                fontWeight: 700
-              }}
-            >
-              مسح متزامن ⚡
-            </span>
+            {activeGroups.length > 0 ? (
+              <span
+                style={{
+                  fontSize: '0.66rem',
+                  backgroundColor: 'var(--md-sys-color-primary-container)',
+                  color: 'var(--md-sys-color-on-primary-container)',
+                  padding: '2px 6px',
+                  borderRadius: '6px',
+                  fontWeight: 700
+                }}
+              >
+                مسح متزامن ⚡
+              </span>
+            ) : (
+              <span
+                style={{
+                  fontSize: '0.68rem',
+                  backgroundColor: '#fff7ed',
+                  color: '#c2410c',
+                  border: '1px solid #fed7aa',
+                  padding: '2px 8px',
+                  borderRadius: '6px',
+                  fontWeight: 800
+                }}
+              >
+                لا يوجد فوج نشط الآن
+              </span>
+            )}
 
             <button
               type="button"
@@ -1048,82 +1041,82 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
             border: '1px solid var(--md-sys-color-outline-variant)'
           }}
         >
-          {/* Active Group Cards Grid */}
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: activeGroups.length > 1 ? 'repeat(auto-fit, minmax(240px, 1fr))' : '1fr',
-              gap: '6px'
-            }}
-          >
-            {activeGroups.map((ag, idx) => {
-              const gSheet = data.groupData[ag.groupId];
-              const gStats = getGroupStats(ag.groupId, ag.sessionIndex);
-              return (
-                <div
-                  key={`${ag.groupId}-${idx}`}
-                  style={{
-                    backgroundColor: 'var(--md-sys-color-surface)',
-                    borderRadius: '8px',
-                    border: '1px solid var(--md-sys-color-outline-variant)',
-                    padding: '8px 10px',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'space-between',
-                    gap: '6px',
-                    position: 'relative'
-                  }}
-                >
-                  {/* Card Header */}
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '6px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
-                      <span
-                        style={{
-                          width: '20px',
-                          height: '20px',
-                          borderRadius: '50%',
-                          backgroundColor: 'var(--md-sys-color-primary)',
-                          color: '#fff',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontSize: '0.7rem',
-                          fontWeight: 900,
-                          flexShrink: 0
-                        }}
-                      >
-                        {idx + 1}
-                      </span>
-                      <div style={{ minWidth: 0 }}>
-                        <div
+          {/* Active Group Cards Grid OR Empty State */}
+          {activeGroups.length > 0 ? (
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: activeGroups.length > 1 ? 'repeat(auto-fit, minmax(240px, 1fr))' : '1fr',
+                gap: '6px'
+              }}
+            >
+              {activeGroups.map((ag, idx) => {
+                const gSheet = data.groupData[ag.groupId];
+                const gStats = getGroupStats(ag.groupId, ag.sessionIndex);
+                return (
+                  <div
+                    key={`${ag.groupId}-${idx}`}
+                    style={{
+                      backgroundColor: 'var(--md-sys-color-surface)',
+                      borderRadius: '8px',
+                      border: '1px solid var(--md-sys-color-outline-variant)',
+                      padding: '8px 10px',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                      gap: '6px',
+                      position: 'relative'
+                    }}
+                  >
+                    {/* Card Header */}
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '6px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+                        <span
                           style={{
-                            fontWeight: 800,
-                            fontSize: '0.82rem',
-                            color: 'var(--md-sys-color-on-surface)',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis'
+                            width: '20px',
+                            height: '20px',
+                            borderRadius: '50%',
+                            backgroundColor: 'var(--md-sys-color-primary)',
+                            color: '#fff',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '0.7rem',
+                            fontWeight: 900,
+                            flexShrink: 0
                           }}
                         >
-                          فوج {ag.groupId} ({gSheet?.subject || ''})
-                        </div>
-                        <div
-                          style={{
-                            fontSize: '0.68rem',
-                            color: 'var(--md-sys-color-on-surface-variant)',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis'
-                          }}
-                        >
-                          الأستاذ: {gSheet?.teacherName || '—'}
+                          {idx + 1}
+                        </span>
+                        <div style={{ minWidth: 0 }}>
+                          <div
+                            style={{
+                              fontWeight: 800,
+                              fontSize: '0.82rem',
+                              color: 'var(--md-sys-color-on-surface)',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis'
+                            }}
+                          >
+                            فوج {ag.groupId} ({gSheet?.subject || ''})
+                          </div>
+                          <div
+                            style={{
+                              fontSize: '0.68rem',
+                              color: 'var(--md-sys-color-on-surface-variant)',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis'
+                            }}
+                          >
+                            الأستاذ: {gSheet?.teacherName || '—'}
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
-                      {activeGroups.length > 1 && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
                         <button
                           type="button"
                           onClick={() => handleRemoveActiveGroup(idx)}
@@ -1142,151 +1135,228 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
                         >
                           <Trash2 size={13} />
                         </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Card Selectors */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '6px' }}>
-                    <div>
-                      <span style={{ fontSize: '0.66rem', fontWeight: 700, color: 'var(--md-sys-color-on-surface-variant)', display: 'block', marginBottom: '1px' }}>
-                        الفوج:
-                      </span>
-                      <select
-                        value={ag.groupId}
-                        onChange={(e) => handleUpdateActiveGroup(idx, e.target.value)}
-                        className="m3-input"
-                        style={{ padding: '3px 6px', fontSize: '0.78rem', fontWeight: 700, width: '100%', height: '28px' }}
-                      >
-                        {data.groups.map((g) => (
-                          <option key={g.id} value={g.id}>
-                            فوج {g.id} ({g.subject})
-                          </option>
-                        ))}
-                      </select>
+                      </div>
                     </div>
 
-                    <div>
-                      <span style={{ fontSize: '0.66rem', fontWeight: 700, color: 'var(--md-sys-color-on-surface-variant)', display: 'block', marginBottom: '1px' }}>
-                        الحصة المستهدفة:
-                      </span>
-                      <select
-                        value={ag.sessionIndex}
-                        onChange={(e) => handleUpdateActiveSession(idx, Number(e.target.value))}
-                        className="m3-input"
-                        style={{ padding: '3px 6px', fontSize: '0.78rem', fontWeight: 700, width: '100%', height: '28px' }}
-                      >
-                        {Array.from({ length: gSheet?.sessionCount || 4 }).map((_, sIdx) => (
-                          <option key={sIdx} value={sIdx}>
-                            الحصة {sIdx + 1}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
+                    {/* Card Selectors */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '6px' }}>
+                      <div>
+                        <span style={{ fontSize: '0.66rem', fontWeight: 700, color: 'var(--md-sys-color-on-surface-variant)', display: 'block', marginBottom: '1px' }}>
+                          الفوج:
+                        </span>
+                        <select
+                          value={ag.groupId}
+                          onChange={(e) => handleUpdateActiveGroup(idx, e.target.value)}
+                          className="m3-input"
+                          style={{ padding: '3px 6px', fontSize: '0.78rem', fontWeight: 700, width: '100%', height: '28px' }}
+                        >
+                          {data.groups.map((g) => (
+                            <option key={g.id} value={g.id}>
+                              فوج {g.id} ({g.subject})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
 
-                  {/* Card Footer: Live Badges + End Session Button */}
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      borderTop: '1px dashed var(--md-sys-color-outline-variant)',
-                      paddingTop: '5px',
-                      marginTop: '1px',
-                      gap: '4px',
-                      flexWrap: 'nowrap'
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'nowrap' }}>
-                      <span
+                      <div>
+                        <span style={{ fontSize: '0.66rem', fontWeight: 700, color: 'var(--md-sys-color-on-surface-variant)', display: 'block', marginBottom: '1px' }}>
+                          الحصة المستهدفة:
+                        </span>
+                        <select
+                          value={ag.sessionIndex}
+                          onChange={(e) => handleUpdateActiveSession(idx, Number(e.target.value))}
+                          className="m3-input"
+                          style={{ padding: '3px 6px', fontSize: '0.78rem', fontWeight: 700, width: '100%', height: '28px' }}
+                        >
+                          {Array.from({ length: gSheet?.sessionCount || 4 }).map((_, sIdx) => (
+                            <option key={sIdx} value={sIdx}>
+                              الحصة {sIdx + 1}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Card Footer: Live Badges + End Session Button */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        borderTop: '1px dashed var(--md-sys-color-outline-variant)',
+                        paddingTop: '5px',
+                        marginTop: '1px',
+                        gap: '4px',
+                        flexWrap: 'nowrap'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'nowrap' }}>
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            padding: '1px 5px',
+                            borderRadius: '5px',
+                            backgroundColor: '#f0fdf4',
+                            border: '1px solid #bbf7d0',
+                            fontSize: '0.68rem',
+                            fontWeight: 800,
+                            color: '#166534',
+                            whiteSpace: 'nowrap'
+                          }}
+                        >
+                          حاضر: {gStats.present}/{gStats.total}
+                        </span>
+
+                        {gStats.absent > 0 && (
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              padding: '1px 5px',
+                              borderRadius: '5px',
+                              backgroundColor: '#fee2e2',
+                              border: '1px solid #fca5a5',
+                              fontSize: '0.66rem',
+                              fontWeight: 800,
+                              color: '#b91c1c',
+                              whiteSpace: 'nowrap'
+                            }}
+                          >
+                            غائب: {gStats.absent}
+                          </span>
+                        )}
+
+                        {gStats.unmarked > 0 && (
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              padding: '1px 5px',
+                              borderRadius: '5px',
+                              backgroundColor: '#f8fafc',
+                              border: '1px solid #cbd5e1',
+                              fontSize: '0.66rem',
+                              fontWeight: 700,
+                              color: '#475569',
+                              whiteSpace: 'nowrap'
+                            }}
+                          >
+                            لم يمسح: {gStats.unmarked}
+                          </span>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEndSessionTarget({ groupId: ag.groupId, sessionIndex: ag.sessionIndex });
+                          setShowEndSessionConfirm(true);
+                        }}
+                        className="m3-btn m3-btn-sm"
                         style={{
+                          backgroundColor: '#fee2e2',
+                          color: '#b91c1c',
+                          border: '1px solid #fca5a5',
+                          fontWeight: 800,
+                          fontSize: '0.68rem',
+                          padding: '2px 6px',
                           display: 'inline-flex',
                           alignItems: 'center',
-                          padding: '1px 5px',
+                          gap: '3px',
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0,
                           borderRadius: '5px',
-                          backgroundColor: '#f0fdf4',
-                          border: '1px solid #bbf7d0',
-                          fontSize: '0.68rem',
-                          fontWeight: 800,
-                          color: '#166534',
-                          whiteSpace: 'nowrap'
+                          height: '24px'
+                        }}
+                        title={`إنهاء حصة فوج ${ag.groupId} وتسجيل الغياب`}
+                      >
+                        <UserX size={11} />
+                        <span style={{ whiteSpace: 'nowrap' }}>إنهاء الحصة (A)</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div
+              style={{
+                backgroundColor: '#fff7ed',
+                border: '1.5px dashed #fdba74',
+                borderRadius: '10px',
+                padding: '14px 18px',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                textAlign: 'center',
+                gap: '8px'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Clock size={20} color="#ea580c" />
+                <span style={{ fontSize: '0.94rem', fontWeight: 800, color: '#9a3412' }}>
+                  لا يوجد أي فوج دراسي في هذا الوقت
+                </span>
+              </div>
+              <p style={{ margin: 0, fontSize: '0.78rem', color: '#7c2d12', maxWidth: '480px' }}>
+                تظهر الأفواج تلقائياً في هذه المحطة قبل ساعة من موعد بدايتها وتستمر حتى ساعة بعد موعد البداية.
+              </p>
+
+              {/* Show today's scheduled groups if any */}
+              {currentDetection.allTodayGroups && currentDetection.allTodayGroups.length > 0 ? (
+                <div style={{ marginTop: '3px', width: '100%', maxWidth: '540px' }}>
+                  <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#9a3412', marginBottom: '5px' }}>
+                    الأفواج المجدولة لليوم ({getTodayArabicDayName(new Date())}):
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', justifyContent: 'center' }}>
+                    {currentDetection.allTodayGroups.map((tg) => (
+                      <span
+                        key={tg.group.groupId}
+                        style={{
+                          padding: '2px 8px',
+                          borderRadius: '5px',
+                          backgroundColor: '#ffffff',
+                          border: '1px solid #fed7aa',
+                          fontSize: '0.72rem',
+                          fontWeight: 700,
+                          color: '#c2410c'
                         }}
                       >
-                        حاضر: {gStats.present}/{gStats.total}
+                        فوج {tg.group.groupId} ({tg.group.subject}) — {formatGroupTime(tg.timeStr)}
                       </span>
-
-                      {gStats.absent > 0 && (
-                        <span
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            padding: '1px 5px',
-                            borderRadius: '5px',
-                            backgroundColor: '#fee2e2',
-                            border: '1px solid #fca5a5',
-                            fontSize: '0.66rem',
-                            fontWeight: 800,
-                            color: '#b91c1c',
-                            whiteSpace: 'nowrap'
-                          }}
-                        >
-                          غائب: {gStats.absent}
-                        </span>
-                      )}
-
-                      {gStats.unmarked > 0 && (
-                        <span
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            padding: '1px 5px',
-                            borderRadius: '5px',
-                            backgroundColor: '#f8fafc',
-                            border: '1px solid #cbd5e1',
-                            fontSize: '0.66rem',
-                            fontWeight: 700,
-                            color: '#475569',
-                            whiteSpace: 'nowrap'
-                          }}
-                        >
-                          لم يمسح: {gStats.unmarked}
-                        </span>
-                      )}
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEndSessionTarget({ groupId: ag.groupId, sessionIndex: ag.sessionIndex });
-                        setShowEndSessionConfirm(true);
-                      }}
-                      className="m3-btn m3-btn-sm"
-                      style={{
-                        backgroundColor: '#fee2e2',
-                        color: '#b91c1c',
-                        border: '1px solid #fca5a5',
-                        fontWeight: 800,
-                        fontSize: '0.68rem',
-                        padding: '2px 6px',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '3px',
-                        whiteSpace: 'nowrap',
-                        flexShrink: 0,
-                        borderRadius: '5px',
-                        height: '24px'
-                      }}
-                      title={`إنهاء حصة فوج ${ag.groupId} وتسجيل الغياب`}
-                    >
-                      <UserX size={11} />
-                      <span style={{ whiteSpace: 'nowrap' }}>إنهاء الحصة (A)</span>
-                    </button>
+                    ))}
                   </div>
                 </div>
-              );
-            })}
-          </div>
+              ) : (
+                <div style={{ fontSize: '0.74rem', color: '#9a3412' }}>
+                  لا توجد أفواج مسجلة مجدولة لهذا اليوم ({getTodayArabicDayName(new Date())}).
+                </div>
+              )}
+
+              <div style={{ marginTop: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '0.74rem', color: 'var(--md-sys-color-outline)' }}>أو يمكنك</span>
+                <button
+                  type="button"
+                  onClick={() => handleAddActiveGroup()}
+                  className="m3-btn m3-btn-outlined m3-btn-sm"
+                  style={{
+                    fontSize: '0.74rem',
+                    borderColor: '#fdba74',
+                    color: '#c2410c',
+                    fontWeight: 700,
+                    padding: '2px 10px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  <Plus size={13} />
+                  <span>تحديد وتفعيل فوج يدوياً</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Live Session Counter Banner (Slim Single-Line) */}

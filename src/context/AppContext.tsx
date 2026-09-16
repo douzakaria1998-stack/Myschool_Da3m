@@ -26,7 +26,10 @@ import {
   getNextGroupId,
   getStudentSessionInfo,
   generateUniqueStudentBarcode,
-  isGroupActive
+  isGroupActive,
+  getNextSessionDateAfter,
+  getUpcomingSessionDate,
+  sortGroupsActiveFirstOldToNew
 } from '../utils/sessionUtils';
 import { normalizeArabicName } from '../utils/barcodeUtils';
 
@@ -547,7 +550,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return cleaned;
   });
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedGroup, setSelectedGroup] = useState<string>('BAC01');
+  const [selectedGroup, setSelectedGroup] = useState<string>(() => {
+    const { cleaned } = sanitizeData(initialSeedData as unknown as CenterData);
+    const sorted = sortGroupsActiveFirstOldToNew(cleaned.groups, cleaned.groupData, cleaned.pricingTiers);
+    return sorted[0]?.id || 'BAC01';
+  });
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [lang, setLang] = useState<'ar' | 'en'>('ar');
 
@@ -1732,7 +1739,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       cleanId = getNextGroupId(groupMeta.isVip, data.groups);
     }
     const sessionCount = groupMeta.sessionCount || 8;
-    const sessionDates = generateSessionDates(groupMeta.day1 || 'السبت', sessionCount);
+    const effectiveDay1 = groupMeta.day1 || 'السبت';
+    const effectiveDay2 = groupMeta.day2;
+    const sessionDates =
+      groupMeta.sessionDates && groupMeta.sessionDates.length === sessionCount
+        ? groupMeta.sessionDates
+        : generateSessionDates(effectiveDay1, sessionCount, groupMeta.customStart, effectiveDay2);
 
     const newGroupSheet: GroupSheet = {
       groupId: cleanId,
@@ -1754,7 +1766,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const updatedData: CenterData = {
       ...data,
-      groups: [...data.groups, { ...groupMeta, id: cleanId, sessionCount }],
+      groups: [...data.groups, { ...groupMeta, id: cleanId, sessionCount, sessionDates }],
       groupData: {
         ...data.groupData,
         [cleanId]: newGroupSheet
@@ -1787,12 +1799,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
 
     const sessionCount = customGroupFields?.sessionCount || sourceGroup.sessionCount || sourceMeta?.sessionCount || 4;
-    const todayStr = formatToYYYYMMDD(new Date());
-    const sessionDates = generateSessionDates(
-      customGroupFields?.day1 || sourceGroup.day1 || 'السبت',
-      sessionCount,
-      todayStr
-    );
+    const effectiveDay1 = customGroupFields?.day1 || sourceGroup.day1 || 'السبت';
+    const effectiveDay2 = customGroupFields?.day2 || sourceGroup.day2;
+
+    // Calculate the first session date for the new group:
+    // "ex if the last session for inactive group was wednesday 16/09/2026, the new group first session should be next wednesday 23/09/2026"
+    let startStr = customGroupFields?.customStart;
+    if (!startStr) {
+      const sourceDates = (sourceGroup.sessionDates || []).filter((d) => Boolean(d && typeof d === 'string' && d.trim()));
+      const lastSessionDateStr = sourceDates.length > 0 ? sourceDates[sourceDates.length - 1] : null;
+      const nextDate = getNextSessionDateAfter(lastSessionDateStr, effectiveDay1, effectiveDay2);
+      startStr = formatToYYYYMMDD(nextDate);
+    }
+
+    const sessionDates =
+      customGroupFields?.sessionDates && customGroupFields.sessionDates.length === sessionCount
+        ? customGroupFields.sessionDates
+        : generateSessionDates(
+            effectiveDay1,
+            sessionCount,
+            startStr,
+            effectiveDay2
+          );
 
     // Filter genuine students who were selected
     const selectedStudents = sourceGroup.students.filter(

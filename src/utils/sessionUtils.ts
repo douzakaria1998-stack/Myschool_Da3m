@@ -92,7 +92,7 @@ export function getDayOfWeekFromArabic(dayName: string): number {
 }
 
 /**
- * Standard anchor starts for weekdays in the semester calendar
+ * Standard anchor starts for weekdays in the semester calendar (legacy fallback)
  */
 export const WEEKDAY_ANCHORS: Record<string, string> = {
   'السبت': '2026-08-22',
@@ -108,7 +108,94 @@ export const WEEKDAY_ANCHORS: Record<string, string> = {
 };
 
 /**
- * Generates consecutive session dates formatted as YYYY/MM/DD based on weekday(s)
+ * Calculates the next upcoming calendar date for a given weekday name.
+ * If allowToday is false, even if baseDate falls on that weekday, returns the next occurrence (+7 days).
+ */
+export function getUpcomingSessionDate(
+  dayName: string = 'السبت',
+  baseDate: Date = new Date(),
+  allowToday: boolean = false
+): Date {
+  const targetWeekday = getDayOfWeekFromArabic(dayName);
+  const curWeekday = baseDate.getDay();
+  const validTarget = targetWeekday !== -1 ? targetWeekday : 6; // default Saturday
+
+  let diffDays = (validTarget - curWeekday + 7) % 7;
+  if (diffDays === 0 && !allowToday) {
+    diffDays = 7;
+  }
+
+  const result = new Date(baseDate);
+  result.setDate(result.getDate() + diffDays);
+  return result;
+}
+
+/**
+ * Calculates the first session date for a renewed / new cycle group:
+ * If the source group has session dates, finds the last session date (e.g. Wednesday 16/09/2026)
+ * and returns the next scheduled session date (e.g. next Wednesday 23/09/2026).
+ */
+export function getNextSessionDateAfter(
+  lastDateInput: string | Date | null | undefined,
+  day1Name: string = 'السبت',
+  day2Name?: string
+): Date {
+  let lastDate: Date | null = null;
+  if (lastDateInput) {
+    if (lastDateInput instanceof Date && !isNaN(lastDateInput.getTime())) {
+      lastDate = new Date(lastDateInput);
+    } else if (typeof lastDateInput === 'string') {
+      const formatted = formatToYYYYMMDD(lastDateInput);
+      if (formatted) {
+        const parsed = new Date(formatted.replace(/\//g, '-'));
+        if (!isNaN(parsed.getTime())) {
+          lastDate = parsed;
+        }
+      }
+    }
+  }
+
+  // Resolve study weekdays
+  const weekdays: number[] = [];
+  const w1 = getDayOfWeekFromArabic(day1Name);
+  if (w1 !== -1) weekdays.push(w1);
+  const w2 = getDayOfWeekFromArabic(day2Name || '');
+  if (w2 !== -1 && w2 !== w1) weekdays.push(w2);
+  if (weekdays.length === 0) weekdays.push(6); // Default Saturday
+
+  // If we have a valid last date:
+  if (lastDate) {
+    const nextDate = new Date(lastDate);
+    // Step forward at least 1 day to find the next matching study day
+    let found = false;
+    for (let step = 1; step <= 7; step++) {
+      nextDate.setDate(nextDate.getDate() + 1);
+      if (weekdays.includes(nextDate.getDay())) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      nextDate.setDate(lastDate.getDate() + 7);
+    }
+
+    // If nextDate is in the deep past (older than today), advance it forward to upcoming
+    const todayMidnight = new Date();
+    todayMidnight.setHours(0, 0, 0, 0);
+    if (nextDate.getTime() < todayMidnight.getTime()) {
+      return getUpcomingSessionDate(day1Name, new Date(), false);
+    }
+
+    return nextDate;
+  }
+
+  // If no lastDate available, calculate upcoming session date from today
+  return getUpcomingSessionDate(day1Name, new Date(), false);
+}
+
+/**
+ * Generates consecutive session dates formatted as YYYY/MM/DD based on weekday(s).
+ * By default, newly created groups start on their upcoming schedule date (NEW).
  */
 export function generateSessionDates(
   dayName: string = 'السبت',
@@ -121,8 +208,7 @@ export function generateSessionDates(
     const cleanStart = customStart.replace(/\//g, '-');
     startDate = new Date(cleanStart);
     if (isNaN(startDate.getTime())) {
-      const anchor = WEEKDAY_ANCHORS[dayName] || '2026-08-22';
-      startDate = new Date(anchor);
+      startDate = getUpcomingSessionDate(dayName, new Date(), false);
     } else {
       // Ensure startDate aligns with the specified dayName's weekday
       const targetWeekday = getDayOfWeekFromArabic(dayName);
@@ -134,8 +220,8 @@ export function generateSessionDates(
       }
     }
   } else {
-    const anchor = WEEKDAY_ANCHORS[dayName] || '2026-08-22';
-    startDate = new Date(anchor);
+    // When no custom start is provided, default to the upcoming session date (NEW)
+    startDate = getUpcomingSessionDate(dayName, new Date(), false);
   }
 
   // Resolve study weekdays
@@ -543,6 +629,30 @@ export function isGroupActive(
 }
 
 /**
+ * Sorts groups so that:
+ * 1. Active groups always appear FIRST.
+ * 2. Inactive (completed) groups appear LAST.
+ * 3. Within each group status, groups are sorted from oldest to newest ID (ascending order, e.g. BAC01, BAC02, ..., BAC10).
+ */
+export function sortGroupsActiveFirstOldToNew(
+  groups: GroupMeta[],
+  groupData: Record<string, GroupSheet>,
+  pricingTiers?: PricingTier[]
+): GroupMeta[] {
+  return [...groups].sort((a, b) => {
+    const aActive = isGroupActive(a, groupData[a.id], pricingTiers);
+    const bActive = isGroupActive(b, groupData[b.id], pricingTiers);
+
+    // Active groups come first
+    if (aActive && !bActive) return -1;
+    if (!aActive && bActive) return 1;
+
+    // From oldest to newest ID (ascending order)
+    return a.id.localeCompare(b.id, undefined, { numeric: true, sensitivity: 'base' });
+  });
+}
+
+/**
  * Checks if a group ID belongs to a VIP group (BACV prefix) or standard group (BAC prefix)
  */
 export function isVipGroupId(groupId: string): boolean {
@@ -869,19 +979,21 @@ export function detectCurrentActiveGroupAndSession(
 
     const window = parseTimeWindow(effectiveTime);
     if (window && isToday) {
-      // Scanning Window:
-      // Starts 35 minutes BEFORE class starts (students arriving & scanning)
-      // Ends 25 minutes AFTER class ends (late students / payment / makeup tracking)
-      const scanWindowStart = window.startMinutes - 35;
-      const scanWindowEnd = window.endMinutes + 25;
+      // User rule:
+      // Group appears exactly an hour before the start time and an hour after the start time
+      const scanWindowStart = window.startMinutes - 60;
+      const scanWindowEnd = window.startMinutes + 60;
 
       if (currentMinutes >= scanWindowStart && currentMinutes <= scanWindowEnd) {
         let status = 'حصة جارية الآن';
         if (currentMinutes < window.startMinutes) {
           const diff = window.startMinutes - currentMinutes;
           status = `تبدأ بعد ${diff} دقيقة`;
-        } else if (currentMinutes > window.endMinutes) {
-          status = 'نهاية الحصة (مغادرة)';
+        } else if (currentMinutes === window.startMinutes) {
+          status = 'موعد بداية الحصة الآن';
+        } else {
+          const diff = currentMinutes - window.startMinutes;
+          status = `بدأت منذ ${diff} دقيقة`;
         }
 
         const startDiffMinutes = Math.abs(currentMinutes - window.startMinutes);
@@ -905,7 +1017,7 @@ export function detectCurrentActiveGroupAndSession(
     activeGroup: bestMatch ? bestMatch.group : null,
     activeSessionIndex: bestMatch ? bestMatch.sessionIndex : 0,
     timeWindowStr: bestMatch ? bestMatch.timeWindowStr : '',
-    statusLabel: bestMatch ? bestMatch.status : 'لا يوجد فوج نشط مجدول في هذا التوقيت',
+    statusLabel: bestMatch ? bestMatch.status : 'لا يوجد أي فوج دراسي في هذا الوقت',
     matchingGroups,
     allTodayGroups
   };

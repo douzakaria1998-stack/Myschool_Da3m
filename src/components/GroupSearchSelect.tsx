@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { Search, X, Check, ChevronDown, Sparkles, Calendar } from 'lucide-react';
-import { isGroupToday, formatGroupTime, normalizeArabicText } from '../utils/sessionUtils';
+import { isGroupToday, formatGroupTime, normalizeArabicText, sortGroupsActiveFirstOldToNew } from '../utils/sessionUtils';
 
 interface Props {
   selectedGroupId: string;
@@ -49,25 +49,29 @@ export default function GroupSearchSelect({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Filter groups
-  const filteredGroups = data.groups.filter((g) => {
-    if (!query.trim()) return true;
-    const normQ = normalizeArabicText(query.toLowerCase());
-    const normId = normalizeArabicText(g.id.toLowerCase());
-    const normSubject = normalizeArabicText(g.subject.toLowerCase());
-    const normTeacher = normalizeArabicText(g.teacherName.toLowerCase());
-    const normDay1 = normalizeArabicText(g.day1?.toLowerCase() || '');
-    const normDay2 = normalizeArabicText(g.day2?.toLowerCase() || '');
+  // Filter and sort groups: active first from oldest to newest ID
+  const filteredGroups = useMemo(() => {
+    const matched = data.groups.filter((g) => {
+      if (!query.trim()) return true;
+      const normQ = normalizeArabicText(query.toLowerCase());
+      const normId = normalizeArabicText(g.id.toLowerCase());
+      const normSubject = normalizeArabicText(g.subject.toLowerCase());
+      const normTeacher = normalizeArabicText(g.teacherName.toLowerCase());
+      const normDay1 = normalizeArabicText(g.day1?.toLowerCase() || '');
+      const normDay2 = normalizeArabicText(g.day2?.toLowerCase() || '');
 
-    return (
-      normId.includes(normQ) ||
-      normSubject.includes(normQ) ||
-      normTeacher.includes(normQ) ||
-      normDay1.includes(normQ) ||
-      normDay2.includes(normQ) ||
-      (g.isVip && (normQ.includes('vip') || normQ.includes('خاص')))
-    );
-  });
+      return (
+        normId.includes(normQ) ||
+        normSubject.includes(normQ) ||
+        normTeacher.includes(normQ) ||
+        normDay1.includes(normQ) ||
+        normDay2.includes(normQ) ||
+        (g.isVip && (normQ.includes('vip') || normQ.includes('خاص')))
+      );
+    });
+
+    return sortGroupsActiveFirstOldToNew(matched, data.groupData, data.pricingTiers);
+  }, [data.groups, data.groupData, data.pricingTiers, query]);
 
   // Handle keyboard navigation
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
