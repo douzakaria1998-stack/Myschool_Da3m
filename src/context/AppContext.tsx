@@ -57,6 +57,7 @@ interface AppContextType {
     paymentAmount?: number
   ) => void;
   // Student Actions
+  cycleAttendance: (groupId: string, rowId: number, sessionIndex: number) => AttendanceStatus;
   updateAttendance: (groupId: string, rowId: number, sessionIndex: number, status: AttendanceStatus) => void;
   recordAttendanceAndPayment: (
     groupId: string,
@@ -562,6 +563,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const cloudSyncTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isSavingRef = useRef<boolean>(false);
+  const dataRef = useRef<CenterData>(data);
+  dataRef.current = data;
+
+  const clientIdRef = useRef<string>(
+    typeof window !== 'undefined'
+      ? (window as any).__DA3M_CLIENT_ID__ || (
+          (window as any).__DA3M_CLIENT_ID__ = 'client_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now()
+        )
+      : 'server'
+  );
+  const hasPendingChangesRef = useRef<boolean>(false);
+  const lastLocalEditTimeRef = useRef<number>(0);
 
   // Sync relational tables (groups, teachers, students) in background for Supabase Table Editor
   const syncRelationalTables = async (centerData: CenterData) => {
@@ -722,16 +735,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // Cloud save to Supabase
-  const saveToCloud = useCallback(async (newData: CenterData) => {
+  // Cloud save to Supabase with serialization and latest-snapshot guarantee
+  const saveToCloud = useCallback(async (dataSnapshot?: CenterData) => {
+    if (isSavingRef.current) {
+      hasPendingChangesRef.current = true;
+      return;
+    }
+
     try {
       setCloudSyncStatus('syncing');
       isSavingRef.current = true;
+      hasPendingChangesRef.current = false;
+
+      const targetData = dataSnapshot || dataRef.current;
+      const dataToSave = {
+        ...targetData,
+        _client_id: clientIdRef.current,
+        _saved_at: Date.now()
+      };
+
       const { error } = await supabase
         .from('center_data')
         .upsert({
           id: 'main',
-          data: newData,
+          data: dataToSave,
           updated_at: new Date().toISOString()
         });
 
@@ -742,15 +769,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setCloudSyncStatus('synced');
         setLastSyncedAt(new Date());
         // Sync relational tables in background so Table Editor always shows live rows
-        syncRelationalTables(newData).catch((e) => console.warn(e));
+        syncRelationalTables(targetData).catch((e) => console.warn(e));
       }
     } catch (err) {
       console.error('Failed to sync to Supabase:', err);
       setCloudSyncStatus('offline');
     } finally {
-      setTimeout(() => {
-        isSavingRef.current = false;
-      }, 500);
+      isSavingRef.current = false;
+      // If user made edits while the network request was in flight, schedule save of latest data
+      if (hasPendingChangesRef.current) {
+        hasPendingChangesRef.current = false;
+        if (cloudSyncTimerRef.current) clearTimeout(cloudSyncTimerRef.current);
+        cloudSyncTimerRef.current = setTimeout(() => {
+          saveToCloud();
+        }, 300);
+      }
     }
   }, []);
 
@@ -764,6 +797,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const parsed = JSON.parse(savedData);
         if (parsed && parsed.groupData) {
           const { cleaned, changed } = sanitizeData(parsed);
+          dataRef.current = cleaned;
           setData(cleaned);
           if (changed) {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(cleaned));
@@ -771,6 +805,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
       } else {
         const { cleaned } = sanitizeData(initialSeedData as unknown as CenterData);
+        dataRef.current = cleaned;
         setData(cleaned);
       }
       const savedTheme = localStorage.getItem(THEME_KEY) as 'light' | 'dark';
@@ -802,7 +837,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
 
         if (remoteRow && remoteRow.data) {
+          // If user already made local edits before cloud fetch finished, do not overwrite
+          if (hasPendingChangesRef.current || (Date.now() - lastLocalEditTimeRef.current < 2500)) {
+            return;
+          }
           const { cleaned } = sanitizeData(remoteRow.data as CenterData);
+          dataRef.current = cleaned;
           setData(cleaned);
           try {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(cleaned));
@@ -829,10 +869,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'center_data', filter: 'id=eq.main' },
         (payload) => {
-          if (isSavingRef.current) return; // Don't overwrite local changes with our own echo
           if (payload.new && (payload.new as any).data) {
-            const incoming = (payload.new as any).data as CenterData;
-            const { cleaned } = sanitizeData(incoming);
+            const incoming = (payload.new as any).data as any;
+
+            // 1. Prevent echo: never overwrite our own changes with our own echo
+            if (incoming?._client_id && incoming._client_id === clientIdRef.current) {
+              return;
+            }
+
+            // 2. Prevent race conditions: don't overwrite if we are currently saving or have pending local edits
+            if (isSavingRef.current || hasPendingChangesRef.current || (Date.now() - lastLocalEditTimeRef.current < 2500)) {
+              return;
+            }
+
+            const { cleaned } = sanitizeData(incoming as CenterData);
+            dataRef.current = cleaned;
             setData(cleaned);
             try {
               localStorage.setItem(STORAGE_KEY, JSON.stringify(cleaned));
@@ -853,21 +904,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Save changes locally and debounce sync to Supabase
   const persistData = (newData: CenterData) => {
+    // 1. Synchronously update dataRef so subsequent operations read latest state immediately
+    dataRef.current = newData;
+    hasPendingChangesRef.current = true;
+    lastLocalEditTimeRef.current = Date.now();
+
+    // 2. Update React state
     setData(newData);
+
+    // 3. Save to localStorage immediately
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(newData));
     } catch (e) {
       console.error('Failed to persist data:', e);
     }
 
-    // Debounced cloud sync (500ms)
+    // 4. Debounced cloud sync (600ms)
     if (cloudSyncTimerRef.current) {
       clearTimeout(cloudSyncTimerRef.current);
     }
     setCloudSyncStatus('syncing');
     cloudSyncTimerRef.current = setTimeout(() => {
-      saveToCloud(newData);
-    }, 500);
+      saveToCloud(dataRef.current);
+    }, 600);
   };
 
   // Manual one-click sync
@@ -907,27 +966,72 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return calcStudentFinancesPure(student, groupType, pricingTiers, groupFinances);
   };
 
-  // Update attendance
-  const updateAttendance = (groupId: string, rowId: number, sessionIndex: number, status: AttendanceStatus) => {
-    const group = data.groupData[groupId];
-    if (!group) return;
+  // Atomic cycle attendance (P -> A -> M -> '' -> P) with synchronous state updating
+  const cycleAttendance = (groupId: string, rowId: number, sessionIndex: number): AttendanceStatus => {
+    const currentData = dataRef.current;
+    const group = currentData.groupData[groupId];
+    if (!group) return '';
 
-    const updatedStudents = group.students.map((student) => {
-      if (student.rowId !== rowId) return student;
-      const newAttendance = [...student.attendance];
-      newAttendance[sessionIndex] = status;
+    const student = group.students.find((s) => s.rowId === rowId);
+    if (!student) return '';
+
+    const currentVal = (student.attendance?.[sessionIndex] || '').trim().toUpperCase();
+    let next: AttendanceStatus = 'P';
+    if (currentVal === 'P' || currentVal === 'ح') next = 'A';
+    else if (currentVal === 'A' || currentVal === 'غ') next = 'M';
+    else if (currentVal === 'M' || currentVal === 'م') next = '';
+    else if (currentVal === '') next = 'P';
+
+    const sessionCount = group.sessionDates?.length || group.sessionCount || 4;
+    const updatedStudents = group.students.map((s) => {
+      if (s.rowId !== rowId) return s;
+      const newAttendance = [...(s.attendance || [])];
+      while (newAttendance.length < sessionCount) newAttendance.push('');
+      newAttendance[sessionIndex] = next;
       return calculateStudentFinances(
-        { ...student, attendance: newAttendance },
+        { ...s, attendance: newAttendance },
         group.type,
-        data.pricingTiers,
+        currentData.pricingTiers,
         group
       );
     });
 
     const updatedData: CenterData = {
-      ...data,
+      ...currentData,
       groupData: {
-        ...data.groupData,
+        ...currentData.groupData,
+        [groupId]: { ...group, students: updatedStudents }
+      }
+    };
+
+    persistData(updatedData);
+    return next;
+  };
+
+  // Update attendance
+  const updateAttendance = (groupId: string, rowId: number, sessionIndex: number, status: AttendanceStatus) => {
+    const currentData = dataRef.current;
+    const group = currentData.groupData[groupId];
+    if (!group) return;
+
+    const sessionCount = group.sessionDates?.length || group.sessionCount || 4;
+    const updatedStudents = group.students.map((student) => {
+      if (student.rowId !== rowId) return student;
+      const newAttendance = [...(student.attendance || [])];
+      while (newAttendance.length < sessionCount) newAttendance.push('');
+      newAttendance[sessionIndex] = status;
+      return calculateStudentFinances(
+        { ...student, attendance: newAttendance },
+        group.type,
+        currentData.pricingTiers,
+        group
+      );
+    });
+
+    const updatedData: CenterData = {
+      ...currentData,
+      groupData: {
+        ...currentData.groupData,
         [groupId]: { ...group, students: updatedStudents }
       }
     };
@@ -942,7 +1046,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     status: AttendanceStatus,
     paymentAmount?: number
   ) => {
-    const group = data.groupData[groupId];
+    const currentData = dataRef.current;
+    const group = currentData.groupData[groupId];
     if (!group) return;
 
     const sessionCount = group.sessionDates?.length || group.sessionCount || 4;
@@ -963,15 +1068,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return calculateStudentFinances(
         { ...student, attendance: newAttendance, payments: newPayments },
         group.type,
-        data.pricingTiers,
+        currentData.pricingTiers,
         group
       );
     });
 
     const updatedData: CenterData = {
-      ...data,
+      ...currentData,
       groupData: {
-        ...data.groupData,
+        ...currentData.groupData,
         [groupId]: { ...group, students: updatedStudents }
       }
     };
@@ -980,7 +1085,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Mark all students present for a session in a single batch operation
   const markAllPresent = (groupId: string, sessionIndex: number, studentRowIds?: number[]) => {
-    const group = data.groupData[groupId];
+    const currentData = dataRef.current;
+    const group = currentData.groupData[groupId];
     if (!group) return;
 
     const rowIdSet = studentRowIds && studentRowIds.length > 0 ? new Set(studentRowIds) : null;
@@ -993,27 +1099,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       targetStudents.length > 0 && targetStudents.every((s) => s.attendance[sessionIndex] === 'P');
     const targetStatus: AttendanceStatus = allAlreadyPresent ? '' : 'P';
 
+    const sessionCount = group.sessionDates?.length || group.sessionCount || 4;
     const updatedStudents = group.students.map((student) => {
       if (isSummaryRow(student, groupId)) return student;
       if (rowIdSet && !rowIdSet.has(student.rowId)) return student;
 
-      const newAttendance = [...student.attendance];
-      const sessionCount = group.sessionDates?.length || group.sessionCount || 8;
+      const newAttendance = [...(student.attendance || [])];
       while (newAttendance.length < sessionCount) newAttendance.push('');
       newAttendance[sessionIndex] = targetStatus;
 
       return calculateStudentFinances(
         { ...student, attendance: newAttendance },
         group.type,
-        data.pricingTiers,
+        currentData.pricingTiers,
         group
       );
     });
 
     const updatedData: CenterData = {
-      ...data,
+      ...currentData,
       groupData: {
-        ...data.groupData,
+        ...currentData.groupData,
         [groupId]: { ...group, students: updatedStudents }
       }
     };
@@ -1022,19 +1128,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Automated Absence Tracking: End session and automatically mark all unscanned/unattended students as Absent ('A')
   const endSessionAndMarkAbsent = (groupId: string, sessionIndex: number) => {
-    const group = data.groupData[groupId];
+    const currentData = dataRef.current;
+    const group = currentData.groupData[groupId];
     if (!group) return { presentCount: 0, makeupCount: 0, absentCount: 0 };
 
     let presentCount = 0;
     let makeupCount = 0;
     let absentCount = 0;
 
+    const sessionCount = group.sessionDates?.length || group.sessionCount || 4;
     const updatedStudents = group.students.map((student) => {
       if (isSummaryRow(student, groupId)) return student;
 
       const currentStatus = student.attendance?.[sessionIndex] || '';
       const newAttendance = [...(student.attendance || [])];
-      while (newAttendance.length <= sessionIndex) newAttendance.push('');
+      while (newAttendance.length < sessionCount) newAttendance.push('');
 
       if (currentStatus === 'P') {
         presentCount++;
@@ -1049,15 +1157,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return calculateStudentFinances(
         { ...student, attendance: newAttendance },
         group.type,
-        data.pricingTiers,
+        currentData.pricingTiers,
         group
       );
     });
 
     const updatedData: CenterData = {
-      ...data,
+      ...currentData,
       groupData: {
-        ...data.groupData,
+        ...currentData.groupData,
         [groupId]: { ...group, students: updatedStudents }
       }
     };
@@ -1074,10 +1182,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     sessionIndex: number,
     paymentAmount?: number
   ) => {
-    const activeGroup = data.groupData[activeGroupId];
+    const currentData = dataRef.current;
+    const activeGroup = currentData.groupData[activeGroupId];
     if (!activeGroup) return;
 
-    const originalGroup = data.groupData[originalGroupId];
+    const originalGroup = currentData.groupData[originalGroupId];
     const originalStudent = originalGroup?.students.find((s) => s.rowId === studentRowId);
     if (!originalStudent) return;
 
@@ -1097,7 +1206,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const updatedStudent = calculateStudentFinances(
         { ...existingInActive, attendance: newAttendance, payments: newPayments },
         activeGroup.type,
-        data.pricingTiers,
+        currentData.pricingTiers,
         activeGroup
       );
       updatedActiveGroup.students = activeGroup.students.map((s) =>
@@ -1128,16 +1237,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           totalAttendance: 1
         },
         activeGroup.type,
-        data.pricingTiers,
+        currentData.pricingTiers,
         activeGroup
       );
       updatedActiveGroup.students = [...activeGroup.students, newCoverStudent];
     }
 
     const updatedData: CenterData = {
-      ...data,
+      ...currentData,
       groupData: {
-        ...data.groupData,
+        ...currentData.groupData,
         [activeGroupId]: updatedActiveGroup
       }
     };
@@ -1146,27 +1255,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Update payment installment
   const updatePayment = (groupId: string, rowId: number, paymentIndex: number, amount: number | string) => {
-    const group = data.groupData[groupId];
+    const currentData = dataRef.current;
+    const group = currentData.groupData[groupId];
     if (!group) return;
 
+    const sessionCount = group.sessionDates?.length || group.sessionCount || 4;
     const updatedStudents = group.students.map((student) => {
       if (student.rowId !== rowId) return student;
-      const sessionCount = group.sessionDates?.length || group.sessionCount || 8;
       const newPayments = [...(student.payments || [])];
       while (newPayments.length < sessionCount) newPayments.push('');
       newPayments[paymentIndex] = amount === '' ? '' : Number(amount) || 0;
       return calculateStudentFinances(
         { ...student, payments: newPayments },
         group.type,
-        data.pricingTiers,
+        currentData.pricingTiers,
         group
       );
     });
 
     const updatedData: CenterData = {
-      ...data,
+      ...currentData,
       groupData: {
-        ...data.groupData,
+        ...currentData.groupData,
         [groupId]: { ...group, students: updatedStudents }
       }
     };
@@ -2403,6 +2513,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         endSessionAndMarkAbsent,
         recordCoverAttendance,
         recordAttendanceAndPayment,
+        cycleAttendance,
         updateAttendance,
         markAllPresent,
         updatePayment,

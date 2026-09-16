@@ -54,6 +54,7 @@ export default function AttendancePage() {
     selectedGroup,
     setSelectedGroup,
     updateAttendance,
+    cycleAttendance,
     markAllPresent,
     deleteStudent,
     getGroupStats,
@@ -162,16 +163,6 @@ export default function AttendancePage() {
     return { present, absent, makeup, unmarked, total, rate };
   }, [group, selectedSessionStatsIndex, filteredStudents, realStudents]);
 
-  // Toggle attendance status (P -> A -> M -> S -> empty -> P)
-  const cycleAttendance = (rowId: number, sessionIndex: number, current: AttendanceStatus) => {
-    let next: AttendanceStatus = 'P';
-    if (current === 'P') next = 'A';
-    else if (current === 'A') next = 'M';
-    else if (current === 'M') next = '';
-    else if (current === '') next = 'P';
-
-    updateAttendance(group.groupId, rowId, sessionIndex, next);
-  };
 
   // Save session dates
   const handleSaveDates = () => {
@@ -1204,7 +1195,7 @@ export default function AttendancePage() {
                       return (
                         <td
                           key={sessionIdx}
-                          onClick={() => cycleAttendance(student.rowId, sessionIdx, status as AttendanceStatus)}
+                          onClick={() => cycleAttendance(group.groupId, student.rowId, sessionIdx)}
                           style={{
                             textAlign: 'center',
                             cursor: 'pointer',
