@@ -6,12 +6,34 @@
  * 3. Exact page sizing (CR80 PVC: 85.6mm x 54mm, A4: 8 cards per page)
  */
 
+import { sanitizePrintTitle } from './printTitleUtils';
+
 export function printCardHtml(
   cardHtmlList: string[],
   layout: 'cr80' | 'a4_sheet' = 'cr80',
-  title: string = 'طباعة بطاقة التلميذ'
+  title: string = 'بطاقة التلميذ'
 ) {
   if (!cardHtmlList || cardHtmlList.length === 0) return;
+
+  const cleanTitle = sanitizePrintTitle(title) || 'بطاقة التلميذ';
+  const originalTitle = typeof document !== 'undefined' ? document.title : '';
+  if (typeof document !== 'undefined') {
+    document.title = cleanTitle;
+  }
+
+  const restoreTitle = () => {
+    if (typeof document !== 'undefined' && originalTitle) {
+      document.title = originalTitle;
+    }
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('afterprint', restoreTitle);
+    }
+  };
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('afterprint', restoreTitle, { once: true });
+    setTimeout(restoreTitle, 5000);
+  }
 
   // Build isolated HTML document
   let bodyContent = '';
@@ -62,7 +84,7 @@ export function printCardHtml(
 <html dir="rtl" lang="ar">
 <head>
   <meta charset="utf-8" />
-  <title>${title}</title>
+  <title>${cleanTitle}</title>
   <style>
     * {
       box-sizing: border-box;

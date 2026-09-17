@@ -6,6 +6,7 @@ import { Printer, ArrowRight } from 'lucide-react';
 import Link from 'next/link';
 import GroupSearchSelect from '../../components/GroupSearchSelect';
 import { isSummaryRow, formatToYYYYMMDD } from '../../utils/sessionUtils';
+import { sanitizePrintTitle, triggerPrintWithDocumentTitle } from '../../utils/printTitleUtils';
 
 export default function PrintPage() {
   const { data, selectedGroup, setSelectedGroup } = useApp();
@@ -14,8 +15,26 @@ export default function PrintPage() {
     return (group?.students || []).filter((s) => !isSummaryRow(s, group?.groupId));
   }, [group?.students, group?.groupId]);
 
+  const printTitle = React.useMemo(() => {
+    if (!group) return 'كشف الحضور';
+    const teacherPart = group.teacherName ? `${group.teacherName.trim()} - ` : '';
+    const groupPart = group.groupId || '';
+    return sanitizePrintTitle(`${teacherPart}${groupPart}`) || 'كشف الحضور';
+  }, [group]);
+
+  React.useEffect(() => {
+    if (!printTitle) return;
+    const prevTitle = document.title;
+    document.title = printTitle;
+    return () => {
+      document.title = prevTitle;
+    };
+  }, [printTitle]);
+
   const handlePrint = () => {
-    window.print();
+    triggerPrintWithDocumentTitle(printTitle, () => {
+      window.print();
+    });
   };
 
   if (!group) return <div>لا يوجد فوج محدد.</div>;

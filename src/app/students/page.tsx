@@ -25,6 +25,7 @@ import {
 import StudentPaymentModal from '../../components/StudentPaymentModal';
 import StudentProfileModal from '../../components/StudentProfileModal';
 import StudentBadgeModal from '../../components/StudentBadgeModal';
+import GroupBadgesModal from '../../components/GroupBadgesModal';
 import MultiGroupPaymentModal from '../../components/MultiGroupPaymentModal';
 import { normalizeArabicName } from '../../utils/barcodeUtils';
 import { isSummaryRow } from '../../utils/sessionUtils';
@@ -43,6 +44,8 @@ export interface UnifiedStudent {
   key: string;
   name: string;
   phone: string;
+  barcode?: string;
+  rowId?: number;
   groups: GroupEnrollment[];
   totalFee: number;
   totalReceived: number;
@@ -74,6 +77,7 @@ export default function StudentsPage() {
     groupId: string;
     allGroups: string[];
   } | null>(null);
+  const [isAllBadgesModalOpen, setIsAllBadgesModalOpen] = useState(false);
 
   // Consolidate students so each student can have multiple groups and an aggregate balance
   const allStudents = useMemo(() => {
@@ -89,10 +93,6 @@ export default function StudentsPage() {
 
       gSheet.students.forEach((s) => {
         if (isSummaryRow(s, gid) || !s.name || !s.name.trim()) return;
-        const cleanName = s.name.trim();
-        const phone = s.phone ? s.phone.trim() : '';
-        const norm = normalizeArabicName(cleanName);
-        const key = norm || cleanName.toLowerCase();
 
         // Dynamically compute exact finances for this student in this group
         const finances = calcStudentFinancesPure(
@@ -101,6 +101,13 @@ export default function StudentsPage() {
           data.pricingTiers,
           { ...gSheet, groupId: gid, isVip: isVipGroup }
         );
+
+        const cleanName = s.name.trim();
+        const phone = s.phone ? s.phone.trim() : '';
+        const barcode = s.barcode?.trim() || finances.barcode?.trim() || '';
+        const rowId = s.rowId || finances.rowId;
+        const norm = normalizeArabicName(cleanName);
+        const key = norm || cleanName.toLowerCase();
 
         const enrollment: GroupEnrollment = {
           groupId: gid,
@@ -117,6 +124,8 @@ export default function StudentsPage() {
             key,
             name: cleanName,
             phone,
+            barcode,
+            rowId,
             groups: [enrollment],
             totalFee: finances.fee,
             totalReceived: finances.totalReceived,
@@ -130,6 +139,9 @@ export default function StudentsPage() {
         } else {
           const item = map.get(key)!;
           if (phone && !item.phone) item.phone = phone;
+          if (!item.barcode && barcode) item.barcode = barcode;
+          if (!item.rowId && rowId) item.rowId = rowId;
+          if (!item.primaryStudentRecord.barcode && barcode) item.primaryStudentRecord.barcode = barcode;
 
           // Prevent duplicate enrollment if a student appears more than once in the same group
           const existingGroupIndex = item.groups.findIndex((eg) => eg.groupId === gid);
@@ -168,14 +180,53 @@ export default function StudentsPage() {
   const negativeBalanceList = allStudents.filter((item) => item.balance < 0);
   const vipList = allStudents.filter((item) => item.groups.some((g) => g.isVip));
 
-  // Filtered students
+  // Filtered students (supports searching by Name, Student ID / Barcode, Phone, Group, Subject, Teacher)
   const filteredStudents = useMemo(() => {
+    const rawQ = search.trim();
+    if (!rawQ) {
+      return allStudents.filter((item) => {
+        const matchesGroup =
+          selectedGroupFilter === 'all' ||
+          item.groups.some((g) => g.groupId === selectedGroupFilter);
+        if (!matchesGroup) return false;
+        if (filterType === 'debt') return item.balance < 0;
+        if (filterType === 'paid') return item.balance >= 0;
+        if (filterType === 'multi') return item.groups.length > 1;
+        if (filterType === 'vip') return item.groups.some((g) => g.isVip);
+        return true;
+      });
+    }
+
+    const q = rawQ.toLowerCase();
+    // Normalize Arabic-Indic digits (٠-٩) to 0-9
+    const normalizedDigits = q.replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString());
+    const cleanDigits = normalizedDigits.replace(/\D/g, '');
+
     return allStudents.filter((item) => {
-      const q = search.trim().toLowerCase();
+      // Gather all associated barcodes / IDs for this student
+      const barcodes = [
+        item.barcode,
+        item.primaryStudentRecord.barcode,
+        ...item.groups.map((g) => g.student.barcode)
+      ].filter(Boolean) as string[];
+
+      // Match Student ID / Barcode: full string, alphanumeric, or numeric ID sequence
+      const matchesId =
+        barcodes.some((b) => {
+          const bLower = b.toLowerCase();
+          if (bLower.includes(q) || bLower.includes(normalizedDigits)) return true;
+          if (cleanDigits.length >= 2 && b.replace(/\D/g, '').includes(cleanDigits)) return true;
+          return false;
+        }) ||
+        (cleanDigits.length > 0 &&
+          (String(item.rowId) === cleanDigits ||
+            String(item.primaryStudentRecord.rowId) === cleanDigits ||
+            item.groups.some((g) => String(g.student.rowId) === cleanDigits)));
+
       const matchesSearch =
-        !q ||
+        matchesId ||
         item.name.toLowerCase().includes(q) ||
-        (item.phone && item.phone.includes(q)) ||
+        (item.phone && (item.phone.includes(q) || item.phone.includes(cleanDigits))) ||
         item.groups.some(
           (g) =>
             g.groupId.toLowerCase().includes(q) ||
@@ -431,7 +482,7 @@ export default function StudentsPage() {
       >
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
           {/* Search */}
-          <div style={{ position: 'relative', width: '280px' }}>
+          <div style={{ position: 'relative', width: '330px' }}>
             <input
               type="text"
               value={search}
@@ -439,9 +490,12 @@ export default function StudentsPage() {
                 setSearch(e.target.value);
                 setPage(1);
               }}
-              placeholder="ابحث بالاسم، الهاتف، الفوج أو المادة..."
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.preventDefault();
+              }}
+              placeholder="ابحث بالاسم، معرّف التلميذ (ID / Barcode)، الهاتف، الفوج..."
               className="m3-input"
-              style={{ paddingInlineStart: '36px', paddingBlock: '8px', fontSize: '0.85rem' }}
+              style={{ paddingInlineStart: '36px', paddingBlock: '8px', fontSize: '0.84rem' }}
             />
             <Search
               size={16}
@@ -514,6 +568,26 @@ export default function StudentsPage() {
               </button>
             ))}
           </div>
+
+          <button
+            onClick={() => setIsAllBadgesModalOpen(true)}
+            className="m3-btn m3-btn-outlined m3-btn-sm"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontSize: '0.8rem',
+              padding: '6px 12px',
+              color: '#c2410c',
+              borderColor: '#fdba74',
+              backgroundColor: '#fff7ed',
+              fontWeight: 700
+            }}
+            title="طباعة بطاقات جميع التلاميذ (10 بطاقات في الصفحة أو بطاقات CR80 فردية)"
+          >
+            <Printer size={14} />
+            <span>طباعة كل البطاقات</span>
+          </button>
 
           <button
             onClick={handleExportAllCsv}
@@ -625,6 +699,23 @@ export default function StudentsPage() {
                           >
                             <Layers size={10} />
                             <span>{item.groups.length}</span>
+                          </span>
+                        )}
+                        {(item.barcode || item.primaryStudentRecord.barcode) && (
+                          <span
+                            style={{
+                              fontSize: '0.67rem',
+                              fontWeight: 600,
+                              fontFamily: 'monospace',
+                              backgroundColor: 'var(--md-sys-color-surface-container)',
+                              color: 'var(--md-sys-color-outline)',
+                              padding: '1px 5px',
+                              borderRadius: '4px',
+                              border: '1px solid var(--md-sys-color-outline-variant)'
+                            }}
+                            title={`معرّف التلميذ / الباركود: ${item.barcode || item.primaryStudentRecord.barcode}`}
+                          >
+                            {item.barcode || item.primaryStudentRecord.barcode}
                           </span>
                         )}
                       </div>
@@ -929,6 +1020,23 @@ export default function StudentsPage() {
           groupId={activeBadgeStudent.groupId}
           allGroups={activeBadgeStudent.allGroups}
           onClose={() => setActiveBadgeStudent(null)}
+        />
+      )}
+
+      {/* Batch Badges Modal for All Students */}
+      {isAllBadgesModalOpen && (
+        <GroupBadgesModal
+          groupId="جميع التلاميذ"
+          students={filteredStudents.map((item, idx) => ({
+            ...item.primaryStudentRecord,
+            rowId: idx + 1,
+            name: item.name,
+            phone: item.phone || item.primaryStudentRecord.phone || '',
+            barcode:
+              item.primaryStudentRecord.barcode ||
+              `STU-2700${(idx + 1).toString().padStart(4, '0')}`
+          }))}
+          onClose={() => setIsAllBadgesModalOpen(false)}
         />
       )}
     </div>

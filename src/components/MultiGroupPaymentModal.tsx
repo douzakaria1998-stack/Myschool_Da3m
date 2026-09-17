@@ -22,6 +22,7 @@ import {
 import { normalizeArabicName, getBarcodeCandidates } from '../utils/barcodeUtils';
 import { isSummaryRow } from '../utils/sessionUtils';
 import { playSuccessChime } from '../utils/soundUtils';
+import { sanitizePrintTitle } from '../utils/printTitleUtils';
 
 interface Props {
   isOpen: boolean;
@@ -406,8 +407,33 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
   const handlePrintReceipt = (
     results: { groupId: string; rowId: number; fee: number; paidNow: number; totalReceived: number; debt: number }[]
   ) => {
+    if (!selectedStudent) return;
+
+    const studentId = selectedStudent.barcode;
+    const printDocTitle =
+      sanitizePrintTitle(`${selectedStudent.name} - ${studentId || 'وصل تسديد'}`) ||
+      `وصل تسديد متعدد - ${selectedStudent.name}`;
+
+    const originalParentTitle = typeof document !== 'undefined' ? document.title : '';
+    if (typeof document !== 'undefined') {
+      document.title = printDocTitle;
+    }
+    const restoreParentTitle = () => {
+      if (typeof document !== 'undefined' && originalParentTitle) {
+        document.title = originalParentTitle;
+      }
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('afterprint', restoreParentTitle);
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('afterprint', restoreParentTitle, { once: true });
+      setTimeout(restoreParentTitle, 5000);
+    }
+
     const printWindow = window.open('', '_blank', receiptFormat === 'thermal' ? 'width=420,height=650' : 'width=750,height=900');
-    if (!printWindow || !selectedStudent) return;
+    if (!printWindow) return;
+    printWindow.document.title = printDocTitle;
 
     const printDate = new Date().toLocaleDateString('ar-DZ');
     const printTime = new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' });
@@ -427,7 +453,7 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
         <html dir="rtl" lang="ar">
           <head>
             <meta charset="utf-8" />
-            <title>وصل تسديد متعدد - ${selectedStudent.name}</title>
+            <title>${printDocTitle}</title>
             <style>
               @page { size: 80mm auto; margin: 0mm !important; }
               * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -513,6 +539,7 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
 
             <script>
               window.onload = function() {
+                document.title = ${JSON.stringify(printDocTitle)};
                 window.print();
                 setTimeout(function() { window.close(); }, 500);
               };
@@ -527,7 +554,7 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
         <html dir="rtl" lang="ar">
           <head>
             <meta charset="utf-8" />
-            <title>وصل تسديد متعدد A4 - ${selectedStudent.name}</title>
+            <title>${printDocTitle}</title>
             <style>
               body { font-family: 'Cairo', sans-serif; padding: 30px; text-align: right; color: #111; }
               .header { text-align: center; border-bottom: 2px solid #0284c7; padding-bottom: 12px; margin-bottom: 20px; }
@@ -555,7 +582,8 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
               </div>
               <div style="text-align: left;">
                 <p><strong>رقم الوصل:</strong> #${receiptNo}</p>
-                <p><strong>التاريخ:</strong> ${printDate} - ${printTime}</p>
+                <p><strong>التاريخ:</strong> ${printDate}</p>
+                <p><strong>الوقت:</strong> ${printTime}</p>
               </div>
             </div>
 
@@ -565,9 +593,9 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
                   <th>الفوج</th>
                   <th>المادة</th>
                   <th>الأستاذ</th>
-                  <th style="text-align: center;">الرسوم</th>
-                  <th style="text-align: center;">المسدد الآن</th>
-                  <th style="text-align: center;">المتبقي كدين</th>
+                  <th>المبلغ المستحق</th>
+                  <th>المسدد الآن</th>
+                  <th>الوضعية</th>
                 </tr>
               </thead>
               <tbody>
@@ -576,13 +604,13 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
                     const g = data.groups.find((grp) => grp.id === rec.groupId);
                     return `
                     <tr>
-                      <td style="font-weight: bold;">${rec.groupId}</td>
+                      <td style="font-weight: bold; text-align: center;">${rec.groupId}</td>
                       <td>${g?.subject || ''}</td>
                       <td>${g?.teacherName || ''}</td>
                       <td style="text-align: center;">${rec.fee.toLocaleString()} دج</td>
-                      <td style="text-align: center; font-weight: bold; color: #15803d;">+ ${rec.paidNow.toLocaleString()} دج</td>
-                      <td style="text-align: center; font-weight: bold; color: ${rec.debt > 0 ? '#b91c1c' : '#15803d'};">
-                        ${rec.debt > 0 ? `${rec.debt.toLocaleString()} دج` : 'مسدد بالكامل ✓'}
+                      <td style="text-align: center; font-weight: bold; color: #0284c7;">${rec.paidNow.toLocaleString()} دج</td>
+                      <td style="text-align: center; color: ${rec.debt > 0 ? '#b91c1c' : '#15803d'};">
+                        ${rec.debt > 0 ? `متبقي دين: ${rec.debt.toLocaleString()} دج` : 'خالص ✓'}
                       </td>
                     </tr>
                   `;
@@ -592,9 +620,9 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
             </table>
 
             <div class="totals-box">
-              <div class="flex-row total-paid">
-                <span>المجموع المستلم الآن:</span>
-                <span>${grandTotalPaid.toLocaleString()} دج</span>
+              <div class="flex-row">
+                <span>المبلغ الإجمالي المسدد الآن:</span>
+                <span class="total-paid">${grandTotalPaid.toLocaleString()} دج</span>
               </div>
               <div class="flex-row" style="color: ${grandTotalDebt > 0 ? '#b91c1c' : '#15803d'}; font-weight: bold;">
                 <span>إجمالي الديون المتبقية:</span>
@@ -608,6 +636,7 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
 
             <script>
               window.onload = function() {
+                document.title = ${JSON.stringify(printDocTitle)};
                 window.print();
                 setTimeout(function() { window.close(); }, 500);
               };

@@ -42,14 +42,16 @@ export default function StudentBadgeModal({ student, groupId, allGroups = [], on
   const handlePrint = () => {
     if (!cardRef.current) return;
     const cardHtml = cardRef.current.outerHTML;
+    const studentId = barcodeValue || student.barcode || student.rowId;
+    const cardTitle = `${student.name} - ${studentId}`;
 
     if (printLayout === 'cr80') {
       // Exactly 1 single card on CR80 PVC (1 page only)
-      printCardHtml([cardHtml], 'cr80', `بطاقة التلميذ - ${student.name}`);
+      printCardHtml([cardHtml], 'cr80', cardTitle);
     } else {
       // 10 copies filling an A4 sheet (1 page of 10 cards)
       const tenCopies = Array.from({ length: 10 }).map(() => cardHtml);
-      printCardHtml(tenCopies, 'a4_sheet', `كشف بطاقة التلميذ A4 - ${student.name}`);
+      printCardHtml(tenCopies, 'a4_sheet', cardTitle);
     }
   };
 

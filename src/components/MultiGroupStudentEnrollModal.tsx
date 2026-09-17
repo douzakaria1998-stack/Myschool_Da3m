@@ -15,6 +15,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { getGroupStatus, isGroupActive } from '../utils/sessionUtils';
+import { sanitizePrintTitle } from '../utils/printTitleUtils';
 
 interface Props {
   isOpen: boolean;
@@ -250,12 +251,34 @@ export default function MultiGroupStudentEnrollModal({ isOpen, onClose }: Props)
   const handlePrintMultiReceipt = (
     enrolledRecords: { groupId: string; fee: number; paid: number; debt: number }[]
   ) => {
+    const receiptNo = `REG-${Date.now().toString().slice(-6)}`;
+    const printDocTitle =
+      sanitizePrintTitle(`${studentName} - ${receiptNo}`) ||
+      `وصل تسجيل - ${studentName}`;
+
+    const originalParentTitle = typeof document !== 'undefined' ? document.title : '';
+    if (typeof document !== 'undefined') {
+      document.title = printDocTitle;
+    }
+    const restoreParentTitle = () => {
+      if (typeof document !== 'undefined' && originalParentTitle) {
+        document.title = originalParentTitle;
+      }
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('afterprint', restoreParentTitle);
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('afterprint', restoreParentTitle, { once: true });
+      setTimeout(restoreParentTitle, 5000);
+    }
+
     const printWindow = window.open('', '_blank', receiptFormat === 'thermal' ? 'width=420,height=650' : 'width=750,height=900');
     if (!printWindow) return;
+    printWindow.document.title = printDocTitle;
 
     const printDate = new Date().toLocaleDateString('ar-DZ');
     const printTime = new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' });
-    const receiptNo = `REG-${Date.now().toString().slice(-6)}`;
 
     const printRecords = receiptScope === 'paid_only'
       ? enrolledRecords.filter((rec) => rec.paid > 0)
@@ -291,7 +314,7 @@ export default function MultiGroupStudentEnrollModal({ isOpen, onClose }: Props)
         <html dir="rtl" lang="ar">
           <head>
             <meta charset="utf-8" />
-            <title>وصل تسجيل متعدد 80mm - ${studentName}</title>
+            <title>${printDocTitle}</title>
             <style>
               @page { size: 80mm auto; margin: 0mm !important; }
               * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -385,6 +408,7 @@ export default function MultiGroupStudentEnrollModal({ isOpen, onClose }: Props)
 
             <script>
               window.onload = function() {
+                document.title = ${JSON.stringify(printDocTitle)};
                 window.print();
                 setTimeout(function() { window.close(); }, 500);
               };
@@ -399,7 +423,7 @@ export default function MultiGroupStudentEnrollModal({ isOpen, onClose }: Props)
         <html dir="rtl" lang="ar">
           <head>
             <meta charset="utf-8" />
-            <title>وصل تسجيل واستلام مستحقات - ${studentName}</title>
+            <title>${printDocTitle}</title>
             <style>
               @page { size: A4; margin: 15mm; }
               * { box-sizing: border-box; }
@@ -512,6 +536,7 @@ export default function MultiGroupStudentEnrollModal({ isOpen, onClose }: Props)
 
             <script>
               window.onload = function() {
+                document.title = ${JSON.stringify(printDocTitle)};
                 window.print();
               };
             </script>

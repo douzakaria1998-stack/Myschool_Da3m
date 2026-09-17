@@ -129,16 +129,36 @@ export default function AttendancePage() {
     }
   }, [group?.groupId, group?.sessionDates]);
 
-  // Filter students
+  // Filter students (supports Name, Student ID / Barcode, Phone)
   const filteredStudents = realStudents.filter((s) => {
-    const matchesSearch =
-      s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (s.phone && s.phone.includes(searchQuery));
+    const rawQ = searchQuery.trim();
+    if (!rawQ) {
+      if (filterDebt === 'debt') return s.debt > 0;
+      if (filterDebt === 'paid') return s.debt === 0 && s.fee > 0;
+      if (filterDebt === 'exempt') return s.discount === '0';
+      return true;
+    }
 
-    if (filterDebt === 'debt') return matchesSearch && s.debt > 0;
-    if (filterDebt === 'paid') return matchesSearch && s.debt === 0 && s.fee > 0;
-    if (filterDebt === 'exempt') return matchesSearch && s.discount === '0';
-    return matchesSearch;
+    const q = rawQ.toLowerCase();
+    const normalizedDigits = q.replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString());
+    const cleanDigits = normalizedDigits.replace(/\D/g, '');
+
+    const barcode = (s.barcode || '').toLowerCase();
+    const matchesId =
+      (barcode && (barcode.includes(q) || barcode.includes(normalizedDigits))) ||
+      (cleanDigits.length >= 2 && barcode.replace(/\D/g, '').includes(cleanDigits)) ||
+      (cleanDigits.length > 0 && String(s.rowId) === cleanDigits);
+
+    const matchesSearch =
+      matchesId ||
+      s.name.toLowerCase().includes(q) ||
+      (s.phone && (s.phone.includes(q) || s.phone.includes(cleanDigits)));
+
+    if (!matchesSearch) return false;
+    if (filterDebt === 'debt') return s.debt > 0;
+    if (filterDebt === 'paid') return s.debt === 0 && s.fee > 0;
+    if (filterDebt === 'exempt') return s.discount === '0';
+    return true;
   });
 
   // Calculate live aggregate attendance statistics for the selected session
@@ -628,12 +648,15 @@ export default function AttendancePage() {
       >
         {/* Search & Debt Filter */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-          <div style={{ position: 'relative', width: '260px' }}>
+          <div style={{ position: 'relative', width: '310px' }}>
             <input
               type="text"
               value={searchQuery ?? ''}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="ابحث باسم التلميذ أو رقم الهاتف..."
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.preventDefault();
+              }}
+              placeholder="ابحث باسم التلميذ، المعرّف (ID) أو الهاتف..."
               className="m3-input"
               style={{ paddingInlineStart: '36px', paddingBlock: '8px', fontSize: '0.85rem' }}
             />

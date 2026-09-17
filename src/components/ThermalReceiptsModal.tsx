@@ -5,6 +5,7 @@ import { GroupSheet, StudentRecord } from '../types';
 import { useApp } from '../context/AppContext';
 import { X, Printer, Receipt, Check, Save, CreditCard, Search } from 'lucide-react';
 import { getDefaultSessionIndex, isSessionDateToday, isSummaryRow, formatToYYYYMMDD } from '../utils/sessionUtils';
+import { sanitizePrintTitle } from '../utils/printTitleUtils';
 
 interface Props {
   group: GroupSheet;
@@ -433,6 +434,37 @@ export default function ThermalReceiptsModal({ group, onClose }: Props) {
     const printDateStr = formatToYYYYMMDD(new Date());
     const printTimeStr = new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' });
 
+    let printDocTitle = '';
+    if (listToPrint.length === 1) {
+      const singleStu = listToPrint[0];
+      const singleStuId = singleStu.barcode || (singleStu.rowId ? `STU-${singleStu.rowId}` : '');
+      printDocTitle =
+        sanitizePrintTitle(`${singleStu.name} - ${singleStuId || 'وصل حراري'}`) ||
+        `وصل حراري - ${singleStu.name}`;
+    } else {
+      const teacherPrefix = group.teacherName ? `${group.teacherName} - ` : '';
+      printDocTitle =
+        sanitizePrintTitle(`${teacherPrefix}وصولات فوج ${group.groupId}`) ||
+        `وصولات حرارية 80mm - فوج ${group.groupId}`;
+    }
+
+    const originalParentTitle = typeof document !== 'undefined' ? document.title : '';
+    if (typeof document !== 'undefined') {
+      document.title = printDocTitle;
+    }
+    const restoreParentTitle = () => {
+      if (typeof document !== 'undefined' && originalParentTitle) {
+        document.title = originalParentTitle;
+      }
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('afterprint', restoreParentTitle);
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('afterprint', restoreParentTitle, { once: true });
+      setTimeout(restoreParentTitle, 5000);
+    }
+
     // Single student OR batch mode with explicit page breaks
     if (listToPrint.length === 1 || printMode === 'batch') {
       const printWindow = window.open('', '_blank', 'width=420,height=600');
@@ -440,6 +472,7 @@ export default function ThermalReceiptsModal({ group, onClose }: Props) {
         alert('يرجى السماح بفتح النوافذ المنبثقة للطباعة');
         return;
       }
+      printWindow.document.title = printDocTitle;
 
       const receiptsHtml = listToPrint
         .map((student, idx) => buildReceiptHtml(student, idx, printDateStr, printTimeStr))
@@ -450,7 +483,7 @@ export default function ThermalReceiptsModal({ group, onClose }: Props) {
         <html dir="rtl" lang="ar">
           <head>
             <meta charset="utf-8" />
-            <title>وصولات حرارية 80mm - فوج ${group.groupId}</title>
+            <title>${printDocTitle}</title>
             <style>
               ${thermalPrintCss}
             </style>
@@ -461,6 +494,7 @@ export default function ThermalReceiptsModal({ group, onClose }: Props) {
             </div>
             <script>
               window.onload = function() {
+                document.title = ${JSON.stringify(printDocTitle)};
                 window.print();
                 setTimeout(function() { window.close(); }, 600);
               };
@@ -538,6 +572,9 @@ export default function ThermalReceiptsModal({ group, onClose }: Props) {
             function printCurrent() {
               if (curIdx >= receipts.length) return;
               renderReceipt(curIdx);
+              if (receipts[curIdx] && receipts[curIdx].name) {
+                document.title = receipts[curIdx].name + ' - وصل حراري';
+              }
               setTimeout(function() {
                 window.print();
               }, 350);
@@ -898,7 +935,7 @@ export default function ThermalReceiptsModal({ group, onClose }: Props) {
 
                   return (
                     <tr
-                      key={s.rowId}
+                      key={`thermal-stu-${s.rowId}-${s.barcode || s.name}-${idx}`}
                       style={{
                         backgroundColor: isSelected
                           ? (hasPaidToday ? 'var(--status-present-container)' : 'var(--md-sys-color-surface-container)')

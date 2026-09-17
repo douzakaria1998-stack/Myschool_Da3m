@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   X,
   Printer,
@@ -28,6 +28,10 @@ export default function GroupBadgesModal({ groupId, students, onClose }: Props) 
   const [selectedRowIds, setSelectedRowIds] = useState<Set<number>>(
     () => new Set(students.map((s) => s.rowId))
   );
+
+  useEffect(() => {
+    setSelectedRowIds(new Set(students.map((s) => s.rowId)));
+  }, [students]);
 
   const groupMeta = data.groups?.find((g) => g.id === groupId);
   const groupSubject = groupMeta?.subject || data.groupData[groupId]?.subject || '';
@@ -76,10 +80,14 @@ export default function GroupBadgesModal({ groupId, students, onClose }: Props) 
     const cardNodes = container.querySelectorAll('.pvc-card');
     const cardHtmlList = Array.from(cardNodes).map((node) => node.outerHTML);
 
+    const isAll = groupId === 'جميع التلاميذ' || groupId === 'all';
+    const titlePrefix = groupTeacher ? `${groupTeacher} - ` : '';
+    const printTitle = isAll ? 'بطاقات جميع التلاميذ' : `${titlePrefix}بطاقات فوج ${groupId}`;
+
     printCardHtml(
       cardHtmlList,
       printLayout,
-      `بطاقات الفوج ${groupId} (${cardHtmlList.length} بطاقة)`
+      printTitle
     );
   };
 
@@ -138,7 +146,9 @@ export default function GroupBadgesModal({ groupId, students, onClose }: Props) 
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: 'var(--md-sys-color-on-surface)' }}>
-                  طباعة شارات وبطاقات الفوج ({groupId})
+                  {groupId === 'جميع التلاميذ' || groupId === 'all'
+                    ? 'طباعة شارات وبطاقات جميع التلاميذ'
+                    : `طباعة شارات وبطاقات الفوج (${groupId})`}
                 </h3>
                 <span
                   style={{
@@ -151,11 +161,15 @@ export default function GroupBadgesModal({ groupId, students, onClose }: Props) 
                     fontWeight: 800
                   }}
                 >
-                  {groupSubject ? `${groupSubject}` : 'الفوج المعتمد'} {groupTeacher ? `— ${groupTeacher}` : ''}
+                  {groupId === 'جميع التلاميذ' || groupId === 'all'
+                    ? 'قائمة التلاميذ العامة'
+                    : `${groupSubject ? `${groupSubject}` : 'الفوج المعتمد'} ${groupTeacher ? `— ${groupTeacher}` : ''}`}
                 </span>
               </div>
               <p style={{ margin: '2px 0 0', fontSize: '0.82rem', color: 'var(--md-sys-color-outline)' }}>
-                طباعة بطاقات جميع تلاميذ الفوج ({students.length} تلميذ) لمدرسة ماي سكول لتعليم اللغات
+                {groupId === 'جميع التلاميذ' || groupId === 'all'
+                  ? `طباعة بطاقات جميع التلاميذ المحددين (${students.length} تلميذ) لمدرسة ماي سكول لتعليم اللغات`
+                  : `طباعة بطاقات جميع تلاميذ الفوج (${students.length} تلميذ) لمدرسة ماي سكول لتعليم اللغات`}
               </p>
             </div>
           </div>
@@ -296,11 +310,11 @@ export default function GroupBadgesModal({ groupId, students, onClose }: Props) 
               border: '1px solid var(--md-sys-color-outline-variant)'
             }}
           >
-            {filteredStudents.map((s) => {
+            {filteredStudents.map((s, idx) => {
               const isSelected = selectedRowIds.has(s.rowId);
               return (
                 <button
-                  key={s.rowId}
+                  key={`student-select-${s.rowId}-${s.barcode || s.name}-${idx}`}
                   type="button"
                   onClick={() => toggleStudent(s.rowId)}
                   style={{
@@ -343,8 +357,8 @@ export default function GroupBadgesModal({ groupId, students, onClose }: Props) 
               alignItems: 'center'
             }}
           >
-            {printStudents.slice(0, 6).map((student) => (
-              <div key={student.rowId} style={{ flexShrink: 0, transform: 'scale(0.95)', transformOrigin: 'top center' }}>
+            {printStudents.slice(0, 6).map((student, idx) => (
+              <div key={`preview-card-${student.rowId}-${student.barcode || student.name}-${idx}`} style={{ flexShrink: 0, transform: 'scale(0.95)', transformOrigin: 'top center' }}>
                 <StudentCardView
                   student={student}
                   academicYear={data.academicYear || '2026/2027'}
@@ -386,9 +400,9 @@ export default function GroupBadgesModal({ groupId, students, onClose }: Props) 
 
         {/* Hidden Container with all selected cards rendered for print collection */}
         <div id="batch-badges-cards-source" style={{ display: 'none' }}>
-          {printStudents.map((s) => (
+          {printStudents.map((s, idx) => (
             <StudentCardView
-              key={s.rowId}
+              key={`print-source-card-${s.rowId}-${s.barcode || s.name}-${idx}`}
               student={s}
               academicYear={data.academicYear || '2026/2027'}
               centerName="مدرسة ماي سكول لتعليم اللغات"

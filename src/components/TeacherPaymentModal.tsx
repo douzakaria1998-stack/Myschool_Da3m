@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { Teacher, GroupSheet, TeacherPaymentRecord } from '../types';
+import { sanitizePrintTitle, getArabicMonthYear } from '../utils/printTitleUtils';
 import {
   X,
   Printer,
@@ -42,8 +43,31 @@ export default function TeacherPaymentModal({ teacher, stats, onClose }: Props) 
 
   // Print voucher function
   const handlePrintVoucher = (payment: TeacherPaymentRecord, currentRemaining: number) => {
+    const monthStr = getArabicMonthYear(payment.date);
+    const voucherTitle =
+      sanitizePrintTitle(`${teacher.name} - ${teacher.id} - ${monthStr}`) ||
+      `وصل تسديد أتعاب الأستاذ - ${teacher.name}`;
+
+    const originalParentTitle = typeof document !== 'undefined' ? document.title : '';
+    if (typeof document !== 'undefined') {
+      document.title = voucherTitle;
+    }
+    const restoreParentTitle = () => {
+      if (typeof document !== 'undefined' && originalParentTitle) {
+        document.title = originalParentTitle;
+      }
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('afterprint', restoreParentTitle);
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('afterprint', restoreParentTitle, { once: true });
+      setTimeout(restoreParentTitle, 6000);
+    }
+
     const printWindow = window.open('', '_blank', 'width=800,height=900');
     if (!printWindow) return;
+    printWindow.document.title = voucherTitle;
 
     const printDate = payment.date || new Date().toLocaleDateString('ar-DZ');
     const printTime = payment.time || new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' });
@@ -76,7 +100,7 @@ export default function TeacherPaymentModal({ teacher, stats, onClose }: Props) 
       <html dir="rtl" lang="ar">
         <head>
           <meta charset="utf-8" />
-          <title>وصل تسديد أتعاب الأستاذ - ${teacher.name}</title>
+          <title>${voucherTitle}</title>
           <style>
             @page { size: A4; margin: 15mm; }
             * { box-sizing: border-box; }
@@ -290,6 +314,7 @@ export default function TeacherPaymentModal({ teacher, stats, onClose }: Props) 
 
           <script>
             window.onload = () => {
+              document.title = ${JSON.stringify(voucherTitle)};
               window.print();
             };
           </script>

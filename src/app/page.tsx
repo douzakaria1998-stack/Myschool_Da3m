@@ -149,14 +149,36 @@ export default function DashboardPage() {
   const paidCount = useMemo(() => allStudents.filter((s) => (s.student.debt || 0) === 0 && (s.student.fee || 0) > 0).length, [allStudents]);
   const exemptCount = useMemo(() => allStudents.filter((s) => s.student.discount === '0').length, [allStudents]);
 
-  // Filter students
+  // Filter students (supports Name, Student ID / Barcode, Phone, Group, Subject, Teacher)
   const filteredStudents = useMemo(() => {
+    const rawQ = studentSearch.trim();
+    if (!rawQ) {
+      return allStudents.filter((item) => {
+        const matchesGroup = studentGroupFilter === 'all' || item.groupId === studentGroupFilter;
+        if (!matchesGroup) return false;
+        if (studentStatusFilter === 'debt') return (item.student.debt || 0) > 0;
+        if (studentStatusFilter === 'paid') return (item.student.debt || 0) === 0 && (item.student.fee || 0) > 0;
+        if (studentStatusFilter === 'exempt') return item.student.discount === '0';
+        if (studentStatusFilter === 'vip') return item.isVip;
+        return true;
+      });
+    }
+
+    const q = rawQ.toLowerCase();
+    const normalizedDigits = q.replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString());
+    const cleanDigits = normalizedDigits.replace(/\D/g, '');
+
     return allStudents.filter((item) => {
-      const q = studentSearch.trim().toLowerCase();
+      const barcode = (item.student.barcode || '').toLowerCase();
+      const matchesId =
+        (barcode && (barcode.includes(q) || barcode.includes(normalizedDigits))) ||
+        (cleanDigits.length >= 2 && barcode.replace(/\D/g, '').includes(cleanDigits)) ||
+        (cleanDigits.length > 0 && String(item.student.rowId) === cleanDigits);
+
       const matchesSearch =
-        !q ||
+        matchesId ||
         item.student.name.toLowerCase().includes(q) ||
-        (item.student.phone && item.student.phone.includes(q)) ||
+        (item.student.phone && (item.student.phone.includes(q) || item.student.phone.includes(cleanDigits))) ||
         item.groupId.toLowerCase().includes(q) ||
         item.subject.toLowerCase().includes(q) ||
         item.teacherName.toLowerCase().includes(q);
@@ -1265,7 +1287,7 @@ export default function DashboardPage() {
           >
             <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
               {/* Search input */}
-              <div style={{ position: 'relative', width: '260px' }}>
+              <div style={{ position: 'relative', width: '310px' }}>
                 <input
                   type="text"
                   value={studentSearch}
@@ -1273,7 +1295,10 @@ export default function DashboardPage() {
                     setStudentSearch(e.target.value);
                     setStudentPage(1);
                   }}
-                  placeholder="ابحث بالاسم، الهاتف، الفوج..."
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') e.preventDefault();
+                  }}
+                  placeholder="ابحث بالاسم، المعرّف (ID)، الهاتف، الفوج..."
                   className="m3-input"
                   style={{ paddingInlineStart: '34px', paddingBlock: '7px', fontSize: '0.82rem' }}
                 />

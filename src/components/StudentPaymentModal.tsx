@@ -5,6 +5,7 @@ import { StudentRecord, DiscountType } from '../types';
 import { useApp, calcStudentFinancesPure } from '../context/AppContext';
 import { X, Check, Printer, AlertCircle, Receipt } from 'lucide-react';
 import { formatToYYYYMMDD } from '../utils/sessionUtils';
+import { sanitizePrintTitle } from '../utils/printTitleUtils';
 
 interface Props {
   groupId: string;
@@ -53,8 +54,31 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
     // Auto-save changes first
     updateStudentFullFinances(groupId, student.rowId, payments, discount);
 
+    const studentId = student.barcode || (student.rowId ? `STU-${student.rowId}` : '');
+    const receiptTitle =
+      sanitizePrintTitle(`${student.name} - ${studentId || 'وصل دفع'}`) ||
+      `وصل دفع - ${student.name}`;
+
+    const originalParentTitle = typeof document !== 'undefined' ? document.title : '';
+    if (typeof document !== 'undefined') {
+      document.title = receiptTitle;
+    }
+    const restoreParentTitle = () => {
+      if (typeof document !== 'undefined' && originalParentTitle) {
+        document.title = originalParentTitle;
+      }
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('afterprint', restoreParentTitle);
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('afterprint', restoreParentTitle, { once: true });
+      setTimeout(restoreParentTitle, 5000);
+    }
+
     const printWindow = window.open('', '', 'width=600,height=700');
     if (!printWindow) return;
+    printWindow.document.title = receiptTitle;
 
     const totalPaid = livePreview.totalReceived;
     const balance = livePreview.debt;
@@ -63,7 +87,7 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
       <!DOCTYPE html>
       <html dir="rtl" lang="ar">
         <head>
-          <title>وصل دفع - ${student.name}</title>
+          <title>${receiptTitle}</title>
           <style>
             body { font-family: 'Cairo', sans-serif; padding: 30px; text-align: right; color: #111; }
             .header { text-align: center; border-bottom: 2px solid #00639b; padding-bottom: 12px; margin-bottom: 20px; }
@@ -119,7 +143,11 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
             <p>ختم وإمضاء الإدارة</p>
           </div>
           <script>
-            window.onload = () => { window.print(); window.close(); }
+            window.onload = () => {
+              document.title = ${JSON.stringify(receiptTitle)};
+              window.print();
+              window.close();
+            };
           </script>
         </body>
       </html>
@@ -132,8 +160,31 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
     // Auto-save changes first
     updateStudentFullFinances(groupId, student.rowId, payments, discount);
 
+    const studentId = student.barcode || (student.rowId ? `STU-${student.rowId}` : '');
+    const receiptTitle =
+      sanitizePrintTitle(`${student.name} - ${studentId || 'وصل حراري'}`) ||
+      `وصل حراري - ${student.name}`;
+
+    const originalParentTitle = typeof document !== 'undefined' ? document.title : '';
+    if (typeof document !== 'undefined') {
+      document.title = receiptTitle;
+    }
+    const restoreParentTitle = () => {
+      if (typeof document !== 'undefined' && originalParentTitle) {
+        document.title = originalParentTitle;
+      }
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('afterprint', restoreParentTitle);
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('afterprint', restoreParentTitle, { once: true });
+      setTimeout(restoreParentTitle, 5000);
+    }
+
     const printWindow = window.open('', '_blank', 'width=400,height=550');
     if (!printWindow) return;
+    printWindow.document.title = receiptTitle;
 
     const totalPaid = livePreview.totalReceived;
     const balance = livePreview.debt;
@@ -146,7 +197,7 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
       <html dir="rtl" lang="ar">
         <head>
           <meta charset="utf-8" />
-          <title>وصل حراري 80mm - ${student.name}</title>
+          <title>${receiptTitle}</title>
           <style>
             @page { size: 80mm auto; margin: 0mm !important; }
             * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -218,7 +269,11 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
           </div>
           <div class="cut-line">✄ - - - - - - - - - - - - - - - - - - -</div>
           <script>
-            window.onload = function() { window.print(); setTimeout(function() { window.close(); }, 500); };
+            window.onload = function() {
+              document.title = ${JSON.stringify(receiptTitle)};
+              window.print();
+              setTimeout(function() { window.close(); }, 500);
+            };
           </script>
         </body>
       </html>
