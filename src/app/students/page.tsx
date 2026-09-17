@@ -27,7 +27,7 @@ import StudentProfileModal from '../../components/StudentProfileModal';
 import StudentBadgeModal from '../../components/StudentBadgeModal';
 import GroupBadgesModal from '../../components/GroupBadgesModal';
 import MultiGroupPaymentModal from '../../components/MultiGroupPaymentModal';
-import { normalizeArabicName } from '../../utils/barcodeUtils';
+import { normalizeArabicName, normalizeScannedBarcode } from '../../utils/barcodeUtils';
 import { isSummaryRow } from '../../utils/sessionUtils';
 
 export interface GroupEnrollment {
@@ -198,6 +198,7 @@ export default function StudentsPage() {
     }
 
     const q = rawQ.toLowerCase();
+    const normalizedScan = normalizeScannedBarcode(rawQ).toLowerCase();
     // Normalize Arabic-Indic digits (٠-٩) to 0-9
     const normalizedDigits = q.replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString());
     const cleanDigits = normalizedDigits.replace(/\D/g, '');
@@ -210,11 +211,17 @@ export default function StudentsPage() {
         ...item.groups.map((g) => g.student.barcode)
       ].filter(Boolean) as string[];
 
-      // Match Student ID / Barcode: full string, alphanumeric, or numeric ID sequence
+      // Match Student ID / Barcode: full string, normalized scan, alphanumeric, or numeric ID sequence
       const matchesId =
         barcodes.some((b) => {
           const bLower = b.toLowerCase();
-          if (bLower.includes(q) || bLower.includes(normalizedDigits)) return true;
+          if (
+            bLower.includes(q) ||
+            bLower.includes(normalizedScan) ||
+            bLower.includes(normalizedDigits)
+          ) {
+            return true;
+          }
           if (cleanDigits.length >= 2 && b.replace(/\D/g, '').includes(cleanDigits)) return true;
           return false;
         }) ||
@@ -487,15 +494,31 @@ export default function StudentsPage() {
               type="text"
               value={search}
               onChange={(e) => {
-                setSearch(e.target.value);
+                const cleanVal = normalizeScannedBarcode(e.target.value);
+                setSearch(cleanVal);
                 setPage(1);
+              }}
+              onPaste={(e) => {
+                const pasted = e.clipboardData.getData('text');
+                const cleanVal = normalizeScannedBarcode(pasted);
+                if (cleanVal !== pasted) {
+                  e.preventDefault();
+                  setSearch(cleanVal);
+                  setPage(1);
+                }
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') e.preventDefault();
               }}
               placeholder="ابحث بالاسم، معرّف التلميذ (ID / Barcode)، الهاتف، الفوج..."
               className="m3-input"
-              style={{ paddingInlineStart: '36px', paddingBlock: '8px', fontSize: '0.84rem' }}
+              style={{
+                paddingInlineStart: '36px',
+                paddingBlock: '8px',
+                fontSize: '0.84rem',
+                direction: /^[a-zA-Z0-9\-_]/.test(search) ? 'ltr' : 'rtl',
+                textAlign: /^[a-zA-Z0-9\-_]/.test(search) ? 'left' : 'right'
+              }}
             />
             <Search
               size={16}

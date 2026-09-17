@@ -23,6 +23,7 @@ import { normalizeArabicName, getBarcodeCandidates } from '../utils/barcodeUtils
 import { isSummaryRow } from '../utils/sessionUtils';
 import { playSuccessChime } from '../utils/soundUtils';
 import { sanitizePrintTitle } from '../utils/printTitleUtils';
+import { normalizeScannedBarcode } from '../utils/barcodeUtils';
 
 interface Props {
   isOpen: boolean;
@@ -204,10 +205,10 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
   // Hardware scanner auto-select
   useEffect(() => {
     if (!isOpen || selectedStudent) return;
-    const q = searchQuery.trim();
-    if (q.length >= 8) {
+    const cleanQ = normalizeScannedBarcode(searchQuery).trim();
+    if (cleanQ.length >= 8) {
       const exactBarcodeMatch = allUniqueStudents.find(
-        (s) => s.barcode && s.barcode.toUpperCase() === q.toUpperCase()
+        (s) => s.barcode && s.barcode.toUpperCase() === cleanQ.toUpperCase()
       );
       if (exactBarcodeMatch) {
         handleSelectStudent(exactBarcodeMatch);
@@ -772,7 +773,18 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
                   ref={searchInputRef}
                   type="text"
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onChange={(e) => {
+                    const cleanVal = normalizeScannedBarcode(e.target.value);
+                    setSearchQuery(cleanVal);
+                  }}
+                  onPaste={(e) => {
+                    const pasted = e.clipboardData.getData('text');
+                    const cleanVal = normalizeScannedBarcode(pasted);
+                    if (cleanVal !== pasted) {
+                      e.preventDefault();
+                      setSearchQuery(cleanVal);
+                    }
+                  }}
                   placeholder="اكتب اسم التلميذ، أو مرر بطاقة الباركود بالقارئ، أو اكتب الهاتف..."
                   className="m3-input"
                   style={{
@@ -782,7 +794,9 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
                     fontWeight: 700,
                     height: '32px',
                     borderColor: 'var(--md-sys-color-primary)',
-                    boxShadow: '0 1px 4px rgba(0,0,0,0.04)'
+                    boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+                    direction: /^[a-zA-Z0-9\-_]/.test(searchQuery) ? 'ltr' : 'rtl',
+                    textAlign: /^[a-zA-Z0-9\-_]/.test(searchQuery) ? 'left' : 'right'
                   }}
                   autoFocus
                 />

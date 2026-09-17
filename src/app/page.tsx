@@ -38,6 +38,7 @@ import MultiGroupStudentEnrollModal from '../components/MultiGroupStudentEnrollM
 import MultiGroupPaymentModal from '../components/MultiGroupPaymentModal';
 import RenewGroupModal from '../components/RenewGroupModal';
 import StudentProfileModal from '../components/StudentProfileModal';
+import { normalizeScannedBarcode } from '../utils/barcodeUtils';
 import StudentPaymentModal from '../components/StudentPaymentModal';
 import {
   isGroupToday,
@@ -165,13 +166,14 @@ export default function DashboardPage() {
     }
 
     const q = rawQ.toLowerCase();
+    const normalizedScan = normalizeScannedBarcode(rawQ).toLowerCase();
     const normalizedDigits = q.replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString());
     const cleanDigits = normalizedDigits.replace(/\D/g, '');
 
     return allStudents.filter((item) => {
       const barcode = (item.student.barcode || '').toLowerCase();
       const matchesId =
-        (barcode && (barcode.includes(q) || barcode.includes(normalizedDigits))) ||
+        (barcode && (barcode.includes(q) || barcode.includes(normalizedScan) || barcode.includes(normalizedDigits))) ||
         (cleanDigits.length >= 2 && barcode.replace(/\D/g, '').includes(cleanDigits)) ||
         (cleanDigits.length > 0 && String(item.student.rowId) === cleanDigits);
 
@@ -1292,15 +1294,31 @@ export default function DashboardPage() {
                   type="text"
                   value={studentSearch}
                   onChange={(e) => {
-                    setStudentSearch(e.target.value);
+                    const cleanVal = normalizeScannedBarcode(e.target.value);
+                    setStudentSearch(cleanVal);
                     setStudentPage(1);
+                  }}
+                  onPaste={(e) => {
+                    const pasted = e.clipboardData.getData('text');
+                    const cleanVal = normalizeScannedBarcode(pasted);
+                    if (cleanVal !== pasted) {
+                      e.preventDefault();
+                      setStudentSearch(cleanVal);
+                      setStudentPage(1);
+                    }
                   }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') e.preventDefault();
                   }}
                   placeholder="ابحث بالاسم، المعرّف (ID)، الهاتف، الفوج..."
                   className="m3-input"
-                  style={{ paddingInlineStart: '34px', paddingBlock: '7px', fontSize: '0.82rem' }}
+                  style={{
+                    paddingInlineStart: '34px',
+                    paddingBlock: '7px',
+                    fontSize: '0.82rem',
+                    direction: /^[a-zA-Z0-9\-_]/.test(studentSearch) ? 'ltr' : 'rtl',
+                    textAlign: /^[a-zA-Z0-9\-_]/.test(studentSearch) ? 'left' : 'right'
+                  }}
                 />
                 <Search
                   size={15}

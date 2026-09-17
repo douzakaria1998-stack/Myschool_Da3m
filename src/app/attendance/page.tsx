@@ -36,6 +36,7 @@ import RenewGroupModal from '../../components/RenewGroupModal';
 import GroupSearchSelect from '../../components/GroupSearchSelect';
 import BarcodeScannerModal from '../../components/BarcodeScannerModal';
 import GroupBadgesModal from '../../components/GroupBadgesModal';
+import { normalizeScannedBarcode } from '../../utils/barcodeUtils';
 import {
   isSessionDateToday,
   isGroupToday,
@@ -140,12 +141,13 @@ export default function AttendancePage() {
     }
 
     const q = rawQ.toLowerCase();
+    const normalizedScan = normalizeScannedBarcode(rawQ).toLowerCase();
     const normalizedDigits = q.replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString());
     const cleanDigits = normalizedDigits.replace(/\D/g, '');
 
     const barcode = (s.barcode || '').toLowerCase();
     const matchesId =
-      (barcode && (barcode.includes(q) || barcode.includes(normalizedDigits))) ||
+      (barcode && (barcode.includes(q) || barcode.includes(normalizedScan) || barcode.includes(normalizedDigits))) ||
       (cleanDigits.length >= 2 && barcode.replace(/\D/g, '').includes(cleanDigits)) ||
       (cleanDigits.length > 0 && String(s.rowId) === cleanDigits);
 
@@ -652,13 +654,30 @@ export default function AttendancePage() {
             <input
               type="text"
               value={searchQuery ?? ''}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => {
+                const cleanVal = normalizeScannedBarcode(e.target.value);
+                setSearchQuery(cleanVal);
+              }}
+              onPaste={(e) => {
+                const pasted = e.clipboardData.getData('text');
+                const cleanVal = normalizeScannedBarcode(pasted);
+                if (cleanVal !== pasted) {
+                  e.preventDefault();
+                  setSearchQuery(cleanVal);
+                }
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') e.preventDefault();
               }}
               placeholder="ابحث باسم التلميذ، المعرّف (ID) أو الهاتف..."
               className="m3-input"
-              style={{ paddingInlineStart: '36px', paddingBlock: '8px', fontSize: '0.85rem' }}
+              style={{
+                paddingInlineStart: '36px',
+                paddingBlock: '8px',
+                fontSize: '0.85rem',
+                direction: /^[a-zA-Z0-9\-_]/.test(searchQuery) ? 'ltr' : 'rtl',
+                textAlign: /^[a-zA-Z0-9\-_]/.test(searchQuery) ? 'left' : 'right'
+              }}
             />
             <Search
               size={16}

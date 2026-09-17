@@ -226,3 +226,123 @@ export function getBarcodeCandidates(raw: string): string[] {
   // Filter out empty strings
   return Array.from(candidates).filter((c) => c && c.length > 0);
 }
+
+/**
+ * Normalizes any scanned barcode string into standard English uppercase (e.g. STU-27000101 or BAC01-1)
+ * regardless of the host operating system keyboard layout (Arabic 101, Arabic 102, French AZERTY, English QWERTY).
+ *
+ * If the input is normal user typing (e.g. Arabic name or phone number), it leaves it completely untouched!
+ */
+export function normalizeScannedBarcode(raw: string): string {
+  if (!raw) return '';
+  const trimmed = raw.trim();
+
+  // If already clean English barcode format, standardize casing
+  if (/^STU[-_]?\d+$/i.test(trimmed)) {
+    const m = trimmed.toUpperCase().match(/^STU[-_]?(\d+)$/);
+    return m ? `STU-${m[1]}` : trimmed.toUpperCase();
+  }
+  if (/^(?:BAC|BACV)[-_]?\d+[-_]?\d*$/i.test(trimmed)) {
+    return trimmed.toUpperCase().replace(/_/g, '-');
+  }
+
+  // Detect if this string contains scanner artifacts:
+  // 1. French AZERTY digit row symbols: é, è, à, ç, &, ", ', (, §, etc.
+  // 2. Arabic keyboard transcription of scanner letters: سفع, لإ, لأ, ستو, لاشؤ, لاضؤ
+  // 3. Arabic-Indic digits: ٠-٩
+  // 4. Raw digits sequence of 6+ digits
+  const hasAzertyDigits = /[éèàç&"'()§]/.test(trimmed);
+  const hasArabicScannerKey = /(?:سفع|لإ|لأ|ستو|لاشؤ|لاضؤ)/.test(trimmed);
+  const hasArabicIndic = /[٠-٩]/.test(trimmed);
+  const hasStuOrBac = /(?:STU|BAC|BACV)/i.test(trimmed);
+  const hasRawSerial = /^\d{6,}$/.test(trimmed);
+
+  // If none of the scanner signatures exist, this is regular user typing (e.g. Arabic name or short query), leave untouched!
+  if (!hasAzertyDigits && !hasArabicScannerKey && !hasArabicIndic && !hasStuOrBac && !hasRawSerial) {
+    return raw;
+  }
+
+  // Map of AZERTY number row characters to digits
+  const azertyMap: Record<string, string> = {
+    '&': '1',
+    'é': '2', 'É': '2',
+    '"': '3',
+    "'": '4',
+    '(': '5',
+    '-': '6',
+    'è': '7', 'È': '7',
+    'ç': '9', 'Ç': '9',
+    'à': '0', 'À': '0',
+    '§': '6'
+  };
+
+  const arabicIndicMap: Record<string, string> = {
+    '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4',
+    '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9'
+  };
+
+  // Extract digits by translating AZERTY symbols, Arabic-indic digits, or standard digits
+  let extractedDigits = '';
+  for (let i = 0; i < trimmed.length; i++) {
+    const ch = trimmed[i];
+    if (azertyMap[ch] !== undefined) {
+      extractedDigits += azertyMap[ch];
+    } else if (arabicIndicMap[ch] !== undefined) {
+      extractedDigits += arabicIndicMap[ch];
+    } else if (/\d/.test(ch)) {
+      extractedDigits += ch;
+    }
+  }
+
+  // If we extracted a valid student serial number (e.g. 2700XXXX or 2600XXXX, 6 to 10 digits)
+  if (extractedDigits.length >= 6) {
+    const m27 = extractedDigits.match(/(27\d{4,8}|26\d{4,8})/);
+    if (m27) {
+      return `STU-${m27[1]}`;
+    }
+    if (hasStuOrBac || hasArabicScannerKey || hasAzertyDigits) {
+      return `STU-${extractedDigits}`;
+    }
+  }
+
+  // Check group barcodes like BAC01-1 or BACV01-1
+  let textDecoded = trimmed
+    .replace(/لاشؤ[-_]?/g, 'BAC-')
+    .replace(/لاضؤ[-_]?/g, 'BAC-')
+    .replace(/سفع[-_]?/g, 'STU-')
+    .replace(/ستو[-_]?/g, 'STU-')
+    .replace(/لإ[-_]?/g, 'STU-')
+    .replace(/لأ[-_]?/g, 'STU-');
+
+  let converted = '';
+  for (let i = 0; i < textDecoded.length; i++) {
+    const ch = textDecoded[i];
+    if (azertyMap[ch] !== undefined) {
+      converted += azertyMap[ch];
+    } else if (arabicIndicMap[ch] !== undefined) {
+      converted += arabicIndicMap[ch];
+    } else if (ch === ')') {
+      converted += '-';
+    } else {
+      converted += ch;
+    }
+  }
+
+  const mBac = converted.toUpperCase().match(/^(?:BAC|BACV)[-_]?\d+[-_]?\d*$/);
+  if (mBac) {
+    return converted.toUpperCase().replace(/_/g, '-');
+  }
+
+  const mFinalStu = converted.toUpperCase().match(/^STU[-_]?(\d+)$/);
+  if (mFinalStu) {
+    return `STU-${mFinalStu[1]}`;
+  }
+
+  if (extractedDigits.length >= 4 && (hasAzertyDigits || hasArabicScannerKey)) {
+    if (extractedDigits.startsWith('27') || extractedDigits.startsWith('26')) {
+      return `STU-${extractedDigits}`;
+    }
+  }
+
+  return raw;
+}

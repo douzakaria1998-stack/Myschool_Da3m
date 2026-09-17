@@ -36,7 +36,7 @@ import {
   getTodayArabicDayName,
   getDefaultSessionIndex
 } from '../utils/sessionUtils';
-import { getBarcodeCandidates, normalizeArabicName } from '../utils/barcodeUtils';
+import { getBarcodeCandidates, normalizeArabicName, normalizeScannedBarcode } from '../utils/barcodeUtils';
 
 interface Props {
   initialGroupId?: string;
@@ -264,10 +264,12 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
 
       // Enter key: finalize scan
       if (e.key === 'Enter') {
-        const candidate = (document.activeElement === scannerInputRef.current ? barcodeInput : buffer).trim();
+        const rawCandidate = (document.activeElement === scannerInputRef.current ? barcodeInput : buffer).trim();
+        const candidate = normalizeScannedBarcode(rawCandidate);
         if (candidate.length >= 1) {
           e.preventDefault();
           buffer = '';
+          setBarcodeInput(candidate);
           handleBarcodeSubmit(undefined, candidate);
         }
         return;
@@ -291,7 +293,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
 
       // Sync with input field if it was not focused
       if (document.activeElement !== scannerInputRef.current && buffer.length > 0) {
-        setBarcodeInput(buffer);
+        setBarcodeInput(normalizeScannedBarcode(buffer));
       }
     };
 
@@ -1440,7 +1442,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
                   type="text"
                   value={barcodeInput}
                   onChange={(e) => {
-                    const val = e.target.value;
+                    const val = normalizeScannedBarcode(e.target.value);
                     setBarcodeInput(val);
                     if (scanTimeoutRef.current) clearTimeout(scanTimeoutRef.current);
                     if (val.trim().length >= 1) {

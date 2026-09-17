@@ -18,6 +18,7 @@ import {
 import { DiscountType, StudentRecord } from '../types';
 import { isSummaryRow } from '../utils/sessionUtils';
 import StudentBadgeModal from './StudentBadgeModal';
+import { normalizeScannedBarcode } from '../utils/barcodeUtils';
 
 interface Props {
   groupId: string;
@@ -62,7 +63,7 @@ export default function AddStudentModal({ groupId, onClose }: Props) {
   const existingStudents = useMemo(() => {
     const map = new Map<
       string,
-      { name: string; phone: string; groups: string[]; alreadyInCurrentGroup: boolean }
+      { name: string; phone: string; barcode?: string; groups: string[]; alreadyInCurrentGroup: boolean }
     >();
 
     Object.entries(data.groupData).forEach(([gid, gSheet]) => {
@@ -70,18 +71,21 @@ export default function AddStudentModal({ groupId, onClose }: Props) {
         if (isSummaryRow(s, gid) || !s.name || !s.name.trim()) return;
         const cleanName = s.name.trim();
         const phone = s.phone ? s.phone.trim() : '';
+        const barcode = s.barcode ? s.barcode.trim() : '';
         const key = cleanName.toLowerCase();
 
         if (!map.has(key)) {
           map.set(key, {
             name: cleanName,
             phone,
+            barcode,
             groups: [gid],
             alreadyInCurrentGroup: gid === groupId
           });
         } else {
           const item = map.get(key)!;
           if (phone && !item.phone) item.phone = phone;
+          if (barcode && !item.barcode) item.barcode = barcode;
           if (!item.groups.includes(gid)) item.groups.push(gid);
           if (gid === groupId) item.alreadyInCurrentGroup = true;
         }
@@ -93,16 +97,19 @@ export default function AddStudentModal({ groupId, onClose }: Props) {
 
   // Filter existing students by search term
   const filteredExisting = useMemo(() => {
-    const q = existingSearch.trim().toLowerCase();
-    if (!q) {
+    const rawQ = existingSearch.trim();
+    if (!rawQ) {
       // Return first 10 students not already in this group
       return existingStudents.slice(0, 10);
     }
+    const q = rawQ.toLowerCase();
+    const normalizedScan = normalizeScannedBarcode(rawQ).toLowerCase();
     return existingStudents
       .filter(
         (s) =>
           s.name.toLowerCase().includes(q) ||
           s.phone.includes(q) ||
+          (s.barcode && (s.barcode.toLowerCase().includes(q) || s.barcode.toLowerCase().includes(normalizedScan))) ||
           s.groups.some((g) => g.toLowerCase().includes(q))
       )
       .slice(0, 15);
@@ -408,12 +415,26 @@ export default function AddStudentModal({ groupId, onClose }: Props) {
                       type="text"
                       value={existingSearch}
                       onChange={(e) => {
-                        setExistingSearch(e.target.value);
+                        const cleanVal = normalizeScannedBarcode(e.target.value);
+                        setExistingSearch(cleanVal);
                         setError('');
                       }}
-                      placeholder="ابحث بالاسم، الهاتف أو الفوج السابق..."
+                      onPaste={(e) => {
+                        const pasted = e.clipboardData.getData('text');
+                        const cleanVal = normalizeScannedBarcode(pasted);
+                        if (cleanVal !== pasted) {
+                          e.preventDefault();
+                          setExistingSearch(cleanVal);
+                          setError('');
+                        }
+                      }}
+                      placeholder="ابحث بالاسم، المعرّف (ID / Barcode) أو الهاتف..."
                       className="m3-input"
-                      style={{ paddingInlineStart: '36px' }}
+                      style={{
+                        paddingInlineStart: '36px',
+                        direction: /^[a-zA-Z0-9\-_]/.test(existingSearch) ? 'ltr' : 'rtl',
+                        textAlign: /^[a-zA-Z0-9\-_]/.test(existingSearch) ? 'left' : 'right'
+                      }}
                       autoFocus
                     />
                     <Search

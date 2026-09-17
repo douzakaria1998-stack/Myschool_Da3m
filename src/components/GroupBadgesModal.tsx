@@ -13,6 +13,7 @@ import { StudentRecord } from '../types';
 import { useApp } from '../context/AppContext';
 import StudentCardView from './StudentCardView';
 import { printCardHtml } from '../utils/printCardUtils';
+import { normalizeScannedBarcode } from '../utils/barcodeUtils';
 
 interface Props {
   groupId: string;
@@ -41,11 +42,12 @@ export default function GroupBadgesModal({ groupId, students, onClose }: Props) 
   const filteredStudents = useMemo(() => {
     if (!searchTerm.trim()) return students;
     const term = searchTerm.toLowerCase().trim();
+    const normalizedScan = normalizeScannedBarcode(term).toLowerCase();
     return students.filter(
       (s) =>
         s.name.toLowerCase().includes(term) ||
         (s.phone && s.phone.includes(term)) ||
-        (s.barcode && s.barcode.toLowerCase().includes(term))
+        (s.barcode && (s.barcode.toLowerCase().includes(term) || s.barcode.toLowerCase().includes(normalizedScan)))
     );
   }, [students, searchTerm]);
 
@@ -271,16 +273,26 @@ export default function GroupBadgesModal({ groupId, students, onClose }: Props) 
             <div style={{ position: 'relative', width: '220px' }}>
               <input
                 type="text"
-                placeholder="تصفية حسب الاسم..."
+                placeholder="تصفية حسب الاسم أو المعرّف (ID)..."
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={(e) => setSearchTerm(normalizeScannedBarcode(e.target.value))}
+                onPaste={(e) => {
+                  const pasted = e.clipboardData.getData('text');
+                  const clean = normalizeScannedBarcode(pasted);
+                  if (clean !== pasted) {
+                    e.preventDefault();
+                    setSearchTerm(clean);
+                  }
+                }}
                 style={{
                   width: '100%',
                   padding: '4px 10px 4px 28px',
                   borderRadius: '6px',
                   border: '1px solid var(--md-sys-color-outline-variant)',
                   fontSize: '0.78rem',
-                  outline: 'none'
+                  outline: 'none',
+                  direction: /^[a-zA-Z0-9\-_]/.test(searchTerm) ? 'ltr' : 'rtl',
+                  textAlign: /^[a-zA-Z0-9\-_]/.test(searchTerm) ? 'left' : 'right'
                 }}
               />
               <Search
