@@ -29,7 +29,11 @@ const StudentCardView = React.forwardRef<HTMLDivElement, StudentCardViewProps>(f
     student.barcode?.trim() ||
     `STU-2700${student.rowId.toString().padStart(4, '0')}`;
 
-  if (barcodeValue.startsWith('STU-26')) {
+  if (barcodeValue.startsWith('STU-627')) {
+    barcodeValue = 'STU-27' + barcodeValue.slice(7);
+  } else if (barcodeValue.startsWith('STU-626')) {
+    barcodeValue = 'STU-26' + barcodeValue.slice(7);
+  } else if (barcodeValue.startsWith('STU-26')) {
     barcodeValue = barcodeValue.replace(/^STU-26/, 'STU-27');
   }
 

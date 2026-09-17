@@ -35,9 +35,14 @@ export default function StudentBadgeModal({ student, groupId, allGroups = [], on
       ?.barcode?.trim() ||
     `STU-2700${student.rowId.toString().padStart(4, '0')}`;
 
-  const barcodeValue = rawBarcode.startsWith('STU-26')
-    ? rawBarcode.replace(/^STU-26/, 'STU-27')
-    : rawBarcode;
+  let barcodeValue = rawBarcode;
+  if (barcodeValue.startsWith('STU-627')) {
+    barcodeValue = 'STU-27' + barcodeValue.slice(7);
+  } else if (barcodeValue.startsWith('STU-626')) {
+    barcodeValue = 'STU-26' + barcodeValue.slice(7);
+  } else if (barcodeValue.startsWith('STU-26')) {
+    barcodeValue = barcodeValue.replace(/^STU-26/, 'STU-27');
+  }
 
   const handlePrint = () => {
     if (!cardRef.current) return;

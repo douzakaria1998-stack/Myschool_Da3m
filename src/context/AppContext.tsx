@@ -237,7 +237,15 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
     for (const s of sheet.students || []) {
       if (s.barcode?.trim()) {
         let b = s.barcode.trim();
-        if (b.startsWith('STU-26')) {
+        if (b.startsWith('STU-627')) {
+          b = 'STU-27' + b.slice(7);
+          s.barcode = b;
+          changed = true;
+        } else if (b.startsWith('STU-626')) {
+          b = 'STU-26' + b.slice(7);
+          s.barcode = b;
+          changed = true;
+        } else if (b.startsWith('STU-26')) {
           b = 'STU-27' + b.slice(6);
           s.barcode = b;
           changed = true;
@@ -357,7 +365,13 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
       if ((s.attendance || []).length !== 4) changed = true;
 
       let barcode = s.barcode?.trim();
-      if (barcode && barcode.startsWith('STU-26')) {
+      if (barcode && barcode.startsWith('STU-627')) {
+        barcode = 'STU-27' + barcode.slice(7);
+        changed = true;
+      } else if (barcode && barcode.startsWith('STU-626')) {
+        barcode = 'STU-26' + barcode.slice(7);
+        changed = true;
+      } else if (barcode && barcode.startsWith('STU-26')) {
         barcode = 'STU-27' + barcode.slice(6);
         changed = true;
       }
