@@ -773,9 +773,16 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
                   ref={searchInputRef}
                   type="text"
                   value={searchQuery}
+                  onFocus={(e) => e.target.select()}
+                  onClick={(e) => (e.target as HTMLInputElement).select()}
                   onChange={(e) => {
                     const cleanVal = normalizeScannedBarcode(e.target.value);
                     setSearchQuery(cleanVal);
+                    if (/^(?:STU[-_]?\d+|(?:BAC|BACV)[-_]?\d+[-_]?\d*)$/i.test(cleanVal)) {
+                      setTimeout(() => {
+                        searchInputRef.current?.select();
+                      }, 50);
+                    }
                   }}
                   onPaste={(e) => {
                     const pasted = e.clipboardData.getData('text');
@@ -783,6 +790,15 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
                     if (cleanVal !== pasted) {
                       e.preventDefault();
                       setSearchQuery(cleanVal);
+                      setTimeout(() => {
+                        searchInputRef.current?.select();
+                      }, 50);
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      (e.target as HTMLInputElement).select();
                     }
                   }}
                   placeholder="اكتب اسم التلميذ، أو مرر بطاقة الباركود بالقارئ، أو اكتب الهاتف..."
@@ -790,6 +806,7 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
                   style={{
                     width: '100%',
                     paddingRight: '36px',
+                    paddingLeft: searchQuery ? '32px' : '12px',
                     fontSize: '0.86rem',
                     fontWeight: 700,
                     height: '32px',
@@ -800,6 +817,33 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
                   }}
                   autoFocus
                 />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchQuery('');
+                      searchInputRef.current?.focus();
+                    }}
+                    style={{
+                      position: 'absolute',
+                      left: '8px',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      padding: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'var(--md-sys-color-on-surface-variant)',
+                      borderRadius: '50%'
+                    }}
+                    title="مسح البحث"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
               </div>
 
               {/* Search Results Dropdown / List */}

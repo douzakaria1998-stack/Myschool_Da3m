@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { useApp } from '../context/AppContext';
 import { StudentRecord } from '../types';
@@ -30,7 +30,8 @@ import {
   ChevronLeft,
   Filter,
   ExternalLink,
-  Edit3
+  Edit3,
+  X
 } from 'lucide-react';
 import AddGroupModal from '../components/AddGroupModal';
 import EditGroupModal from '../components/EditGroupModal';
@@ -82,6 +83,7 @@ export default function DashboardPage() {
 
   // Student Section state
   const [studentSearch, setStudentSearch] = useState('');
+  const studentSearchInputRef = useRef<HTMLInputElement>(null);
   const [studentGroupFilter, setStudentGroupFilter] = useState('all');
   const [studentStatusFilter, setStudentStatusFilter] = useState<'all' | 'debt' | 'paid' | 'exempt' | 'vip'>('all');
   const [studentPage, setStudentPage] = useState(1);
@@ -1291,12 +1293,20 @@ export default function DashboardPage() {
               {/* Search input */}
               <div style={{ position: 'relative', width: '310px' }}>
                 <input
+                  ref={studentSearchInputRef}
                   type="text"
                   value={studentSearch}
+                  onFocus={(e) => e.target.select()}
+                  onClick={(e) => (e.target as HTMLInputElement).select()}
                   onChange={(e) => {
                     const cleanVal = normalizeScannedBarcode(e.target.value);
                     setStudentSearch(cleanVal);
                     setStudentPage(1);
+                    if (/^(?:STU[-_]?\d+|(?:BAC|BACV)[-_]?\d+[-_]?\d*)$/i.test(cleanVal)) {
+                      setTimeout(() => {
+                        studentSearchInputRef.current?.select();
+                      }, 50);
+                    }
                   }}
                   onPaste={(e) => {
                     const pasted = e.clipboardData.getData('text');
@@ -1305,15 +1315,22 @@ export default function DashboardPage() {
                       e.preventDefault();
                       setStudentSearch(cleanVal);
                       setStudentPage(1);
+                      setTimeout(() => {
+                        studentSearchInputRef.current?.select();
+                      }, 50);
                     }
                   }}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') e.preventDefault();
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      (e.target as HTMLInputElement).select();
+                    }
                   }}
                   placeholder="ابحث بالاسم، المعرّف (ID)، الهاتف، الفوج..."
                   className="m3-input"
                   style={{
                     paddingInlineStart: '34px',
+                    paddingInlineEnd: studentSearch ? '32px' : '10px',
                     paddingBlock: '7px',
                     fontSize: '0.82rem',
                     direction: /^[a-zA-Z0-9\-_]/.test(studentSearch) ? 'ltr' : 'rtl',
@@ -1327,9 +1344,38 @@ export default function DashboardPage() {
                     insetInlineStart: '10px',
                     top: '50%',
                     transform: 'translateY(-50%)',
-                    color: 'var(--md-sys-color-outline)'
+                    color: 'var(--md-sys-color-outline)',
+                    pointerEvents: 'none'
                   }}
                 />
+                {studentSearch && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStudentSearch('');
+                      setStudentPage(1);
+                      studentSearchInputRef.current?.focus();
+                    }}
+                    style={{
+                      position: 'absolute',
+                      insetInlineEnd: '6px',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      padding: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'var(--md-sys-color-on-surface-variant)',
+                      borderRadius: '50%'
+                    }}
+                    title="مسح البحث"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
               </div>
 
               {/* Group filter dropdown */}

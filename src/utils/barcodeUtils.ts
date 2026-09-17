@@ -231,36 +231,12 @@ export function getBarcodeCandidates(raw: string): string[] {
  * Normalizes any scanned barcode string into standard English uppercase (e.g. STU-27000101 or BAC01-1)
  * regardless of the host operating system keyboard layout (Arabic 101, Arabic 102, French AZERTY, English QWERTY).
  *
+ * Automatically clears previous scans if new barcodes are scanned into an existing search bar!
  * If the input is normal user typing (e.g. Arabic name or phone number), it leaves it completely untouched!
  */
 export function normalizeScannedBarcode(raw: string): string {
   if (!raw) return '';
   const trimmed = raw.trim();
-
-  // If already clean English barcode format, standardize casing
-  if (/^STU[-_]?\d+$/i.test(trimmed)) {
-    const m = trimmed.toUpperCase().match(/^STU[-_]?(\d+)$/);
-    return m ? `STU-${m[1]}` : trimmed.toUpperCase();
-  }
-  if (/^(?:BAC|BACV)[-_]?\d+[-_]?\d*$/i.test(trimmed)) {
-    return trimmed.toUpperCase().replace(/_/g, '-');
-  }
-
-  // Detect if this string contains scanner artifacts:
-  // 1. French AZERTY digit row symbols: é, è, à, ç, &, ", ', (, §, etc.
-  // 2. Arabic keyboard transcription of scanner letters: سفع, لإ, لأ, ستو, لاشؤ, لاضؤ
-  // 3. Arabic-Indic digits: ٠-٩
-  // 4. Raw digits sequence of 6+ digits
-  const hasAzertyDigits = /[éèàç&"'()§]/.test(trimmed);
-  const hasArabicScannerKey = /(?:سفع|لإ|لأ|ستو|لاشؤ|لاضؤ)/.test(trimmed);
-  const hasArabicIndic = /[٠-٩]/.test(trimmed);
-  const hasStuOrBac = /(?:STU|BAC|BACV)/i.test(trimmed);
-  const hasRawSerial = /^\d{6,}$/.test(trimmed);
-
-  // If none of the scanner signatures exist, this is regular user typing (e.g. Arabic name or short query), leave untouched!
-  if (!hasAzertyDigits && !hasArabicScannerKey && !hasArabicIndic && !hasStuOrBac && !hasRawSerial) {
-    return raw;
-  }
 
   // Map of AZERTY number row characters to digits
   const azertyMap: Record<string, string> = {
@@ -281,6 +257,64 @@ export function normalizeScannedBarcode(raw: string): string {
     '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9'
   };
 
+  // 1. If input contains multiple barcodes (e.g. repeated scans: STU-27000220STU-27000220STU-27000220):
+  // ALWAYS keep ONLY the newest (last) barcode!
+  const barcodeRegex = /(?:STU[-_]?\d{4,10}|(?:BAC|BACV)[-_]?\d+[-_]?\d*)/gi;
+  const allBarcodes = trimmed.match(barcodeRegex);
+  if (allBarcodes && allBarcodes.length > 1) {
+    const lastBarcode = allBarcodes[allBarcodes.length - 1].toUpperCase();
+    const m = lastBarcode.match(/^STU[-_]?(\d+)$/);
+    return m ? `STU-${m[1]}` : lastBarcode.replace(/_/g, '-');
+  }
+
+  // If there's 1 barcode and it's appended after other text (e.g. "محمدSTU-27000220" or "0661122334STU-27000220")
+  if (allBarcodes && allBarcodes.length === 1 && !trimmed.toUpperCase().startsWith(allBarcodes[0].toUpperCase())) {
+    const single = allBarcodes[0].toUpperCase();
+    const m = single.match(/^STU[-_]?(\d+)$/);
+    return m ? `STU-${m[1]}` : single.replace(/_/g, '-');
+  }
+
+  // 2. If input already is a single clean English barcode format, standardize casing & format
+  if (/^STU[-_]?\d+$/i.test(trimmed)) {
+    const m = trimmed.toUpperCase().match(/^STU[-_]?(\d+)$/);
+    return m ? `STU-${m[1]}` : trimmed.toUpperCase();
+  }
+  if (/^(?:BAC|BACV)[-_]?\d+[-_]?\d*$/i.test(trimmed)) {
+    return trimmed.toUpperCase().replace(/_/g, '-');
+  }
+
+  // 3. If input has an old barcode and a new scan in French AZERTY or Arabic was appended:
+  // e.g. "STU-27000101_éèàààèéç('لإ"
+  if (
+    allBarcodes &&
+    allBarcodes.length === 1 &&
+    (/[éèàç&"'()§]/.test(trimmed) || /(?:سفع|لإ|لأ|ستو|لاشؤ|لاضؤ)/.test(trimmed))
+  ) {
+    const remaining = trimmed.replace(allBarcodes[0], '').trim();
+    if (remaining.length >= 4) {
+      const decodedNew = normalizeScannedBarcode(remaining);
+      if (decodedNew && decodedNew !== remaining) {
+        return decodedNew;
+      }
+    }
+  }
+
+  // 4. Detect scanner artifacts:
+  // - French AZERTY digit row symbols: é, è, à, ç, &, ", ', (, §, etc.
+  // - Arabic keyboard transcription of scanner letters: سفع, لإ, لأ, ستو, لاشؤ, لاضؤ
+  // - Arabic-Indic digits: ٠-٩
+  // - Repeated serials sequence (12+ digits)
+  const hasAzertyDigits = /[éèàç&"'()§]/.test(trimmed);
+  const hasArabicScannerKey = /(?:سفع|لإ|لأ|ستو|لاشؤ|لاضؤ)/.test(trimmed);
+  const hasArabicIndic = /[٠-٩]/.test(trimmed);
+  const hasStuOrBac = /(?:STU|BAC|BACV)/i.test(trimmed);
+  const hasConcatSerials = /^\d{12,}$/.test(trimmed);
+
+  // If none of the scanner signatures exist, this is regular user typing (e.g. Arabic name or phone number), leave untouched!
+  if (!hasAzertyDigits && !hasArabicScannerKey && !hasArabicIndic && !hasStuOrBac && !hasConcatSerials) {
+    return raw;
+  }
+
   // Extract digits by translating AZERTY symbols, Arabic-indic digits, or standard digits
   let extractedDigits = '';
   for (let i = 0; i < trimmed.length; i++) {
@@ -294,19 +328,21 @@ export function normalizeScannedBarcode(raw: string): string {
     }
   }
 
-  // If we extracted a valid student serial number (e.g. 2700XXXX or 2600XXXX, 6 to 10 digits)
+  // If we extracted student serials (e.g. 2700XXXX or 2600XXXX, standard 8 digits)
   if (extractedDigits.length >= 6) {
-    const m27 = extractedDigits.match(/(27\d{4,8}|26\d{4,8})/);
-    if (m27) {
-      return `STU-${m27[1]}`;
+    const matches27 = Array.from(extractedDigits.matchAll(/(27\d{6}|26\d{6}|27\d{4,6}|26\d{4,6})/g));
+    if (matches27.length > 0) {
+      // Take the LAST serial if multiple scans occurred!
+      const lastMatch = matches27[matches27.length - 1][0];
+      return `STU-${lastMatch}`;
     }
     if (hasStuOrBac || hasArabicScannerKey || hasAzertyDigits) {
-      return `STU-${extractedDigits}`;
+      return `STU-${extractedDigits.slice(-8)}`;
     }
   }
 
   // Check group barcodes like BAC01-1 or BACV01-1
-  let textDecoded = trimmed
+  const textDecoded = trimmed
     .replace(/لاشؤ[-_]?/g, 'BAC-')
     .replace(/لاضؤ[-_]?/g, 'BAC-')
     .replace(/سفع[-_]?/g, 'STU-')
@@ -336,12 +372,6 @@ export function normalizeScannedBarcode(raw: string): string {
   const mFinalStu = converted.toUpperCase().match(/^STU[-_]?(\d+)$/);
   if (mFinalStu) {
     return `STU-${mFinalStu[1]}`;
-  }
-
-  if (extractedDigits.length >= 4 && (hasAzertyDigits || hasArabicScannerKey)) {
-    if (extractedDigits.startsWith('27') || extractedDigits.startsWith('26')) {
-      return `STU-${extractedDigits}`;
-    }
   }
 
   return raw;

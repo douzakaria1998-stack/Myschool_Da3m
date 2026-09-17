@@ -414,10 +414,17 @@ export default function AddStudentModal({ groupId, onClose }: Props) {
                       ref={searchInputRef}
                       type="text"
                       value={existingSearch}
+                      onFocus={(e) => e.target.select()}
+                      onClick={(e) => (e.target as HTMLInputElement).select()}
                       onChange={(e) => {
                         const cleanVal = normalizeScannedBarcode(e.target.value);
                         setExistingSearch(cleanVal);
                         setError('');
+                        if (/^(?:STU[-_]?\d+|(?:BAC|BACV)[-_]?\d+[-_]?\d*)$/i.test(cleanVal)) {
+                          setTimeout(() => {
+                            searchInputRef.current?.select();
+                          }, 50);
+                        }
                       }}
                       onPaste={(e) => {
                         const pasted = e.clipboardData.getData('text');
@@ -426,12 +433,22 @@ export default function AddStudentModal({ groupId, onClose }: Props) {
                           e.preventDefault();
                           setExistingSearch(cleanVal);
                           setError('');
+                          setTimeout(() => {
+                            searchInputRef.current?.select();
+                          }, 50);
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          (e.target as HTMLInputElement).select();
                         }
                       }}
                       placeholder="ابحث بالاسم، المعرّف (ID / Barcode) أو الهاتف..."
                       className="m3-input"
                       style={{
                         paddingInlineStart: '36px',
+                        paddingInlineEnd: existingSearch ? '32px' : '10px',
                         direction: /^[a-zA-Z0-9\-_]/.test(existingSearch) ? 'ltr' : 'rtl',
                         textAlign: /^[a-zA-Z0-9\-_]/.test(existingSearch) ? 'left' : 'right'
                       }}
@@ -444,9 +461,38 @@ export default function AddStudentModal({ groupId, onClose }: Props) {
                         insetInlineStart: '12px',
                         top: '50%',
                         transform: 'translateY(-50%)',
-                        color: 'var(--md-sys-color-outline)'
+                        color: 'var(--md-sys-color-outline)',
+                        pointerEvents: 'none'
                       }}
                     />
+                    {existingSearch && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setExistingSearch('');
+                          setError('');
+                          searchInputRef.current?.focus();
+                        }}
+                        style={{
+                          position: 'absolute',
+                          insetInlineEnd: '6px',
+                          top: '50%',
+                          transform: 'translateY(-50%)',
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          padding: '4px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: 'var(--md-sys-color-on-surface-variant)',
+                          borderRadius: '50%'
+                        }}
+                        title="مسح البحث"
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
                   </div>
 
                   {/* Results list */}

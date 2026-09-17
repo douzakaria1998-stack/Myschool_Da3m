@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   X,
   Printer,
@@ -26,6 +26,7 @@ export default function GroupBadgesModal({ groupId, students, onClose }: Props) 
 
   const [printLayout, setPrintLayout] = useState<'a4_sheet' | 'cr80'>('a4_sheet');
   const [searchTerm, setSearchTerm] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [selectedRowIds, setSelectedRowIds] = useState<Set<number>>(
     () => new Set(students.map((s) => s.rowId))
   );
@@ -272,21 +273,43 @@ export default function GroupBadgesModal({ groupId, students, onClose }: Props) 
             {/* Quick Search */}
             <div style={{ position: 'relative', width: '220px' }}>
               <input
+                ref={searchInputRef}
                 type="text"
                 placeholder="تصفية حسب الاسم أو المعرّف (ID)..."
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(normalizeScannedBarcode(e.target.value))}
+                onFocus={(e) => e.target.select()}
+                onClick={(e) => (e.target as HTMLInputElement).select()}
+                onChange={(e) => {
+                  const clean = normalizeScannedBarcode(e.target.value);
+                  setSearchTerm(clean);
+                  if (/^(?:STU[-_]?\d+|(?:BAC|BACV)[-_]?\d+[-_]?\d*)$/i.test(clean)) {
+                    setTimeout(() => {
+                      searchInputRef.current?.select();
+                    }, 50);
+                  }
+                }}
                 onPaste={(e) => {
                   const pasted = e.clipboardData.getData('text');
                   const clean = normalizeScannedBarcode(pasted);
                   if (clean !== pasted) {
                     e.preventDefault();
                     setSearchTerm(clean);
+                    setTimeout(() => {
+                      searchInputRef.current?.select();
+                    }, 50);
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    (e.target as HTMLInputElement).select();
                   }
                 }}
                 style={{
                   width: '100%',
-                  padding: '4px 10px 4px 28px',
+                  paddingInlineStart: '10px',
+                  paddingInlineEnd: searchTerm ? '48px' : '28px',
+                  paddingBlock: '4px',
                   borderRadius: '6px',
                   border: '1px solid var(--md-sys-color-outline-variant)',
                   fontSize: '0.78rem',
@@ -299,12 +322,40 @@ export default function GroupBadgesModal({ groupId, students, onClose }: Props) 
                 size={13}
                 style={{
                   position: 'absolute',
-                  insetInlineEnd: '8px',
+                  insetInlineEnd: searchTerm ? '26px' : '8px',
                   top: '50%',
                   transform: 'translateY(-50%)',
-                  color: 'var(--md-sys-color-outline)'
+                  color: 'var(--md-sys-color-outline)',
+                  pointerEvents: 'none'
                 }}
               />
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchTerm('');
+                    searchInputRef.current?.focus();
+                  }}
+                  style={{
+                    position: 'absolute',
+                    insetInlineEnd: '4px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: '2px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'var(--md-sys-color-on-surface-variant)',
+                    borderRadius: '50%'
+                  }}
+                  title="مسح البحث"
+                >
+                  <X size={12} />
+                </button>
+              )}
             </div>
           </div>
 

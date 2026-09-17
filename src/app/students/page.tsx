@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { useApp, calcStudentFinancesPure } from '../../context/AppContext';
 import { StudentRecord } from '../../types';
 import {
@@ -20,7 +20,8 @@ import {
   Sparkles,
   DollarSign,
   IdCard,
-  Printer
+  Printer,
+  X
 } from 'lucide-react';
 import StudentPaymentModal from '../../components/StudentPaymentModal';
 import StudentProfileModal from '../../components/StudentProfileModal';
@@ -61,6 +62,7 @@ export default function StudentsPage() {
   const { data } = useApp();
 
   const [search, setSearch] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [filterType, setFilterType] = useState<'all' | 'debt' | 'paid' | 'multi' | 'vip'>('all');
   const [selectedGroupFilter, setSelectedGroupFilter] = useState('all');
   const [page, setPage] = useState(1);
@@ -491,12 +493,20 @@ export default function StudentsPage() {
           {/* Search */}
           <div style={{ position: 'relative', width: '330px' }}>
             <input
+              ref={searchInputRef}
               type="text"
               value={search}
+              onFocus={(e) => e.target.select()}
+              onClick={(e) => (e.target as HTMLInputElement).select()}
               onChange={(e) => {
                 const cleanVal = normalizeScannedBarcode(e.target.value);
                 setSearch(cleanVal);
                 setPage(1);
+                if (/^(?:STU[-_]?\d+|(?:BAC|BACV)[-_]?\d+[-_]?\d*)$/i.test(cleanVal)) {
+                  setTimeout(() => {
+                    searchInputRef.current?.select();
+                  }, 50);
+                }
               }}
               onPaste={(e) => {
                 const pasted = e.clipboardData.getData('text');
@@ -505,15 +515,22 @@ export default function StudentsPage() {
                   e.preventDefault();
                   setSearch(cleanVal);
                   setPage(1);
+                  setTimeout(() => {
+                    searchInputRef.current?.select();
+                  }, 50);
                 }
               }}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') e.preventDefault();
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  (e.target as HTMLInputElement).select();
+                }
               }}
               placeholder="ابحث بالاسم، معرّف التلميذ (ID / Barcode)، الهاتف، الفوج..."
               className="m3-input"
               style={{
                 paddingInlineStart: '36px',
+                paddingInlineEnd: search ? '34px' : '12px',
                 paddingBlock: '8px',
                 fontSize: '0.84rem',
                 direction: /^[a-zA-Z0-9\-_]/.test(search) ? 'ltr' : 'rtl',
@@ -527,9 +544,38 @@ export default function StudentsPage() {
                 insetInlineStart: '12px',
                 top: '50%',
                 transform: 'translateY(-50%)',
-                color: 'var(--md-sys-color-outline)'
+                color: 'var(--md-sys-color-outline)',
+                pointerEvents: 'none'
               }}
             />
+            {search && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearch('');
+                  setPage(1);
+                  searchInputRef.current?.focus();
+                }}
+                style={{
+                  position: 'absolute',
+                  insetInlineEnd: '8px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--md-sys-color-on-surface-variant)',
+                  borderRadius: '50%'
+                }}
+                title="مسح البحث"
+              >
+                <X size={15} />
+              </button>
+            )}
           </div>
 
           {/* Group Filter */}

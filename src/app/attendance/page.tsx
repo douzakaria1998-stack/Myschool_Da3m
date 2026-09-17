@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import Link from 'next/link';
 import { useApp } from '../../context/AppContext';
 import { AttendanceStatus, StudentRecord } from '../../types';
@@ -26,7 +26,8 @@ import {
   CheckCheck,
   Scan,
   UserX,
-  IdCard
+  IdCard,
+  X
 } from 'lucide-react';
 import StudentPaymentModal from '../../components/StudentPaymentModal';
 import AddStudentModal from '../../components/AddStudentModal';
@@ -69,6 +70,7 @@ export default function AttendancePage() {
   const groupStats = getGroupStats(group?.groupId || selectedGroup);
 
   const [searchQuery, setSearchQuery] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [filterDebt, setFilterDebt] = useState<'all' | 'debt' | 'paid' | 'exempt'>('all');
   const [activeStudentForPayment, setActiveStudentForPayment] = useState<StudentRecord | null>(null);
   const [isBarcodeScannerOpen, setIsBarcodeScannerOpen] = useState(false);
@@ -652,11 +654,19 @@ export default function AttendancePage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
           <div style={{ position: 'relative', width: '310px' }}>
             <input
+              ref={searchInputRef}
               type="text"
               value={searchQuery ?? ''}
+              onFocus={(e) => e.target.select()}
+              onClick={(e) => (e.target as HTMLInputElement).select()}
               onChange={(e) => {
                 const cleanVal = normalizeScannedBarcode(e.target.value);
                 setSearchQuery(cleanVal);
+                if (/^(?:STU[-_]?\d+|(?:BAC|BACV)[-_]?\d+[-_]?\d*)$/i.test(cleanVal)) {
+                  setTimeout(() => {
+                    searchInputRef.current?.select();
+                  }, 50);
+                }
               }}
               onPaste={(e) => {
                 const pasted = e.clipboardData.getData('text');
@@ -664,15 +674,22 @@ export default function AttendancePage() {
                 if (cleanVal !== pasted) {
                   e.preventDefault();
                   setSearchQuery(cleanVal);
+                  setTimeout(() => {
+                    searchInputRef.current?.select();
+                  }, 50);
                 }
               }}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') e.preventDefault();
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  (e.target as HTMLInputElement).select();
+                }
               }}
               placeholder="ابحث باسم التلميذ، المعرّف (ID) أو الهاتف..."
               className="m3-input"
               style={{
                 paddingInlineStart: '36px',
+                paddingInlineEnd: searchQuery ? '32px' : '10px',
                 paddingBlock: '8px',
                 fontSize: '0.85rem',
                 direction: /^[a-zA-Z0-9\-_]/.test(searchQuery) ? 'ltr' : 'rtl',
@@ -686,9 +703,37 @@ export default function AttendancePage() {
                 insetInlineStart: '12px',
                 top: '50%',
                 transform: 'translateY(-50%)',
-                color: 'var(--md-sys-color-outline)'
+                color: 'var(--md-sys-color-outline)',
+                pointerEvents: 'none'
               }}
             />
+            {Boolean(searchQuery) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery('');
+                  searchInputRef.current?.focus();
+                }}
+                style={{
+                  position: 'absolute',
+                  insetInlineEnd: '6px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--md-sys-color-on-surface-variant)',
+                  borderRadius: '50%'
+                }}
+                title="مسح البحث"
+              >
+                <X size={15} />
+              </button>
+            )}
           </div>
 
           <div
