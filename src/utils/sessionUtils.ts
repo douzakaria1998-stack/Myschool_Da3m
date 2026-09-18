@@ -801,13 +801,38 @@ export interface StudentSessionInfo {
  * Calculates session counting rules for a student:
  * - Empty cells before the student's first recorded attendance (P/A/M/S) do NOT count (un-enrolled / pre-enrollment sessions).
  * - Empty cells after the student has recorded attendance DO count (officially registered in the group).
+ * - RULE: If student attended only 1 session and did NOT pay, the session does NOT count for the school or teacher.
+ * - But if student attended 1 session and PAID, it DOES count for both school and teacher.
  */
 export function getStudentSessionInfo(
   attendance: (string | null | undefined)[],
-  cycleSessions: number = 4
+  cycleSessions: number = 4,
+  payments?: (number | string | null | undefined)[] | number
 ): StudentSessionInfo {
   const cycleAtt = (attendance || []).slice(0, cycleSessions);
   const hasSuspended = cycleAtt.includes('S');
+  const attendedCount = cycleAtt.filter((st) => st === 'P').length;
+  const makeupCount = cycleAtt.filter((st) => st === 'M').length;
+  const totalAttended = attendedCount + makeupCount;
+
+  const totalReceived = Array.isArray(payments)
+    ? payments.reduce<number>((sum, p) => {
+        const val = typeof p === 'number' ? p : parseFloat(String(p));
+        return sum + (isNaN(val) ? 0 : val);
+      }, 0)
+    : typeof payments === 'number'
+    ? payments
+    : 0;
+
+  // RULE: If student attended only 1 session and did not pay, the session does not count for school or teacher
+  const isOneSessionUnpaid = totalAttended === 1 && totalReceived === 0;
+  if (isOneSessionUnpaid) {
+    return {
+      firstActiveIndex: -1,
+      countedSessions: 0,
+      isSessionCounted: () => false
+    };
+  }
 
   let firstActiveIndex = -1;
   for (let i = 0; i < cycleAtt.length; i++) {
