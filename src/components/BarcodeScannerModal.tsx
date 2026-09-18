@@ -53,6 +53,16 @@ import {
 import Link from 'next/link';
 import { getBarcodeCandidates, normalizeArabicName, normalizeScannedBarcode } from '../utils/barcodeUtils';
 
+export interface PendingCoverRequest {
+  id: string;
+  student: StudentRecord;
+  homeGroupId: string;
+  studentEnrolledGroups: string[];
+  targetActiveGroupId: string;
+  sessionIdx: number;
+  time: string;
+}
+
 interface Props {
   initialGroupId?: string;
   onClose?: () => void;
@@ -123,14 +133,10 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
   // LIVE ACTION / NOTIFICATION QUEUE (ON THE LEFT SIDE)
   // All scanner notifications (covering requests, unpaid students) appear here!
   // =========================================================================
-  const [pendingCoverRequest, setPendingCoverRequest] = useState<{
-    id: string;
-    student: StudentRecord;
-    homeGroupId: string;
-    studentEnrolledGroups: string[];
-    targetActiveGroupId: string;
-    sessionIdx: number;
-    time: string;
+  const [pendingCoverRequests, setPendingCoverRequests] = useState<PendingCoverRequest[]>([]);
+  const [confirmActionModal, setConfirmActionModal] = useState<{
+    type: 'cover' | 'transfer';
+    req: PendingCoverRequest;
   } | null>(null);
 
   const [pendingDebtors, setPendingDebtors] = useState<
@@ -622,7 +628,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       const targetGid = currentActiveGroups[0]?.groupId || primaryGid;
       const targetSession = currentActiveGroups[0]?.sessionIndex ?? activeSessionIdx;
 
-      setPendingCoverRequest({
+      const newCoverReq: PendingCoverRequest = {
         id: `${Date.now()}-${Math.random()}`,
         student: result.student,
         homeGroupId: result.studentEnrolledGroups[0] || result.homeGroupId,
@@ -630,6 +636,13 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
         targetActiveGroupId: targetGid,
         sessionIdx: targetSession,
         time: nowStr
+      };
+
+      setPendingCoverRequests((prev) => {
+        const filtered = prev.filter(
+          (r) => r.student.name.trim() !== result.student.name.trim() || r.targetActiveGroupId !== targetGid
+        );
+        return [...filtered, newCoverReq];
       });
 
       // Switch left tab to live queue so admin sees it instantly!
@@ -640,7 +653,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       setFlashSuccess({
         name: result.student.name,
         statusText: `تلميذ من فوج آخر (${result.studentEnrolledGroups[0] || result.homeGroupId})`,
-        details: `تم توجيه خيارات التعويض والتحويل إلى اللوحة اليسرى 👈`,
+        details: `طلب التعويض / النقل معروض في اللوحة اليسرى 👈`,
         isWarning: true
       });
 
@@ -966,9 +979,8 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
   // ==========================================
 
   // Choice 1: Temporary Covering (stays in original group, credited with 'C')
-  const handleAcceptTemporaryCover = () => {
-    if (!pendingCoverRequest) return;
-    const { student, homeGroupId, targetActiveGroupId, sessionIdx } = pendingCoverRequest;
+  const handleAcceptTemporaryCover = (req: PendingCoverRequest) => {
+    const { student, homeGroupId, targetActiveGroupId, sessionIdx } = req;
 
     recordCoverAttendance(targetActiveGroupId, homeGroupId, student.rowId, sessionIdx);
     playSuccessChime();
@@ -988,14 +1000,13 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       details: `يحضر الآن كتعويض في فوج ${targetActiveGroupId} (الحصة ${sessionIdx + 1})`
     });
 
-    setPendingCoverRequest(null);
+    setPendingCoverRequests((prev) => prev.filter((r) => r.id !== req.id));
     setTimeout(() => setFlashSuccess(null), 2500);
   };
 
   // Choice 2: Permanent Transfer (transfers student to active group permanently)
-  const handleAcceptPermanentTransfer = () => {
-    if (!pendingCoverRequest) return;
-    const { student, homeGroupId, targetActiveGroupId, sessionIdx } = pendingCoverRequest;
+  const handleAcceptPermanentTransfer = (req: PendingCoverRequest) => {
+    const { student, homeGroupId, targetActiveGroupId, sessionIdx } = req;
 
     const ok = transferStudent(homeGroupId, targetActiveGroupId, student.rowId);
     if (ok) {
@@ -1017,10 +1028,38 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
         details: `تم نقله من ${homeGroupId} وتسجيله حاضراً في الحصة ${sessionIdx + 1}`
       });
 
-      setPendingCoverRequest(null);
+      setPendingCoverRequests((prev) => prev.filter((r) => r.id !== req.id));
       setTimeout(() => setFlashSuccess(null), 2500);
     } else {
       alert('تعذر إتمام عملية النقل');
+    }
+  };
+
+  // Choice 3: Cancel Cover Request - does NOT take attendance
+  const handleCancelCoverRequest = (reqId: string) => {
+    const req = pendingCoverRequests.find((r) => r.id === reqId);
+    setPendingCoverRequests((prev) => prev.filter((r) => r.id !== reqId));
+
+    if (req) {
+      // Remove from recent scans
+      setRecentScans((prev) =>
+        prev.filter(
+          (s) =>
+            !(
+              s.studentName === req.student.name &&
+              s.groupId === req.targetActiveGroupId &&
+              s.status === 'COVER_REQ'
+            )
+        )
+      );
+
+      setFlashSuccess({
+        name: req.student.name,
+        statusText: 'تم إلغاء الطلب ولم يتم احتساب الحضور ✕',
+        details: 'تم إلغاء العملية بناءً على طلب المسؤول',
+        isWarning: true
+      });
+      setTimeout(() => setFlashSuccess(null), 2000);
     }
   };
 
@@ -1101,9 +1140,36 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     setTimeout(() => setFlashSuccess(null), 2000);
   };
 
-  // Debtor Quick Action: Confirm entry as debtor (dismiss from waiting queue)
+  // Debtor Quick Action: Confirm entry as debtor (dismiss from waiting queue, keep attendance)
   const handleDismissDebtorFromQueue = (debtorId: string) => {
     setPendingDebtors((prev) => prev.filter((d) => d.id !== debtorId));
+  };
+
+  // Debtor Action 3: Cancel debtor attendance - reverses attendance (does NOT take attendance)
+  const handleCancelDebtorAttendance = (debtorItem: typeof pendingDebtors[0]) => {
+    const { student, groupId, sessionIdx } = debtorItem;
+
+    // Reset attendance in sheet back to empty string
+    updateAttendance(groupId, student.rowId, sessionIdx, '');
+
+    // Remove from pending debtors queue
+    setPendingDebtors((prev) => prev.filter((d) => d.id !== debtorItem.id));
+
+    // Remove from recent scans
+    setRecentScans((prev) =>
+      prev.filter(
+        (s) => !(s.studentName === student.name && s.groupId === groupId && s.sessionIndex === sessionIdx)
+      )
+    );
+
+    setFlashSuccess({
+      name: student.name,
+      statusText: 'تم إلغاء الحضور ولم يتم احتسابه ✕',
+      details: `فوج ${groupId} • الحصة ${sessionIdx + 1}`,
+      isWarning: true
+    });
+
+    setTimeout(() => setFlashSuccess(null), 2000);
   };
 
   // ==========================================
@@ -1281,7 +1347,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
   };
 
   // Total pending items in the Live Queue
-  const totalQueueCount = (pendingCoverRequest ? 1 : 0) + pendingDebtors.length;
+  const totalQueueCount = pendingCoverRequests.length + pendingDebtors.length;
 
   // ==========================================
   // RENDER: CODEBAR SECTION (اليمين)
@@ -2156,135 +2222,117 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
           {/* ========================================================================= */}
           {leftTab === 'queue' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              {/* SECTION A: SCANNER COVERING & TRANSFER REQUEST CARD */}
-              {pendingCoverRequest && (
-                <div
-                  style={{
-                    backgroundColor: '#fffbeb',
-                    border: '2px solid #f59e0b',
-                    borderRadius: 'var(--md-shape-md)',
-                    padding: '12px 14px',
-                    boxShadow: '0 4px 12px rgba(245, 158, 11, 0.15)'
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#b45309' }}>
-                      <AlertTriangle size={20} className="animate-pulse" />
-                      <h4 style={{ margin: 0, fontSize: '0.94rem', fontWeight: 900 }}>
-                        طلب تعويض / تحويل وارد من قارئ الباركود ⚡
-                      </h4>
-                    </div>
-                    <span style={{ fontSize: '0.72rem', color: '#92400e', fontWeight: 700 }}>
-                      {pendingCoverRequest.time}
+              {/* SECTION A: SCANNER COVERING & TRANSFER REQUEST CARD (COMPACT) */}
+              {pendingCoverRequests.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#b45309' }}>
+                    <AlertTriangle size={16} />
+                    <span style={{ fontSize: '0.84rem', fontWeight: 800 }}>
+                      طلبات التعويض والتحويل ({pendingCoverRequests.length}):
                     </span>
                   </div>
 
-                  <div
-                    style={{
-                      backgroundColor: '#ffffff',
-                      padding: '8px 10px',
-                      borderRadius: '6px',
-                      border: '1px solid #fde68a',
-                      marginBottom: '10px',
-                      fontSize: '0.82rem',
-                      lineHeight: 1.5
-                    }}
-                  >
-                    <div>
-                      التلميذ: <strong style={{ fontSize: '0.94rem', color: '#b45309' }}>{pendingCoverRequest.student.name}</strong>
-                    </div>
-                    <div style={{ color: '#475569', fontSize: '0.76rem', marginTop: '2px' }}>
-                      مسجل في: <strong>فوج {pendingCoverRequest.homeGroupId}</strong> ({data.groupData[pendingCoverRequest.homeGroupId]?.subject || ''})
-                      <br />
-                      يحضر الآن في: <strong>فوج {pendingCoverRequest.targetActiveGroupId}</strong> (الحصة {pendingCoverRequest.sessionIdx + 1})
-                    </div>
-                  </div>
-
-                  <p style={{ margin: '0 0 8px', fontSize: '0.76rem', color: '#92400e', fontWeight: 800 }}>
-                    اختر الإجراء المطلوب للتلميذ:
-                  </p>
-
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {/* CHOICE 1: Temporary Covering */}
-                    <button
-                      type="button"
-                      onClick={handleAcceptTemporaryCover}
-                      className="m3-btn"
+                  {pendingCoverRequests.map((req) => (
+                    <div
+                      key={req.id}
                       style={{
-                        backgroundColor: '#d97706',
-                        color: '#ffffff',
-                        fontWeight: 800,
-                        fontSize: '0.8rem',
+                        backgroundColor: '#fffbeb',
+                        border: '1px solid #f59e0b',
+                        borderRadius: '8px',
                         padding: '8px 12px',
-                        borderRadius: '6px',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'space-between',
-                        textAlign: 'right'
+                        gap: '8px',
+                        flexWrap: 'wrap',
+                        boxShadow: '0 2px 6px rgba(245, 158, 11, 0.1)'
                       }}
                     >
-                      <div>
-                        <div>🔄 خيار 1: حصة تعويض مؤقتة (مع البقاء في فوجه الأصلي {pendingCoverRequest.homeGroupId})</div>
-                        <div style={{ fontSize: '0.68rem', fontWeight: 500, opacity: 0.9 }}>
-                          تُحتسب الحصة كحضور تعويض (C) في فوجه الأصلي، ويسجل حاضراً في حصة اليوم
-                        </div>
+                      {/* Name and Origin Info */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                        <strong style={{ fontSize: '0.92rem', color: '#92400e' }}>
+                          {req.student.name}
+                        </strong>
+                        <span style={{ fontSize: '0.72rem', color: '#78350f', backgroundColor: '#fde68a', padding: '1px 6px', borderRadius: '4px', fontWeight: 700 }}>
+                          فوج {req.homeGroupId}
+                        </span>
+                        <span style={{ fontSize: '0.72rem', color: '#92400e' }}>
+                          ➔ يحضر في: {req.targetActiveGroupId}
+                        </span>
                       </div>
-                      <span style={{ fontSize: '0.74rem', backgroundColor: 'rgba(255,255,255,0.2)', padding: '2px 8px', borderRadius: '4px' }}>
-                        تنفيذ التعويض ✓
-                      </span>
-                    </button>
 
-                    {/* CHOICE 2: Permanent Transfer */}
-                    <button
-                      type="button"
-                      onClick={handleAcceptPermanentTransfer}
-                      className="m3-btn"
-                      style={{
-                        backgroundColor: '#4f46e5',
-                        color: '#ffffff',
-                        fontWeight: 800,
-                        fontSize: '0.8rem',
-                        padding: '8px 12px',
-                        borderRadius: '6px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        textAlign: 'right'
-                      }}
-                    >
-                      <div>
-                        <div>🔀 خيار 2: تحويل نهائي للتلميذ (الانتقال دائماً إلى فوج {pendingCoverRequest.targetActiveGroupId})</div>
-                        <div style={{ fontSize: '0.68rem', fontWeight: 500, opacity: 0.9 }}>
-                          يُنقل التلميذ دائماً للفوج الحالي ويُسجل حاضراً رسمياً (P) في حصة اليوم
-                        </div>
+                      {/* Compact Action Buttons */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        {/* Cover Button */}
+                        <button
+                          type="button"
+                          onClick={() => setConfirmActionModal({ type: 'cover', req })}
+                          className="m3-btn m3-btn-sm"
+                          style={{
+                            backgroundColor: '#d97706',
+                            color: '#ffffff',
+                            fontSize: '0.76rem',
+                            padding: '3px 10px',
+                            height: '28px',
+                            fontWeight: 800,
+                            borderRadius: '6px'
+                          }}
+                          title="تسجيل كحصة تعويض في الفوج الأصلي"
+                        >
+                          🔄 تعويض
+                        </button>
+
+                        {/* Move Button */}
+                        <button
+                          type="button"
+                          onClick={() => setConfirmActionModal({ type: 'transfer', req })}
+                          className="m3-btn m3-btn-sm"
+                          style={{
+                            backgroundColor: '#4f46e5',
+                            color: '#ffffff',
+                            fontSize: '0.76rem',
+                            padding: '3px 10px',
+                            height: '28px',
+                            fontWeight: 800,
+                            borderRadius: '6px'
+                          }}
+                          title="نقل التلميذ نهائياً لهذا الفوج"
+                        >
+                          🔀 نقل
+                        </button>
+
+                        {/* Cancel Button - does NOT take attendance */}
+                        <button
+                          type="button"
+                          onClick={() => handleCancelCoverRequest(req.id)}
+                          className="m3-btn m3-btn-sm"
+                          style={{
+                            backgroundColor: '#ffffff',
+                            color: '#92400e',
+                            border: '1px solid #d97706',
+                            fontSize: '0.74rem',
+                            padding: '3px 8px',
+                            height: '28px',
+                            fontWeight: 700,
+                            borderRadius: '6px'
+                          }}
+                          title="إلغاء الطلب وعدم احتساب الحضور"
+                        >
+                          ✕ إلغاء
+                        </button>
                       </div>
-                      <span style={{ fontSize: '0.74rem', backgroundColor: 'rgba(255,255,255,0.2)', padding: '2px 8px', borderRadius: '4px' }}>
-                        نقل نهائي ✓
-                      </span>
-                    </button>
-
-                    {/* Dismiss */}
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '2px' }}>
-                      <button
-                        type="button"
-                        onClick={() => setPendingCoverRequest(null)}
-                        className="m3-btn-text"
-                        style={{ fontSize: '0.74rem', color: '#92400e', fontWeight: 700 }}
-                      >
-                        إلغاء وتجاهل الطلب ✕
-                      </button>
                     </div>
-                  </div>
+                  ))}
                 </div>
               )}
 
-              {/* SECTION B: UNPAID / DEBTORS WAITING LIST (from oldest to newest) */}
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+              {/* SECTION B: UNPAID / DEBTORS WAITING LIST (COMPACT) */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <CreditCard size={16} color="var(--md-sys-color-primary)" />
-                    <span style={{ fontSize: '0.86rem', fontWeight: 900, color: 'var(--md-sys-color-on-surface)' }}>
-                      قائمة انتظار غير المسددين ({pendingDebtors.length}):
+                    <span style={{ fontSize: '0.84rem', fontWeight: 800, color: 'var(--md-sys-color-on-surface)' }}>
+                      قائمة غير المسددين ({pendingDebtors.length}):
                     </span>
                   </div>
                   {pendingDebtors.length > 0 && (
@@ -2299,7 +2347,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                   )}
                 </div>
 
-                {pendingDebtors.length === 0 && !pendingCoverRequest ? (
+                {pendingDebtors.length === 0 && pendingCoverRequests.length === 0 ? (
                   <div
                     style={{
                       border: '1.5px dashed var(--md-sys-color-outline-variant)',
@@ -2314,11 +2362,11 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                       لا توجد طلبات تعويض أو ديون معلقة حالياً
                     </div>
                     <div style={{ fontSize: '0.74rem', color: 'var(--md-sys-color-on-surface-variant)', marginTop: '4px' }}>
-                      عندما يمسح تلميذ غير مسدد أو تلميذ من فوج آخر بطاقته في اليمين، سيظهر هنا فوراً في القائمة لتسوية وضعه.
+                      عند مسح بطاقة تلميذ غير مسدد أو تلميذ من فوج آخر، سيظهر هنا فوراً لاتخاذ الإجراء المناسب.
                     </div>
                   </div>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     {pendingDebtors.map((debtor, idx) => (
                       <div
                         key={debtor.id}
@@ -2326,86 +2374,105 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                           backgroundColor: '#fef2f2',
                           border: '1px solid #fecaca',
                           borderRadius: '8px',
-                          padding: '10px 12px',
+                          padding: '8px 12px',
                           display: 'flex',
-                          flexDirection: 'column',
-                          gap: '6px'
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '8px',
+                          flexWrap: 'wrap',
+                          boxShadow: '0 1px 3px rgba(239, 68, 68, 0.08)'
                         }}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <span
-                              style={{
-                                width: '20px',
-                                height: '20px',
-                                borderRadius: '50%',
-                                backgroundColor: '#b91c1c',
-                                color: '#fff',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                fontSize: '0.68rem',
-                                fontWeight: 900
-                              }}
-                            >
-                              {idx + 1}
-                            </span>
-                            <strong style={{ fontSize: '0.9rem', color: '#7f1d1d' }}>{debtor.student.name}</strong>
-                            <span style={{ fontSize: '0.72rem', color: '#991b1b' }}>
-                              (فوج {debtor.groupId} • ح{debtor.sessionIdx + 1})
-                            </span>
-                          </div>
-
-                          <span style={{ fontSize: '0.72rem', color: '#991b1b', fontWeight: 700 }}>
-                            {debtor.time}
+                        {/* Student Name and Debt Amount */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <span
+                            style={{
+                              width: '20px',
+                              height: '20px',
+                              borderRadius: '50%',
+                              backgroundColor: '#b91c1c',
+                              color: '#fff',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: '0.68rem',
+                              fontWeight: 900
+                            }}
+                          >
+                            {idx + 1}
+                          </span>
+                          <strong style={{ fontSize: '0.92rem', color: '#7f1d1d' }}>
+                            {debtor.student.name}
+                          </strong>
+                          <span style={{ fontSize: '0.74rem', color: '#991b1b', backgroundColor: '#fee2e2', padding: '1px 6px', borderRadius: '4px', fontWeight: 700 }}>
+                            المبلغ المطلوب: {debtor.debt.toLocaleString()} دج
                           </span>
                         </div>
 
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
-                          <span style={{ fontSize: '0.84rem', fontWeight: 900, color: '#b91c1c' }}>
-                            الدين المتبقي: {debtor.debt.toLocaleString()} دج
-                          </span>
+                        {/* 3 Compact Action Buttons */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                          {/* 1. Pay */}
+                          <button
+                            type="button"
+                            onClick={() => handleSettleDebtorInQueue(debtor, debtor.debt, true)}
+                            className="m3-btn m3-btn-sm"
+                            style={{
+                              backgroundColor: '#15803d',
+                              color: '#fff',
+                              fontSize: '0.74rem',
+                              padding: '3px 8px',
+                              height: '28px',
+                              fontWeight: 800,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '3px',
+                              borderRadius: '6px'
+                            }}
+                            title="تسديد المبلغ وطباعة الوصل فوراً"
+                          >
+                            <Printer size={12} />
+                            <span>تسديد ({debtor.debt}) 🖨️</span>
+                          </button>
 
-                          <div style={{ display: 'flex', gap: '6px' }}>
-                            <button
-                              type="button"
-                              onClick={() => handleSettleDebtorInQueue(debtor, debtor.debt, true)}
-                              className="m3-btn m3-btn-sm m3-btn-primary"
-                              style={{
-                                backgroundColor: '#15803d',
-                                borderColor: '#15803d',
-                                fontSize: '0.74rem',
-                                padding: '3px 8px',
-                                height: '28px',
-                                fontWeight: 800,
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '3px'
-                              }}
-                              title="تسديد كامل الدين وطباعة الوصل فوراً"
-                            >
-                              <Printer size={12} />
-                              <span>تسديد كامل ({debtor.debt}) 🖨️</span>
-                            </button>
+                          {/* 2. Accept without paying (keep attendance) */}
+                          <button
+                            type="button"
+                            onClick={() => handleDismissDebtorFromQueue(debtor.id)}
+                            className="m3-btn m3-btn-sm"
+                            style={{
+                              backgroundColor: '#fff',
+                              color: '#334155',
+                              border: '1px solid #cbd5e1',
+                              fontSize: '0.72rem',
+                              padding: '3px 8px',
+                              height: '28px',
+                              fontWeight: 800,
+                              borderRadius: '6px'
+                            }}
+                            title="قبول الدخول كمدين مع تثبيت الحضور"
+                          >
+                            قبول كمدين ✓
+                          </button>
 
-                            <button
-                              type="button"
-                              onClick={() => handleDismissDebtorFromQueue(debtor.id)}
-                              className="m3-btn m3-btn-sm m3-btn-outlined"
-                              style={{
-                                borderColor: '#b91c1c',
-                                color: '#b91c1c',
-                                backgroundColor: '#fff',
-                                fontSize: '0.72rem',
-                                padding: '3px 8px',
-                                height: '28px',
-                                fontWeight: 800
-                              }}
-                              title="تأكيد الدخول كمدين وحذف من القائمة"
-                            >
-                              حاضر كمدين ✓
-                            </button>
-                          </div>
+                          {/* 3. Cancel attendance (don't take attendance) */}
+                          <button
+                            type="button"
+                            onClick={() => handleCancelDebtorAttendance(debtor)}
+                            className="m3-btn m3-btn-sm"
+                            style={{
+                              backgroundColor: '#fff',
+                              color: '#b91c1c',
+                              border: '1px solid #fca5a5',
+                              fontSize: '0.72rem',
+                              padding: '3px 8px',
+                              height: '28px',
+                              fontWeight: 800,
+                              borderRadius: '6px'
+                            }}
+                            title="إلغاء الحضور وعدم احتسابه نهائياً"
+                          >
+                            ✕ إلغاء الحضور
+                          </button>
                         </div>
                       </div>
                     ))}
@@ -2414,6 +2481,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
               </div>
             </div>
           )}
+
 
           {/* ========================================================================= */}
           {/* TAB 2: ADD NEW STUDENT                                                    */}
@@ -3422,6 +3490,118 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                 تفعيل كفوج تعويض اليوم ⚡
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: CONFIRM COVER OR MOVE FOR SCANNER REQUEST                          */}
+      {/* ========================================================================= */}
+      {confirmActionModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0,0,0,0.6)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 250
+          }}
+          onClick={() => setConfirmActionModal(null)}
+        >
+          <div
+            style={{
+              backgroundColor: '#fff',
+              padding: '24px',
+              borderRadius: 'var(--md-shape-xl)',
+              maxWidth: '480px',
+              width: '92%',
+              boxShadow: 'var(--md-elevation-5)',
+              direction: 'rtl',
+              border: confirmActionModal.type === 'cover' ? '2px solid #f59e0b' : '2px solid #6366f1'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {confirmActionModal.type === 'cover' ? (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#b45309', marginBottom: '12px' }}>
+                  <Sparkles size={22} color="#f59e0b" />
+                  <h3 style={{ fontSize: '1.15rem', fontWeight: 900, margin: 0 }}>
+                    تأكيد تسجيل حصة تعويض 🔄
+                  </h3>
+                </div>
+
+                <div style={{ fontSize: '0.9rem', color: '#334155', lineHeight: 1.6, marginBottom: '16px' }}>
+                  هل تريد تسجيل حصة تعويض للتلميذ <strong style={{ color: '#b45309' }}>{confirmActionModal.req.student.name}</strong>؟
+                  <div style={{ marginTop: '10px', backgroundColor: '#fffbeb', padding: '10px 12px', borderRadius: '8px', border: '1px solid #fde68a', fontSize: '0.82rem', color: '#78350f' }}>
+                    <div>• <strong>الفوج الأصلي:</strong> فوج {confirmActionModal.req.homeGroupId} (تُحتسب الحصة كتعويض <strong>C</strong> للأستاذ والمؤسسة)</div>
+                    <div style={{ marginTop: '4px' }}>• <strong>فوج التعويض اليوم:</strong> فوج {confirmActionModal.req.targetActiveGroupId} (يُسجل كحاضر بالتعويض <strong>M</strong>)</div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmActionModal(null)}
+                    className="m3-btn m3-btn-text"
+                    style={{ fontSize: '0.84rem' }}
+                  >
+                    تراجع
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleAcceptTemporaryCover(confirmActionModal.req);
+                      setConfirmActionModal(null);
+                    }}
+                    className="m3-btn m3-btn-primary"
+                    style={{ backgroundColor: '#f59e0b', borderColor: '#f59e0b', fontWeight: 800, fontSize: '0.84rem' }}
+                  >
+                    تأكيد التعويض ✓
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#4338ca', marginBottom: '12px' }}>
+                  <ArrowLeftRight size={22} color="#4f46e5" />
+                  <h3 style={{ fontSize: '1.15rem', fontWeight: 900, margin: 0 }}>
+                    تأكيد النقل النهائي للتلميذ 🔀
+                  </h3>
+                </div>
+
+                <div style={{ fontSize: '0.9rem', color: '#334155', lineHeight: 1.6, marginBottom: '16px' }}>
+                  هل تريد تحويل التلميذ <strong style={{ color: '#4338ca' }}>{confirmActionModal.req.student.name}</strong> بشكل نهائي؟
+                  <div style={{ marginTop: '10px', backgroundColor: '#eef2ff', padding: '10px 12px', borderRadius: '8px', border: '1px solid #c7d2fe', fontSize: '0.82rem', color: '#3730a3' }}>
+                    <div>• سيتم نقله دائماً من <strong>فوج {confirmActionModal.req.homeGroupId}</strong> إلى <strong>فوج {confirmActionModal.req.targetActiveGroupId}</strong>.</div>
+                    <div style={{ marginTop: '4px' }}>• يُسجل كحاضر رسمي (<strong>P</strong>) في حصة اليوم.</div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmActionModal(null)}
+                    className="m3-btn m3-btn-text"
+                    style={{ fontSize: '0.84rem' }}
+                  >
+                    تراجع
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleAcceptPermanentTransfer(confirmActionModal.req);
+                      setConfirmActionModal(null);
+                    }}
+                    className="m3-btn m3-btn-primary"
+                    style={{ backgroundColor: '#4f46e5', borderColor: '#4f46e5', fontWeight: 800, fontSize: '0.84rem' }}
+                  >
+                    تأكيد النقل النهائي ✓
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
