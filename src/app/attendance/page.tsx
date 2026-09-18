@@ -37,6 +37,7 @@ import RenewGroupModal from '../../components/RenewGroupModal';
 import GroupSearchSelect from '../../components/GroupSearchSelect';
 import BarcodeScannerModal from '../../components/BarcodeScannerModal';
 import GroupBadgesModal from '../../components/GroupBadgesModal';
+import SecurityPinModal from '../../components/SecurityPinModal';
 import { normalizeScannedBarcode } from '../../utils/barcodeUtils';
 import {
   isSessionDateToday,
@@ -81,6 +82,7 @@ export default function AttendancePage() {
   const [isGroupBadgesModalOpen, setIsGroupBadgesModalOpen] = useState(false);
   const [isEditingDates, setIsEditingDates] = useState(false);
   const [showFinancialStats, setShowFinancialStats] = useState(false);
+  const [isPinModalOpen, setIsPinModalOpen] = useState(false);
   const [editableDates, setEditableDates] = useState<string[]>(
     group?.sessionDates || ['حصة 1', 'حصة 2', 'حصة 3', 'حصة 4', 'حصة 5', 'حصة 6', 'حصة 7', 'حصة 8']
   );
@@ -571,7 +573,13 @@ export default function AttendancePage() {
           {/* Optional Toggle to show/hide Financial KPIs (Hidden by default as requested) */}
           <button
             type="button"
-            onClick={() => setShowFinancialStats(!showFinancialStats)}
+            onClick={() => {
+              if (showFinancialStats) {
+                setShowFinancialStats(false);
+              } else {
+                setIsPinModalOpen(true);
+              }
+            }}
             className="m3-btn m3-btn-outlined m3-btn-sm"
             style={{
               display: 'flex',
@@ -581,7 +589,7 @@ export default function AttendancePage() {
               color: showFinancialStats ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-on-surface-variant)',
               borderColor: showFinancialStats ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-outline-variant)'
             }}
-            title={showFinancialStats ? 'إخفاء شريط الإحصائيات المالية' : 'إظهار شريط الإحصائيات المالية'}
+            title={showFinancialStats ? 'إخفاء شريط الإحصائيات المالية' : 'إظهار شريط الإحصائيات المالية (يتطلب الرمز 1234)'}
           >
             {showFinancialStats ? <EyeOff size={15} /> : <Eye size={15} />}
             <span>{showFinancialStats ? 'إخفاء الإحصائيات المالية' : 'إظهار الإحصائيات المالية'}</span>
@@ -1521,6 +1529,16 @@ export default function AttendancePage() {
           onClose={() => setIsGroupBadgesModalOpen(false)}
         />
       )}
+
+      {/* Security PIN Modal to unlock financial statistics */}
+      <SecurityPinModal
+        isOpen={isPinModalOpen}
+        onClose={() => setIsPinModalOpen(false)}
+        onSuccess={() => setShowFinancialStats(true)}
+        title="تأكيد إظهار الإحصائيات المالية"
+        description="يرجى إدخال رمز الأمان (1234) لعرض المداخيل ومستحقات الفوج"
+        expectedPin="1234"
+      />
     </div>
   );
 }

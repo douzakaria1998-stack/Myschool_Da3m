@@ -18,8 +18,12 @@ import {
   GraduationCap,
   Sparkles,
   ExternalLink,
-  IdCard
+  IdCard,
+  Edit3,
+  Check,
+  Trash2
 } from 'lucide-react';
+import { StudentRecord, GroupSheet, DiscountType } from '../types';
 import Link from 'next/link';
 import StudentPaymentModal from './StudentPaymentModal';
 import ThermalReceiptsModal from './ThermalReceiptsModal';
@@ -34,13 +38,23 @@ interface Props {
 }
 
 export default function StudentProfileModal({ student, groupId, onClose }: Props) {
-  const { data } = useApp();
+  const { data, updateStudent, deleteStudent } = useApp();
   const group = data.groupData[groupId] as GroupSheet | undefined;
   const groupMeta = data.groups.find((g) => g.id === groupId);
 
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isThermalModalOpen, setIsThermalModalOpen] = useState(false);
   const [isBadgeModalOpen, setIsBadgeModalOpen] = useState(false);
+
+  // Edit Student Profile State
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState(student.name);
+  const [editPhone, setEditPhone] = useState(student.phone || '');
+  const [editBarcode, setEditBarcode] = useState(student.barcode || '');
+  const [editDiscount, setEditDiscount] = useState<DiscountType>(student.discount || '1');
+  const [syncAllGroups, setSyncAllGroups] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   // Find all enrollments for this student across all groups with live pure finances
   const allEnrollments = React.useMemo(() => {
@@ -84,6 +98,57 @@ export default function StudentProfileModal({ student, groupId, onClose }: Props
 
   const sessionCount = group?.sessionCount || group?.sessionDates?.length || 4;
   const sessionDates = group?.sessionDates || [];
+
+  // Sync edit form state when student changes
+  React.useEffect(() => {
+    setEditName(currentStudent.name);
+    setEditPhone(currentStudent.phone || '');
+    setEditBarcode(currentStudent.barcode || '');
+    setEditDiscount(currentStudent.discount || '1');
+  }, [currentStudent]);
+
+  const handleSaveProfile = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanName = editName.trim();
+    if (!cleanName) return;
+
+    setIsSaving(true);
+    const cleanPhone = editPhone.trim();
+    const cleanBarcode = editBarcode.trim();
+
+    if (syncAllGroups && allEnrollments.length > 0) {
+      allEnrollments.forEach((enrollment) => {
+        const isCurrentGroup = enrollment.groupId === groupId;
+        updateStudent(enrollment.groupId, enrollment.studentRecord.rowId, {
+          name: cleanName,
+          phone: cleanPhone,
+          barcode: cleanBarcode,
+          ...(isCurrentGroup ? { discount: editDiscount } : {})
+        });
+      });
+    } else {
+      updateStudent(groupId, student.rowId, {
+        name: cleanName,
+        phone: cleanPhone,
+        barcode: cleanBarcode,
+        discount: editDiscount
+      });
+    }
+
+    setIsSaving(false);
+    setSaveSuccess(true);
+    setTimeout(() => {
+      setSaveSuccess(false);
+      setIsEditing(false);
+    }, 600);
+  };
+
+  const handleDeleteStudent = () => {
+    if (window.confirm(`هل أنت متأكد من حذف التلميذ "${currentStudent.name}" نهائياً من الفوج ${groupId}؟`)) {
+      deleteStudent(groupId, student.rowId);
+      onClose();
+    }
+  };
 
   return (
     <div className="m3-dialog-backdrop" onClick={onClose} style={{ padding: '12px' }}>
@@ -158,14 +223,220 @@ export default function StudentProfileModal({ student, groupId, onClose }: Props
             </div>
           </div>
 
-          <button
-            onClick={onClose}
-            className="m3-btn-text"
-            style={{ borderRadius: '50%', width: '32px', height: '32px', padding: 0 }}
-          >
-            <X size={18} />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              type="button"
+              onClick={() => setIsEditing(!isEditing)}
+              className={`m3-btn ${isEditing ? 'm3-btn-primary' : 'm3-btn-tonal'} m3-btn-sm`}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 12px',
+                borderRadius: 'var(--md-shape-sm)',
+                fontWeight: 700
+              }}
+              title="تعديل بيانات التلميذ (الاسم، الهاتف، الباركود، التخفيض)"
+            >
+              <Edit3 size={15} />
+              <span>{isEditing ? 'إلغاء التعديل' : 'تعديل البيانات'}</span>
+            </button>
+
+            <button
+              onClick={onClose}
+              className="m3-btn-text"
+              style={{ borderRadius: '50%', width: '32px', height: '32px', padding: 0 }}
+            >
+              <X size={18} />
+            </button>
+          </div>
         </div>
+
+        {/* Edit Student Profile Panel */}
+        {isEditing && (
+          <form
+            onSubmit={handleSaveProfile}
+            className="m3-card"
+            style={{
+              padding: '16px 20px',
+              backgroundColor: 'var(--md-sys-color-surface-container-high)',
+              border: '1.5px solid var(--md-sys-color-primary)',
+              borderRadius: 'var(--md-shape-md)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+              marginBottom: '14px',
+              animation: 'fadeIn 0.2s ease-in-out'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Edit3 size={18} color="var(--md-sys-color-primary)" />
+                <h3 style={{ fontSize: '1rem', fontWeight: 800, margin: 0, color: 'var(--md-sys-color-on-surface)' }}>
+                  تعديل بيانات التلميذ
+                </h3>
+              </div>
+              {saveSuccess && (
+                <span
+                  style={{
+                    fontSize: '0.8rem',
+                    color: 'var(--status-present)',
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  <CheckCircle2 size={16} />
+                  <span>تم حفظ التعديلات بنجاح!</span>
+                </span>
+              )}
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                gap: '12px'
+              }}
+            >
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, marginBottom: '5px' }}>
+                  الاسم واللقب <span style={{ color: 'var(--md-sys-color-error)' }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="m3-input"
+                  style={{ width: '100%', fontWeight: 700 }}
+                  required
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, marginBottom: '5px' }}>
+                  رقم الهاتف
+                </label>
+                <input
+                  type="text"
+                  value={editPhone}
+                  onChange={(e) => setEditPhone(e.target.value)}
+                  placeholder="06XXXXXXXX"
+                  className="m3-input"
+                  style={{ width: '100%', direction: 'ltr', textAlign: 'right' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, marginBottom: '5px' }}>
+                  رقم الباركود / المعرّف (Barcode)
+                </label>
+                <input
+                  type="text"
+                  value={editBarcode}
+                  onChange={(e) => setEditBarcode(e.target.value)}
+                  placeholder="مثال: STU-12345"
+                  className="m3-input"
+                  style={{ width: '100%', direction: 'ltr', textAlign: 'right', fontWeight: 700 }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, marginBottom: '5px' }}>
+                  نوع التخفيض في هذا الفوج ({groupId})
+                </label>
+                <select
+                  value={editDiscount}
+                  onChange={(e) => setEditDiscount(e.target.value as any)}
+                  className="m3-select"
+                  style={{ width: '100%', fontWeight: 700 }}
+                >
+                  <option value="1">عادي - تسديد 100%</option>
+                  <option value="0.8">تخفيض - تسديد 80%</option>
+                  <option value="0">معفى بالكامل - 0%</option>
+                  <option value="تعويض">حصة تعويض</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Sync all enrollments checkbox if enrolled in multiple groups */}
+            {allEnrollments.length > 1 && (
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  fontSize: '0.82rem',
+                  fontWeight: 600,
+                  color: 'var(--md-sys-color-on-surface-variant)',
+                  cursor: 'pointer',
+                  backgroundColor: 'var(--md-sys-color-surface-container-low)',
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--md-sys-color-outline-variant)'
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={syncAllGroups}
+                  onChange={(e) => setSyncAllGroups(e.target.checked)}
+                  style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: 'var(--md-sys-color-primary)' }}
+                />
+                <span>تطبيق تعديل الاسم، الهاتف والباركود تلقائياً على جميع أفواج التلميذ ({allEnrollments.length} أفواج)</span>
+              </label>
+            )}
+
+            {/* Actions */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
+              <button
+                type="button"
+                onClick={handleDeleteStudent}
+                className="m3-btn-text"
+                style={{
+                  color: 'var(--md-sys-color-error)',
+                  fontSize: '0.82rem',
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
+                title="حذف التلميذ من الفوج الحالي"
+              >
+                <Trash2 size={15} />
+                <span>حذف من هذا الفوج</span>
+              </button>
+
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => setIsEditing(false)}
+                  className="m3-btn m3-btn-outlined m3-btn-sm"
+                  style={{ borderRadius: '8px' }}
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSaving}
+                  className="m3-btn m3-btn-primary m3-btn-sm"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    borderRadius: '8px',
+                    fontWeight: 700,
+                    backgroundColor: 'var(--status-present)',
+                    color: '#ffffff'
+                  }}
+                >
+                  <Check size={16} />
+                  <span>{isSaving ? 'جارٍ الحفظ...' : 'حفظ التعديلات'}</span>
+                </button>
+              </div>
+            </div>
+          </form>
+        )}
 
         {/* Scrollable Content */}
         <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '14px', paddingInlineEnd: '4px' }}>

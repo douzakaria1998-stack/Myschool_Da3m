@@ -41,6 +41,7 @@ import RenewGroupModal from '../components/RenewGroupModal';
 import StudentProfileModal from '../components/StudentProfileModal';
 import { normalizeScannedBarcode } from '../utils/barcodeUtils';
 import StudentPaymentModal from '../components/StudentPaymentModal';
+import SecurityPinModal from '../components/SecurityPinModal';
 import {
   isGroupToday,
   getTodayArabicDayName,
@@ -79,7 +80,8 @@ export default function DashboardPage() {
   const [isMultiPaymentOpen, setIsMultiPaymentOpen] = useState(false);
   const [renewingGroupId, setRenewingGroupId] = useState<string | null>(null);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
-  const [showStats, setShowStats] = useState(true);
+  const [showStats, setShowStats] = useState(false);
+  const [isPinModalOpen, setIsPinModalOpen] = useState(false);
 
   // Student Section state
   const [studentSearch, setStudentSearch] = useState('');
@@ -312,7 +314,13 @@ export default function DashboardPage() {
           </Link>
           <button
             type="button"
-            onClick={() => setShowStats(!showStats)}
+            onClick={() => {
+              if (showStats) {
+                setShowStats(false);
+              } else {
+                setIsPinModalOpen(true);
+              }
+            }}
             className="m3-btn m3-btn-outlined"
             style={{
               display: 'flex',
@@ -322,7 +330,7 @@ export default function DashboardPage() {
               color: showStats ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-on-surface-variant)',
               borderColor: showStats ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-outline-variant)'
             }}
-            title={showStats ? 'إخفاء الإحصائيات العامة والمالية' : 'إظهار الإحصائيات العامة والمالية'}
+            title={showStats ? 'إخفاء الإحصائيات العامة والمالية' : 'إظهار الإحصائيات العامة والمالية (يتطلب الرمز 1234)'}
           >
             {showStats ? <EyeOff size={18} /> : <Eye size={18} />}
             <span>{showStats ? 'إخفاء الإحصائيات' : 'إظهار الإحصائيات'}</span>
@@ -1137,13 +1145,14 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                {/* Micro stats */}
+                {/* Micro stats (المحصل والديون مرتبطان بزر إخفاء/إظهار الإحصائيات) */}
                 <div
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: 'repeat(3, 1fr)',
+                    gridTemplateColumns: showStats ? 'repeat(3, 1fr)' : '1fr',
                     gap: '8px',
-                    textAlign: 'center'
+                    textAlign: 'center',
+                    transition: 'all 0.2s ease-in-out'
                   }}
                 >
                   <div
@@ -1154,40 +1163,49 @@ export default function DashboardPage() {
                     }}
                   >
                     <div style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)' }}>التلاميذ</div>
-                    <div style={{ fontSize: '1rem', fontWeight: 800 }}>{groupStats.studentCount}</div>
-                  </div>
-                  <div
-                    style={{
-                      padding: '8px 4px',
-                      backgroundColor: 'var(--status-present-container)',
-                      borderRadius: 'var(--md-shape-sm)'
-                    }}
-                  >
-                    <div style={{ fontSize: '0.75rem', color: 'var(--status-present)' }}>المحصل</div>
-                    <div style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--status-present)' }}>
-                      {groupStats.totalReceived.toLocaleString()}
+                    <div style={{ fontSize: '1rem', fontWeight: 800 }}>
+                      {groupStats.studentCount} {!showStats && <span style={{ fontSize: '0.78rem', fontWeight: 600 }}>تلميذ</span>}
                     </div>
                   </div>
-                  <div
-                    style={{
-                      padding: '8px 4px',
-                      backgroundColor: groupStats.totalDebt > 0 ? 'var(--status-absent-container)' : 'var(--md-sys-color-surface-container)',
-                      borderRadius: 'var(--md-shape-sm)'
-                    }}
-                  >
-                    <div style={{ fontSize: '0.75rem', color: groupStats.totalDebt > 0 ? 'var(--status-absent)' : 'var(--md-sys-color-on-surface-variant)' }}>
-                      الديون
-                    </div>
-                    <div
-                      style={{
-                        fontSize: '0.9rem',
-                        fontWeight: 800,
-                        color: groupStats.totalDebt > 0 ? 'var(--status-absent)' : 'var(--md-sys-color-on-surface)'
-                      }}
-                    >
-                      {groupStats.totalDebt.toLocaleString()}
-                    </div>
-                  </div>
+
+                  {showStats && (
+                    <>
+                      <div
+                        style={{
+                          padding: '8px 4px',
+                          backgroundColor: 'var(--status-present-container)',
+                          borderRadius: 'var(--md-shape-sm)',
+                          animation: 'fadeIn 0.2s ease-in-out'
+                        }}
+                      >
+                        <div style={{ fontSize: '0.75rem', color: 'var(--status-present)' }}>المحصل</div>
+                        <div style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--status-present)' }}>
+                          {groupStats.totalReceived.toLocaleString()}
+                        </div>
+                      </div>
+                      <div
+                        style={{
+                          padding: '8px 4px',
+                          backgroundColor: groupStats.totalDebt > 0 ? 'var(--status-absent-container)' : 'var(--md-sys-color-surface-container)',
+                          borderRadius: 'var(--md-shape-sm)',
+                          animation: 'fadeIn 0.2s ease-in-out'
+                        }}
+                      >
+                        <div style={{ fontSize: '0.75rem', color: groupStats.totalDebt > 0 ? 'var(--status-absent)' : 'var(--md-sys-color-on-surface-variant)' }}>
+                          الديون
+                        </div>
+                        <div
+                          style={{
+                            fontSize: '0.9rem',
+                            fontWeight: 800,
+                            color: groupStats.totalDebt > 0 ? 'var(--status-absent)' : 'var(--md-sys-color-on-surface)'
+                          }}
+                        >
+                          {groupStats.totalDebt.toLocaleString()}
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 {/* Card Actions */}
@@ -1788,6 +1806,16 @@ export default function DashboardPage() {
           onClose={() => setActivePaymentModal(null)}
         />
       )}
+
+      {/* Security PIN Modal to unlock statistics */}
+      <SecurityPinModal
+        isOpen={isPinModalOpen}
+        onClose={() => setIsPinModalOpen(false)}
+        onSuccess={() => setShowStats(true)}
+        title="تأكيد إظهار الإحصائيات"
+        description="يرجى إدخال رمز الأمان (1234) لعرض الإحصائيات العامة والمداخيل المالية"
+        expectedPin="1234"
+      />
     </div>
   );
 }
