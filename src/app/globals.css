@@ -289,6 +289,16 @@ body {
   transition: var(--transition-standard);
 }
 
+select.m3-input,
+select {
+  padding-top: 4px !important;
+  padding-bottom: 4px !important;
+  padding-inline-start: 10px;
+  padding-inline-end: 28px;
+  line-height: normal;
+  cursor: pointer;
+}
+
 .m3-input:focus {
   border-color: var(--md-sys-color-primary);
   box-shadow: 0 0 0 2px var(--md-sys-color-primary-container);

@@ -1402,17 +1402,26 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
   const handleTransferStudentSubmit = () => {
     if (!changeSelectedStudent) return;
     const { student, fromGroupId } = changeSelectedStudent;
-    if (!changeTargetGroupId || changeTargetGroupId === fromGroupId) {
+    const availableGroups = data.groups.filter(
+      (g) => g.id.trim().toUpperCase() !== fromGroupId.trim().toUpperCase()
+    );
+    const targetGid =
+      (changeTargetGroupId && availableGroups.some((g) => g.id === changeTargetGroupId))
+        ? changeTargetGroupId
+        : availableGroups[0]?.id;
+
+    if (!targetGid || targetGid.toUpperCase() === fromGroupId.toUpperCase()) {
       alert('يرجى اختيار فوج وجهة مختلف عن الفوج الحالي');
       return;
     }
 
-    const success = transferStudent(fromGroupId, changeTargetGroupId, student.rowId);
+    const success = transferStudent(fromGroupId, targetGid, student.rowId);
     if (success) {
       playSuccessChime();
-      setChangeSuccessMsg(`تم نقل التلميذ "${student.name}" من فوج ${fromGroupId} إلى فوج ${changeTargetGroupId} بنجاح ✓`);
+      setChangeSuccessMsg(`تم نقل التلميذ "${student.name}" من فوج ${fromGroupId} إلى فوج ${targetGid} بنجاح ✓`);
       setChangeSelectedStudent(null);
       setChangeSearchQuery('');
+      setChangeTargetGroupId('');
       setTimeout(() => setChangeSuccessMsg(null), 4000);
     } else {
       alert('تعذر إتمام عملية النقل');
@@ -1463,120 +1472,6 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
   // ==========================================
   const renderCodebarSection = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-      {/* Codebar Header Actions */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '8px',
-          flexWrap: 'wrap'
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '0.86rem', fontWeight: 800, color: 'var(--md-sys-color-on-surface)' }}>
-            الأفواج النشطة ({activeGroups.length}):
-          </span>
-
-          {/* Button 1: Add Covering Group for Today */}
-          <button
-            type="button"
-            onClick={() => {
-              setNewCoverGroupId(data.groups[0]?.id || '');
-              setNewCoverGroupSessionIdx(0);
-              setShowAddCoverGroupModal(true);
-            }}
-            className="m3-btn m3-btn-sm"
-            style={{
-              backgroundColor: '#f59e0b',
-              color: '#ffffff',
-              border: 'none',
-              fontWeight: 800,
-              fontSize: '0.74rem',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px',
-              padding: '4px 10px',
-              borderRadius: '6px',
-              boxShadow: '0 2px 6px rgba(245, 158, 11, 0.3)'
-            }}
-            title="إضافة فوج تعويض خاص لهذا اليوم يظهر فوراً في محطة المسح"
-          >
-            <Sparkles size={13} />
-            <span>+ إضافة فوج تعويض لهذا اليوم 🔄</span>
-          </button>
-
-          {/* Button 2: Add Normal Active Group */}
-          <button
-            type="button"
-            onClick={() => handleAddActiveGroup()}
-            className="m3-btn m3-btn-sm"
-            style={{
-              backgroundColor: '#059669',
-              color: '#fff',
-              border: 'none',
-              fontWeight: 800,
-              fontSize: '0.72rem',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '3px',
-              padding: '4px 8px',
-              borderRadius: '6px'
-            }}
-            title="إضافة فوج آخر نشط في نفس الوقت"
-          >
-            <Plus size={12} />
-            <span>+ إضافة فوج نشط</span>
-          </button>
-
-          {activeGroups.length > 1 && (
-            <button
-              type="button"
-              onClick={() => {
-                setEndSessionTarget('ALL');
-                setShowEndSessionConfirm(true);
-              }}
-              className="m3-btn m3-btn-sm"
-              style={{
-                backgroundColor: '#fee2e2',
-                color: '#b91c1c',
-                border: '1px solid #fca5a5',
-                fontWeight: 700,
-                fontSize: '0.72rem',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '3px',
-                padding: '4px 7px',
-                borderRadius: '6px'
-              }}
-            >
-              <UserX size={11} />
-              <span>إنهاء الكل ({activeGroups.length})</span>
-            </button>
-          )}
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <button
-            onClick={() => setShowQueueModal(true)}
-            className="m3-btn m3-btn-outlined m3-btn-sm"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-              fontSize: '0.74rem',
-              padding: '3px 8px',
-              borderColor: printQueue.length > 0 ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-outline-variant)',
-              backgroundColor: printQueue.length > 0 ? 'var(--md-sys-color-primary-container)' : 'transparent',
-              color: printQueue.length > 0 ? 'var(--md-sys-color-on-primary-container)' : 'var(--md-sys-color-on-surface)'
-            }}
-          >
-            <Printer size={13} />
-            <span>طابور الطباعة ({printQueue.length})</span>
-          </button>
-        </div>
-      </div>
-
       {/* Active Group Cards Container */}
       <div
         style={{
@@ -1836,13 +1731,10 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
               textAlign: 'center'
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', color: '#ea580c', fontWeight: 800, fontSize: '0.86rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', color: '#ea580c', fontWeight: 800, fontSize: '0.86rem', marginBottom: '8px' }}>
               <Clock size={16} />
               <span>لا يوجد أي فوج دراسي في هذا الوقت</span>
             </div>
-            <p style={{ margin: '4px 0 8px', fontSize: '0.74rem', color: '#7c2d12' }}>
-              تظهر الأفواج تلقائياً، أو يمكنك إضافة فوج تعويض لهذا اليوم أو تفعيل فوج يدوياً.
-            </p>
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
               <button
                 type="button"
@@ -2046,11 +1938,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
           )}
         </div>
 
-        {recentScans.length === 0 ? (
-          <div style={{ fontSize: '0.76rem', color: 'var(--md-sys-color-outline)', textAlign: 'center', padding: '12px' }}>
-            لا توجد عمليات مسح حتى الآن. مرر بطاقات التلاميذ ليظهر سجل الحضور هنا تلقائياً.
-          </div>
-        ) : (
+        {recentScans.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '200px', overflowY: 'auto' }}>
             {recentScans.map((scan) => (
               <div
@@ -2127,59 +2015,6 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
           flexDirection: 'column'
         }}
       >
-        {/* Panel Header */}
-        <div
-          style={{
-            backgroundColor: 'var(--md-sys-color-surface-container)',
-            padding: '12px 14px',
-            borderBottom: '1px solid var(--md-sys-color-outline-variant)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            flexWrap: 'wrap',
-            gap: '8px'
-          }}
-        >
-          <div>
-            <h3 style={{ margin: 0, fontSize: '1.02rem', fontWeight: 900, color: 'var(--md-sys-color-on-surface)' }}>
-              لوحة الإجراءات المباشرة والعمليات السريعة
-            </h3>
-            <p style={{ margin: '2px 0 0', fontSize: '0.72rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
-              تظهر هنا فورياً تنبيهات الباركود (التعويض، غير المسددين) وتعمل بالتوازي دون تعطيل المسح
-            </p>
-          </div>
-          {totalQueueCount > 0 ? (
-            <span
-              style={{
-                fontSize: '0.7rem',
-                fontWeight: 900,
-                backgroundColor: '#fee2e2',
-                color: '#b91c1c',
-                border: '1px solid #fca5a5',
-                padding: '2px 8px',
-                borderRadius: '12px'
-              }}
-              className="animate-pulse"
-            >
-              ● {totalQueueCount} إجراء معلق بحاجة لمتابعة
-            </span>
-          ) : (
-            <span
-              style={{
-                fontSize: '0.68rem',
-                fontWeight: 800,
-                backgroundColor: '#ecfdf5',
-                color: '#047857',
-                border: '1px solid #a7f3d0',
-                padding: '2px 8px',
-                borderRadius: '12px'
-              }}
-            >
-              ● جاهز لاستقبال الإشعارات
-            </span>
-          )}
-        </div>
-
         {/* Tabs Bar */}
         <div
           style={{
@@ -2635,7 +2470,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                     value={addGid}
                     onChange={(e) => setAddGid(e.target.value)}
                     className="m3-input"
-                    style={{ width: '100%', height: '32px', fontSize: '0.8rem', fontWeight: 700 }}
+                    style={{ width: '100%', height: '32px', padding: '3px 8px', fontSize: '0.8rem', fontWeight: 700, color: 'var(--md-sys-color-on-surface)', backgroundColor: '#fff' }}
                   >
                     {data.groups.map((g) => (
                       <option key={g.id} value={g.id}>
@@ -2695,7 +2530,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                       value={addDiscount}
                       onChange={(e) => setAddDiscount(e.target.value as DiscountType)}
                       className="m3-input"
-                      style={{ width: '100%', height: '32px', fontSize: '0.76rem', fontWeight: 700 }}
+                      style={{ width: '100%', height: '32px', padding: '3px 8px', fontSize: '0.76rem', fontWeight: 700, color: 'var(--md-sys-color-on-surface)', backgroundColor: '#fff' }}
                     >
                       <option value="1">كامل (0% خصم)</option>
                       <option value="0.8">أخوة (20% خصم)</option>
@@ -3073,7 +2908,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                           key={`${groupId}-${student.rowId}`}
                           onClick={() => {
                             setChangeSelectedStudent({ student, fromGroupId: groupId });
-                            const otherGroup = data.groups.find((g) => g.id !== groupId)?.id || '';
+                            const otherGroup = data.groups.find((g) => g.id.toUpperCase() !== groupId.toUpperCase())?.id || '';
                             setChangeTargetGroupId(otherGroup);
                           }}
                           style={{
@@ -3159,20 +2994,43 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                       <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#166534', marginBottom: '2px' }}>
                         الفوج الجديد (الوجهة):
                       </label>
-                      <select
-                        value={changeTargetGroupId}
-                        onChange={(e) => setChangeTargetGroupId(e.target.value)}
-                        className="m3-input"
-                        style={{ width: '100%', height: '34px', fontSize: '0.78rem', fontWeight: 800, borderColor: '#86efac' }}
-                      >
-                        {data.groups
-                          .filter((g) => g.id !== changeSelectedStudent.fromGroupId)
-                          .map((g) => (
-                            <option key={g.id} value={g.id}>
-                              فوج {g.id} ({g.subject})
-                            </option>
-                          ))}
-                      </select>
+                      {(() => {
+                        const availableGroups = data.groups.filter(
+                          (g) => g.id.trim().toUpperCase() !== changeSelectedStudent.fromGroupId.trim().toUpperCase()
+                        );
+                        const effectiveTargetId =
+                          availableGroups.some((g) => g.id === changeTargetGroupId)
+                            ? changeTargetGroupId
+                            : (availableGroups[0]?.id || '');
+
+                        return (
+                          <select
+                            value={effectiveTargetId}
+                            onChange={(e) => setChangeTargetGroupId(e.target.value)}
+                            className="m3-input"
+                            style={{
+                              width: '100%',
+                              height: '34px',
+                              padding: '3px 8px',
+                              fontSize: '0.78rem',
+                              fontWeight: 800,
+                              borderColor: '#86efac',
+                              color: 'var(--md-sys-color-on-surface)',
+                              backgroundColor: '#ffffff'
+                            }}
+                          >
+                            {availableGroups.length === 0 ? (
+                              <option value="" disabled>لا توجد أفواج أخرى متاحة</option>
+                            ) : (
+                              availableGroups.map((g) => (
+                                <option key={g.id} value={g.id}>
+                                  فوج {g.id} ({g.subject}{g.teacherName ? ` - ${g.teacherName}` : ''})
+                                </option>
+                              ))
+                            )}
+                          </select>
+                        );
+                      })()}
                     </div>
                   </div>
 
@@ -3350,11 +3208,11 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                         value={coverTargetGid}
                         onChange={(e) => setCoverTargetGid(e.target.value)}
                         className="m3-input"
-                        style={{ width: '100%', height: '32px', fontSize: '0.78rem', fontWeight: 800 }}
+                        style={{ width: '100%', height: '32px', padding: '3px 8px', fontSize: '0.78rem', fontWeight: 800, color: 'var(--md-sys-color-on-surface)', backgroundColor: '#fff' }}
                       >
                         {data.groups.map((g) => (
                           <option key={g.id} value={g.id}>
-                            فوج {g.id} ({g.subject})
+                            فوج {g.id} ({g.subject}{g.teacherName ? ` - ${g.teacherName}` : ''})
                           </option>
                         ))}
                       </select>
@@ -3368,7 +3226,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                         value={coverSessionIdx}
                         onChange={(e) => setCoverSessionIdx(Number(e.target.value))}
                         className="m3-input"
-                        style={{ width: '100%', height: '32px', fontSize: '0.78rem', fontWeight: 800 }}
+                        style={{ width: '100%', height: '32px', padding: '3px 8px', fontSize: '0.78rem', fontWeight: 800, color: 'var(--md-sys-color-on-surface)', backgroundColor: '#fff' }}
                       >
                         {Array.from({ length: 4 }).map((_, i) => (
                           <option key={i} value={i}>
@@ -3455,85 +3313,6 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
             }
       }
     >
-      {/* Page Header */}
-      {isScreen && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            marginBottom: '16px',
-            paddingBottom: '12px',
-            borderBottom: '1px solid var(--md-sys-color-outline-variant)',
-            flexWrap: 'wrap',
-            gap: '10px'
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div
-              style={{
-                width: '42px',
-                height: '42px',
-                borderRadius: 'var(--md-shape-md)',
-                background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#ffffff',
-                boxShadow: '0 4px 12px rgba(79, 70, 229, 0.3)'
-              }}
-            >
-              <Scan size={22} />
-            </div>
-            <div>
-              <h1
-                style={{
-                  margin: 0,
-                  fontSize: '1.35rem',
-                  fontWeight: 900,
-                  color: 'var(--md-sys-color-on-surface)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px'
-                }}
-              >
-                محطة مسح الباركود وإدارة العمليات المباشرة
-                <span
-                  style={{
-                    fontSize: '0.72rem',
-                    fontWeight: 800,
-                    padding: '2px 8px',
-                    borderRadius: 'var(--md-shape-full)',
-                    backgroundColor: '#ecfdf5',
-                    color: '#047857',
-                    border: '1px solid #a7f3d0'
-                  }}
-                >
-                  ● المسح مستمر دون توقف في الخلفية ⚡
-                </span>
-              </h1>
-              <p
-                style={{
-                  margin: '3px 0 0',
-                  fontSize: '0.82rem',
-                  color: 'var(--md-sys-color-on-surface-variant)'
-                }}
-              >
-                اليمين: مسح بطاقات التلاميذ بدون توقف • اليسار: استقبال إشعارات التعويض وقائمة غير المسددين
-              </p>
-            </div>
-          </div>
-
-          <Link
-            href="/"
-            className="m3-btn m3-btn-outlined m3-btn-sm"
-            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontWeight: 700 }}
-          >
-            <span>← العودة للوحة التحكم</span>
-          </Link>
-        </div>
-      )}
-
       {/* SPLIT SCREEN LAYOUT: Right is Codebar Section, Left is Operations Panel */}
       {isScreen ? (
         <div className="scanner-split-grid">
@@ -3594,7 +3373,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                   value={newCoverGroupId}
                   onChange={(e) => setNewCoverGroupId(e.target.value)}
                   className="m3-input"
-                  style={{ width: '100%', height: '36px', fontSize: '0.84rem', fontWeight: 800 }}
+                  style={{ width: '100%', height: '36px', padding: '4px 8px', fontSize: '0.84rem', fontWeight: 800, color: 'var(--md-sys-color-on-surface)', backgroundColor: '#fff' }}
                 >
                   {data.groups.map((g) => (
                     <option key={g.id} value={g.id}>
@@ -3612,7 +3391,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                   value={newCoverGroupSessionIdx}
                   onChange={(e) => setNewCoverGroupSessionIdx(Number(e.target.value))}
                   className="m3-input"
-                  style={{ width: '100%', height: '36px', fontSize: '0.84rem', fontWeight: 800 }}
+                  style={{ width: '100%', height: '36px', padding: '4px 8px', fontSize: '0.84rem', fontWeight: 800, color: 'var(--md-sys-color-on-surface)', backgroundColor: '#fff' }}
                 >
                   {Array.from({ length: data.groupData[newCoverGroupId]?.sessionCount || 4 }).map((_, i) => (
                     <option key={i} value={i}>
