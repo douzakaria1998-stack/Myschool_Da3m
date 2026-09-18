@@ -467,11 +467,33 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
 
   // =========================================================================
   // HARDWARE BARCODE SCANNER BACKGROUND INTERCEPTOR
-  // Works seamlessly even while the admin is actively typing in another input!
   // =========================================================================
-  const recentBurstRef = useRef<{ char: string; time: number }[]>([]);
+  // HARDWARE BARCODE SCANNER INTERCEPTION (GLOBAL CAPTURE PHASE)
+  // Ensures hardware barcode scanner keystrokes are diverted to attendance engine
+  // without leaking or polluting ANY search input in the operations panel!
+  // =========================================================================
+  const scannerBurstRef = useRef<{ char: string; time: number }[]>([]);
+  const isScannerActiveRef = useRef<boolean>(false);
   const preBurstValueRef = useRef<string>('');
   const burstTargetElRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
+  const scannerResetTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Helper to safely restore a React-controlled input DOM element and its internal React state
+  const restoreReactInputElement = (el: HTMLInputElement | HTMLTextAreaElement, originalValue: string) => {
+    try {
+      const proto = el instanceof HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+      const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+      if (descriptor?.set) {
+        descriptor.set.call(el, originalValue);
+      } else {
+        el.value = originalValue;
+      }
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    } catch (err) {
+      console.error('Failed to restore input value', err);
+    }
+  };
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
@@ -480,46 +502,54 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       }
 
       const now = Date.now();
-      const burst = recentBurstRef.current;
+      const burst = scannerBurstRef.current;
       const lastKeyTime = burst.length > 0 ? burst[burst.length - 1].time : 0;
-      const timeDiff = now - lastKeyTime;
+      const interval = now - lastKeyTime;
+
+      const activeEl = document.activeElement as HTMLInputElement | HTMLTextAreaElement | null;
+      const isFocusedElsewhere =
+        activeEl &&
+        (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA') &&
+        activeEl !== scannerInputRef.current;
 
       // Handle Enter (completion of hardware scanner stream or manual submit)
       if (e.key === 'Enter') {
         const isFocusedOnScanner = document.activeElement === scannerInputRef.current;
         const burstChars = burst.map((b) => b.char).join('').trim();
-        const avgInterval = burst.length > 1 ? (burst[burst.length - 1].time - burst[0].time) / (burst.length - 1) : 999;
-        const looksLikeBarcode =
-          burstChars.toUpperCase().startsWith('STU-') ||
+        const avgInterval = burst.length > 1 ? (now - burst[0].time) / (burst.length - 1) : 999;
+        const isHardwareBurst =
+          isScannerActiveRef.current ||
           burstChars.toUpperCase().startsWith('STU') ||
-          (burstChars.length >= 3 && avgInterval < 65) ||
+          (burstChars.length >= 4 && avgInterval < 55) ||
           Boolean(findStudentByCode(burstChars));
 
         if (isFocusedOnScanner) {
           e.preventDefault();
-          recentBurstRef.current = [];
+          scannerBurstRef.current = [];
+          isScannerActiveRef.current = false;
           handleBarcodeSubmit();
           return;
         }
 
         // Hardware scanner typed while admin was focused elsewhere in the operations panel!
-        if (looksLikeBarcode && burstChars.length >= 1) {
+        if (isHardwareBurst && burstChars.length >= 2) {
           e.preventDefault();
           e.stopPropagation();
 
-          // Clean the target input field value that got polluted by the scanner burst
+          // Restore the focused input back to its clean pre-burst state
           if (burstTargetElRef.current && burstTargetElRef.current !== scannerInputRef.current) {
-            burstTargetElRef.current.value = preBurstValueRef.current;
-            burstTargetElRef.current.dispatchEvent(new Event('input', { bubbles: true }));
+            restoreReactInputElement(burstTargetElRef.current, preBurstValueRef.current);
           }
 
-          recentBurstRef.current = [];
+          scannerBurstRef.current = [];
+          isScannerActiveRef.current = false;
           handleBarcodeSubmit(undefined, burstChars);
           return;
         }
 
-        // Normal human hit Enter on an input in the operations panel
-        recentBurstRef.current = [];
+        // Normal Enter press
+        scannerBurstRef.current = [];
+        isScannerActiveRef.current = false;
         return;
       }
 
@@ -528,19 +558,52 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
         return;
       }
 
-      // If user paused typing for more than 75ms, reset burst buffer
-      if (timeDiff > 75) {
-        recentBurstRef.current = [];
-        burstTargetElRef.current = document.activeElement as HTMLInputElement | HTMLTextAreaElement | null;
-        preBurstValueRef.current = burstTargetElRef.current?.value || '';
+      // Reset auto-clear timer (if typing paused for more than 110ms, burst is done/cancelled)
+      if (scannerResetTimerRef.current) {
+        clearTimeout(scannerResetTimerRef.current);
       }
+      scannerResetTimerRef.current = setTimeout(() => {
+        scannerBurstRef.current = [];
+        isScannerActiveRef.current = false;
+      }, 110);
 
       if (e.key === 'Backspace') {
-        if (recentBurstRef.current.length > 0) {
-          recentBurstRef.current.pop();
+        if (scannerBurstRef.current.length > 0) {
+          scannerBurstRef.current.pop();
         }
-      } else if (e.key.length === 1) {
-        recentBurstRef.current.push({ char: e.key, time: now });
+        return;
+      }
+
+      // Single printable character
+      if (e.key.length === 1) {
+        // If burst is empty or there was a long pause, initialize new burst buffer
+        if (burst.length === 0 || interval > 120) {
+          burstTargetElRef.current = activeEl;
+          preBurstValueRef.current = activeEl?.value || '';
+          scannerBurstRef.current = [{ char: e.key, time: now }];
+          isScannerActiveRef.current = false;
+          return; // Let first key through tentatively
+        }
+
+        // Second or subsequent character in rapid succession
+        scannerBurstRef.current.push({ char: e.key, time: now });
+
+        // Hardware scanner speed check: superhuman interval (< 45ms)
+        if (interval < 45) {
+          isScannerActiveRef.current = true;
+        }
+
+        // If hardware scanner is active while focused in another input:
+        if (isScannerActiveRef.current && isFocusedElsewhere) {
+          // 1. Block character from EVER entering the input element!
+          e.preventDefault();
+          e.stopPropagation();
+
+          // 2. Roll back the first character that slipped through before burst detection!
+          if (burstTargetElRef.current && burstTargetElRef.current !== scannerInputRef.current) {
+            restoreReactInputElement(burstTargetElRef.current, preBurstValueRef.current);
+          }
+        }
       }
     };
 
@@ -566,6 +629,14 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
 
     const rawCode = (directCode !== undefined ? directCode : barcodeInput).trim();
     if (!rawCode) return;
+
+    // Display scanned code in right-hand barcode input box
+    if (directCode) {
+      setBarcodeInput(directCode);
+      setTimeout(() => {
+        setBarcodeInput('');
+      }, 1800);
+    }
 
     let currentActiveGroups = activeGroups;
 
@@ -2543,8 +2614,20 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                   </label>
                   <input
                     type="text"
+                    id="add-student-name-input"
                     value={addName}
-                    onChange={(e) => setAddName(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const match = val.match(/(STU-[A-Za-z0-9]+|STU[A-Za-z0-9]+|\b\d{8}\b)/i);
+                      if (match) {
+                        const code = match[0];
+                        const cleaned = val.replace(code, '').trim();
+                        setAddName(cleaned);
+                        handleBarcodeSubmit(undefined, code);
+                        return;
+                      }
+                      setAddName(val);
+                    }}
                     placeholder="مثال: أمين بلقاسم"
                     className="m3-input"
                     style={{ width: '100%', height: '32px', fontSize: '0.82rem', fontWeight: 700 }}
@@ -2666,9 +2749,19 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                 <div style={{ position: 'relative' }}>
                   <input
                     type="text"
+                    id="pay-search-input"
                     value={paySearchQuery}
                     onChange={(e) => {
-                      setPaySearchQuery(e.target.value);
+                      const val = e.target.value;
+                      const match = val.match(/(STU-[A-Za-z0-9]+|STU[A-Za-z0-9]+|\b\d{8}\b)/i);
+                      if (match) {
+                        const code = match[0];
+                        const cleaned = val.replace(code, '').trim();
+                        setPaySearchQuery(cleaned);
+                        handleBarcodeSubmit(undefined, code);
+                        return;
+                      }
+                      setPaySearchQuery(val);
                       if (paySelectedStudent) setPaySelectedStudent(null);
                     }}
                     placeholder="اكتب اسم التلميذ أو جزءاً منه..."
@@ -2892,9 +2985,19 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                 <div style={{ position: 'relative' }}>
                   <input
                     type="text"
+                    id="change-search-input"
                     value={changeSearchQuery}
                     onChange={(e) => {
-                      setChangeSearchQuery(e.target.value);
+                      const val = e.target.value;
+                      const match = val.match(/(STU-[A-Za-z0-9]+|STU[A-Za-z0-9]+|\b\d{8}\b)/i);
+                      if (match) {
+                        const code = match[0];
+                        const cleaned = val.replace(code, '').trim();
+                        setChangeSearchQuery(cleaned);
+                        handleBarcodeSubmit(undefined, code);
+                        return;
+                      }
+                      setChangeSearchQuery(val);
                       if (changeSelectedStudent) setChangeSelectedStudent(null);
                     }}
                     placeholder="اكتب اسم التلميذ أو هاتفه..."
@@ -3088,9 +3191,19 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                 <div style={{ position: 'relative' }}>
                   <input
                     type="text"
+                    id="cover-search-input"
                     value={coverSearchQuery}
                     onChange={(e) => {
-                      setCoverSearchQuery(e.target.value);
+                      const val = e.target.value;
+                      const match = val.match(/(STU-[A-Za-z0-9]+|STU[A-Za-z0-9]+|\b\d{8}\b)/i);
+                      if (match) {
+                        const code = match[0];
+                        const cleaned = val.replace(code, '').trim();
+                        setCoverSearchQuery(cleaned);
+                        handleBarcodeSubmit(undefined, code);
+                        return;
+                      }
+                      setCoverSearchQuery(val);
                       if (coverSelectedStudent) setCoverSelectedStudent(null);
                     }}
                     placeholder="ابحث بالاسم أو الهاتف..."
