@@ -811,8 +811,8 @@ export function getStudentSessionInfo(
 ): StudentSessionInfo {
   const cycleAtt = (attendance || []).slice(0, cycleSessions);
   const hasSuspended = cycleAtt.includes('S');
-  const attendedCount = cycleAtt.filter((st) => st === 'P').length;
-  const makeupCount = cycleAtt.filter((st) => st === 'M').length;
+  const attendedCount = cycleAtt.filter((st) => st === 'P' || st === 'ح').length;
+  const makeupCount = cycleAtt.filter((st) => st === 'M' || st === 'م').length;
   const totalAttended = attendedCount + makeupCount;
 
   const totalReceived = Array.isArray(payments)
@@ -824,7 +824,7 @@ export function getStudentSessionInfo(
     ? payments
     : 0;
 
-  // RULE: If student attended only 1 session and did not pay, the session does not count for school or teacher
+  // RULE 1: If student attended only 1 session and did not pay, the session does not count for school or teacher
   const isOneSessionUnpaid = totalAttended === 1 && totalReceived === 0;
   if (isOneSessionUnpaid) {
     return {
@@ -834,10 +834,25 @@ export function getStudentSessionInfo(
     };
   }
 
+  // RULE 2: If student attended only 1 session and DID pay, count ONLY this 1 session.
+  // Subsequent / empty sessions do NOT count until the student is marked present for a second session.
+  const isOneSessionPaid = totalAttended === 1 && totalReceived > 0;
+  if (isOneSessionPaid) {
+    const attendedIndex = Math.max(
+      0,
+      cycleAtt.findIndex((st) => st === 'P' || st === 'M' || st === 'ح' || st === 'م')
+    );
+    return {
+      firstActiveIndex: attendedIndex,
+      countedSessions: 1,
+      isSessionCounted: (sessionIdx: number) => sessionIdx === attendedIndex
+    };
+  }
+
   let firstActiveIndex = -1;
   for (let i = 0; i < cycleAtt.length; i++) {
     const st = cycleAtt[i];
-    if (st === 'P' || st === 'A' || st === 'M' || st === 'S') {
+    if (st === 'P' || st === 'A' || st === 'M' || st === 'S' || st === 'ح' || st === 'غ' || st === 'م') {
       firstActiveIndex = i;
       break;
     }
@@ -845,7 +860,7 @@ export function getStudentSessionInfo(
 
   let countedSessions = 0;
   if (hasSuspended) {
-    countedSessions = cycleAtt.filter((st) => st === 'P' || st === 'A').length;
+    countedSessions = cycleAtt.filter((st) => st === 'P' || st === 'A' || st === 'ح' || st === 'غ').length;
   } else if (firstActiveIndex !== -1) {
     countedSessions = cycleSessions - firstActiveIndex;
   } else {
@@ -856,7 +871,7 @@ export function getStudentSessionInfo(
     if (sessionIdx >= cycleSessions) return false;
     if (hasSuspended) {
       const st = cycleAtt[sessionIdx];
-      return st === 'P' || st === 'A';
+      return st === 'P' || st === 'A' || st === 'ح' || st === 'غ';
     }
     if (firstActiveIndex === -1) return false;
     return sessionIdx >= firstActiveIndex;
