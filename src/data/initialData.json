@@ -8121,8 +8121,8 @@
           "totalAttendance": 2
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "عوابد رحاب",
           "phone": "",
           "rowId": 127,
@@ -8140,14 +8140,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "تومي حنين",
           "phone": "",
           "rowId": 128,
@@ -8165,8 +8165,8 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         }
@@ -10182,8 +10182,8 @@
           "totalAttendance": 2
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "زبيدي اية",
           "phone": "",
           "rowId": 73,
@@ -10201,14 +10201,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "نغاق عائشة",
           "phone": "",
           "rowId": 74,
@@ -10226,14 +10226,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "زبيدي تيسير",
           "phone": "",
           "rowId": 75,
@@ -10251,14 +10251,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "بثينة سعود",
           "phone": "",
           "rowId": 76,
@@ -10276,14 +10276,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "بوغزالة حسان",
           "phone": "",
           "rowId": 77,
@@ -10301,14 +10301,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "سلاطنة عصام البشير",
           "phone": "",
           "rowId": 78,
@@ -10326,14 +10326,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "كشخة محمد الامين",
           "phone": "",
           "rowId": 79,
@@ -10351,14 +10351,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "بشيري اسامة",
           "phone": "",
           "rowId": 80,
@@ -10376,14 +10376,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "بن عتوس منار",
           "phone": "",
           "rowId": 81,
@@ -10401,14 +10401,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "لقميري اسراء",
           "phone": "",
           "rowId": 82,
@@ -10426,14 +10426,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "طيباني نور",
           "phone": "",
           "rowId": 83,
@@ -10451,14 +10451,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "قداري يمنى",
           "phone": "",
           "rowId": 84,
@@ -10476,14 +10476,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "غريسي تقى",
           "phone": "",
           "rowId": 85,
@@ -10501,14 +10501,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "بن خليفة ايمان",
           "phone": "",
           "rowId": 86,
@@ -10526,14 +10526,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "مهاوات تقى",
           "phone": "",
           "rowId": 87,
@@ -10551,14 +10551,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "رواق رانية",
           "phone": "",
           "rowId": 88,
@@ -10576,14 +10576,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "عشيري خزاني 2",
           "phone": "",
           "rowId": 89,
@@ -10601,14 +10601,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "باهي غسان",
           "phone": "",
           "rowId": 90,
@@ -10626,14 +10626,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "طليبة محمد",
           "phone": "",
           "rowId": 91,
@@ -10651,14 +10651,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "هناء خلوط",
           "phone": "",
           "rowId": 92,
@@ -10676,14 +10676,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "عتوسي طارق",
           "phone": "",
           "rowId": 93,
@@ -10701,14 +10701,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "قابوسة ايمان",
           "phone": "",
           "rowId": 94,
@@ -10726,14 +10726,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "الياس نذير",
           "phone": "",
           "rowId": 95,
@@ -10751,14 +10751,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "زبيدي عبد السميع",
           "phone": "",
           "rowId": 96,
@@ -10776,14 +10776,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "رحال رزان",
           "phone": "",
           "rowId": 97,
@@ -10801,14 +10801,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "الارقط نور الهدى",
           "phone": "",
           "rowId": 98,
@@ -10826,14 +10826,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "عيشوش عائشة",
           "phone": "",
           "rowId": 99,
@@ -10851,8 +10851,8 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         }
@@ -12950,8 +12950,8 @@
           "totalAttendance": 2
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "سالمي مريم",
           "phone": "",
           "rowId": 84,
@@ -12969,8 +12969,8 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -13100,8 +13100,8 @@
           "totalAttendance": 3
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "ساري نصر انتصار",
           "phone": "",
           "rowId": 90,
@@ -13119,14 +13119,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "بوصبيع صالح نزار",
           "phone": "",
           "rowId": 91,
@@ -13144,14 +13144,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "بوصبيع وحيد",
           "phone": "",
           "rowId": 92,
@@ -13169,8 +13169,8 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -13200,8 +13200,8 @@
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "تجاني لجين",
           "phone": "",
           "rowId": 94,
@@ -13219,14 +13219,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "رتاج عيادي",
           "phone": "",
           "rowId": 95,
@@ -13244,14 +13244,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "ذياب ايمان",
           "phone": "",
           "rowId": 96,
@@ -13269,14 +13269,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "بن مسعود زينب",
           "phone": "",
           "rowId": 97,
@@ -13294,14 +13294,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "زلاسي طه محمد ياسين",
           "phone": "",
           "rowId": 98,
@@ -13319,14 +13319,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1250,
-          "debt": 1250,
+          "fee": 0,
+          "debt": 0,
           "name": "تجاني جمانة",
           "phone": "",
           "rowId": 99,
@@ -13344,8 +13344,8 @@
             "P",
             ""
           ],
-          "schoolEarn": 500,
-          "teacherPay": 750,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -15943,8 +15943,8 @@
           "totalAttendance": 1
         },
         {
-          "fee": 1875,
-          "debt": 1875,
+          "fee": 0,
+          "debt": 0,
           "name": "بن خليفة الجيلاني",
           "phone": "",
           "rowId": 101,
@@ -15962,14 +15962,14 @@
             "",
             ""
           ],
-          "schoolEarn": 750,
-          "teacherPay": 1125,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1875,
-          "debt": 1875,
+          "fee": 0,
+          "debt": 0,
           "name": "شنوف انفال",
           "phone": "",
           "rowId": 102,
@@ -15987,14 +15987,14 @@
             "",
             ""
           ],
-          "schoolEarn": 750,
-          "teacherPay": 1125,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1875,
-          "debt": 1875,
+          "fee": 0,
+          "debt": 0,
           "name": "تجاني جمانة",
           "phone": "",
           "rowId": 103,
@@ -16012,14 +16012,14 @@
             "",
             ""
           ],
-          "schoolEarn": 750,
-          "teacherPay": 1125,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1875,
-          "debt": 1875,
+          "fee": 0,
+          "debt": 0,
           "name": "باحدي يوسف",
           "phone": "",
           "rowId": 104,
@@ -16037,8 +16037,8 @@
             "",
             ""
           ],
-          "schoolEarn": 750,
-          "teacherPay": 1125,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -17561,8 +17561,8 @@
           "totalAttendance": 2
         },
         {
-          "fee": 1875,
-          "debt": 1875,
+          "fee": 0,
+          "debt": 0,
           "name": "ضيف سجى",
           "phone": "",
           "rowId": 59,
@@ -17580,8 +17580,8 @@
             "",
             ""
           ],
-          "schoolEarn": 750,
-          "teacherPay": 1125,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -17611,8 +17611,8 @@
           "totalAttendance": 1
         },
         {
-          "fee": 1875,
-          "debt": 1875,
+          "fee": 0,
+          "debt": 0,
           "name": "سالمي مريم",
           "phone": "",
           "rowId": 61,
@@ -17630,8 +17630,8 @@
             "",
             ""
           ],
-          "schoolEarn": 750,
-          "teacherPay": 1125,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -17686,8 +17686,8 @@
           "totalAttendance": 1
         },
         {
-          "fee": 1875,
-          "debt": 1875,
+          "fee": 0,
+          "debt": 0,
           "name": "باهي انفال",
           "phone": "",
           "rowId": 64,
@@ -17705,14 +17705,14 @@
             "",
             ""
           ],
-          "schoolEarn": 750,
-          "teacherPay": 1125,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1875,
-          "debt": 1875,
+          "fee": 0,
+          "debt": 0,
           "name": "سليماني اماني",
           "phone": "",
           "rowId": 65,
@@ -17730,14 +17730,14 @@
             "",
             ""
           ],
-          "schoolEarn": 750,
-          "teacherPay": 1125,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1875,
-          "debt": 1875,
+          "fee": 0,
+          "debt": 0,
           "name": "فرج مريم البتول",
           "phone": "",
           "rowId": 66,
@@ -17755,14 +17755,14 @@
             "",
             ""
           ],
-          "schoolEarn": 750,
-          "teacherPay": 1125,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1875,
-          "debt": 1875,
+          "fee": 0,
+          "debt": 0,
           "name": "عدوكة اكرام",
           "phone": "",
           "rowId": 67,
@@ -17780,8 +17780,8 @@
             "",
             ""
           ],
-          "schoolEarn": 750,
-          "teacherPay": 1125,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -17811,8 +17811,8 @@
           "totalAttendance": 1
         },
         {
-          "fee": 1875,
-          "debt": 1875,
+          "fee": 0,
+          "debt": 0,
           "name": "ميم عبد القادر",
           "phone": "",
           "rowId": 69,
@@ -17830,14 +17830,14 @@
             "",
             ""
           ],
-          "schoolEarn": 750,
-          "teacherPay": 1125,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1875,
-          "debt": 1875,
+          "fee": 0,
+          "debt": 0,
           "name": "وادة رتاج",
           "phone": "",
           "rowId": 70,
@@ -17855,14 +17855,14 @@
             "",
             ""
           ],
-          "schoolEarn": 750,
-          "teacherPay": 1125,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1875,
-          "debt": 1875,
+          "fee": 0,
+          "debt": 0,
           "name": "خلوط هناء",
           "phone": "",
           "rowId": 71,
@@ -17880,14 +17880,14 @@
             "",
             ""
           ],
-          "schoolEarn": 750,
-          "teacherPay": 1125,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1875,
-          "debt": 1875,
+          "fee": 0,
+          "debt": 0,
           "name": "ابراهيم كريمة",
           "phone": "",
           "rowId": 72,
@@ -17905,8 +17905,8 @@
             "",
             ""
           ],
-          "schoolEarn": 750,
-          "teacherPay": 1125,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         }
@@ -19404,8 +19404,8 @@
           "totalAttendance": 1
         },
         {
-          "fee": 1875,
-          "debt": 1875,
+          "fee": 0,
+          "debt": 0,
           "name": "تجاني لجين",
           "phone": "",
           "rowId": 60,
@@ -19423,14 +19423,14 @@
             "",
             ""
           ],
-          "schoolEarn": 750,
-          "teacherPay": 1125,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1875,
-          "debt": 1875,
+          "fee": 0,
+          "debt": 0,
           "name": "عيادي ريتاج",
           "phone": "",
           "rowId": 61,
@@ -19448,14 +19448,14 @@
             "",
             ""
           ],
-          "schoolEarn": 750,
-          "teacherPay": 1125,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1875,
-          "debt": 1875,
+          "fee": 0,
+          "debt": 0,
           "name": "راتب جلول",
           "phone": "",
           "rowId": 62,
@@ -19473,14 +19473,14 @@
             "",
             ""
           ],
-          "schoolEarn": 750,
-          "teacherPay": 1125,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1875,
-          "debt": 1875,
+          "fee": 0,
+          "debt": 0,
           "name": "بن عمارة مؤيد",
           "phone": "",
           "rowId": 63,
@@ -19498,8 +19498,8 @@
             "",
             ""
           ],
-          "schoolEarn": 750,
-          "teacherPay": 1125,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -19554,8 +19554,8 @@
           "totalAttendance": 1
         },
         {
-          "fee": 1875,
-          "debt": 1875,
+          "fee": 0,
+          "debt": 0,
           "name": "بن عمر خير الدين",
           "phone": "",
           "rowId": 66,
@@ -19573,8 +19573,8 @@
             "",
             ""
           ],
-          "schoolEarn": 750,
-          "teacherPay": 1125,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -19604,8 +19604,8 @@
           "totalAttendance": 1
         },
         {
-          "fee": 1875,
-          "debt": 1875,
+          "fee": 0,
+          "debt": 0,
           "name": "سالمي مريم",
           "phone": "",
           "rowId": 68,
@@ -19623,14 +19623,14 @@
             "",
             ""
           ],
-          "schoolEarn": 750,
-          "teacherPay": 1125,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1875,
-          "debt": 1875,
+          "fee": 0,
+          "debt": 0,
           "name": "كوت اشرف",
           "phone": "",
           "rowId": 69,
@@ -19648,14 +19648,14 @@
             "",
             ""
           ],
-          "schoolEarn": 750,
-          "teacherPay": 1125,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1875,
-          "debt": 1875,
+          "fee": 0,
+          "debt": 0,
           "name": "عميار عبد الحميد",
           "phone": "",
           "rowId": 70,
@@ -19673,14 +19673,14 @@
             "",
             ""
           ],
-          "schoolEarn": 750,
-          "teacherPay": 1125,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1875,
-          "debt": 1875,
+          "fee": 0,
+          "debt": 0,
           "name": "غربي رغد",
           "phone": "",
           "rowId": 71,
@@ -19698,14 +19698,14 @@
             "",
             ""
           ],
-          "schoolEarn": 750,
-          "teacherPay": 1125,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1875,
-          "debt": 1875,
+          "fee": 0,
+          "debt": 0,
           "name": "رزان رحال",
           "phone": "",
           "rowId": 72,
@@ -19723,14 +19723,14 @@
             "",
             ""
           ],
-          "schoolEarn": 750,
-          "teacherPay": 1125,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1875,
-          "debt": 1875,
+          "fee": 0,
+          "debt": 0,
           "name": "بشيري اسامة",
           "phone": "",
           "rowId": 73,
@@ -19748,8 +19748,8 @@
             "",
             ""
           ],
-          "schoolEarn": 750,
-          "teacherPay": 1125,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -19779,8 +19779,8 @@
           "totalAttendance": 1
         },
         {
-          "fee": 1875,
-          "debt": 1875,
+          "fee": 0,
+          "debt": 0,
           "name": "ساجدة تامة",
           "phone": "",
           "rowId": 75,
@@ -19798,14 +19798,14 @@
             "",
             ""
           ],
-          "schoolEarn": 750,
-          "teacherPay": 1125,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1875,
-          "debt": 1875,
+          "fee": 0,
+          "debt": 0,
           "name": "حميدي امجد",
           "phone": "",
           "rowId": 76,
@@ -19823,14 +19823,14 @@
             "",
             ""
           ],
-          "schoolEarn": 750,
-          "teacherPay": 1125,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1875,
-          "debt": 1875,
+          "fee": 0,
+          "debt": 0,
           "name": "الاخوة نهال",
           "phone": "",
           "rowId": 77,
@@ -19848,14 +19848,14 @@
             "",
             ""
           ],
-          "schoolEarn": 750,
-          "teacherPay": 1125,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 1875,
-          "debt": 1875,
+          "fee": 0,
+          "debt": 0,
           "name": "منصر عبد المجيد",
           "phone": "",
           "rowId": 78,
@@ -19873,8 +19873,8 @@
             "",
             ""
           ],
-          "schoolEarn": 750,
-          "teacherPay": 1125,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -23433,8 +23433,8 @@
           "totalAttendance": 3
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "عزي خديجة",
           "phone": "",
           "rowId": 45,
@@ -23452,14 +23452,14 @@
             "P",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "رحومة انصاف",
           "phone": "",
           "rowId": 46,
@@ -23477,8 +23477,8 @@
             "P",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         }
@@ -23526,8 +23526,8 @@
           "totalAttendance": 0
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "عبد الله ميلودي",
           "phone": "",
           "rowId": 2,
@@ -23545,8 +23545,8 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -23576,8 +23576,8 @@
           "totalAttendance": 2
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "دو محمد محي الدين",
           "phone": "",
           "rowId": 4,
@@ -23595,14 +23595,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "انصاف رحومة",
           "phone": "",
           "rowId": 5,
@@ -23620,14 +23620,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "عزي خديجة",
           "phone": "",
           "rowId": 6,
@@ -23645,14 +23645,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "نوفل عميرات",
           "phone": "",
           "rowId": 7,
@@ -23670,14 +23670,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "بده زكري محمد",
           "phone": "",
           "rowId": 8,
@@ -23695,14 +23695,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "نصير اماني سعاد",
           "phone": "",
           "rowId": 9,
@@ -23720,14 +23720,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "عموري ملاك",
           "phone": "",
           "rowId": 10,
@@ -23745,14 +23745,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "ضياء مدلل",
           "phone": "",
           "rowId": 11,
@@ -23770,8 +23770,8 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -23822,8 +23822,8 @@
       "subject": "علوم",
       "students": [
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "شلبي عماد الدين",
           "phone": "",
           "rowId": 1,
@@ -23841,14 +23841,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "فراس قابوسة",
           "phone": "",
           "rowId": 2,
@@ -23866,8 +23866,8 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -23972,8 +23972,8 @@
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "معاذ زيتون",
           "phone": "",
           "rowId": 7,
@@ -23991,8 +23991,8 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -24515,8 +24515,8 @@
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "قدة اياد",
           "phone": "",
           "rowId": 11,
@@ -24534,14 +24534,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "خليل ضياء الدين",
           "phone": "",
           "rowId": 12,
@@ -24559,8 +24559,8 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -24590,8 +24590,8 @@
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "علالي طه",
           "phone": "",
           "rowId": 14,
@@ -24609,8 +24609,8 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         }
@@ -24633,8 +24633,8 @@
       "subject": "رياضيات",
       "students": [
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "منة الله احمادي",
           "phone": "",
           "rowId": 1,
@@ -24652,14 +24652,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "نور اسراء شنوف",
           "phone": "",
           "rowId": 2,
@@ -24677,14 +24677,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "نهى باهي",
           "phone": "",
           "rowId": 3,
@@ -24702,14 +24702,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "زغدي شفاء",
           "phone": "",
           "rowId": 4,
@@ -24727,8 +24727,8 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -24758,8 +24758,8 @@
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "هميسي نور اليقين",
           "phone": "",
           "rowId": 6,
@@ -24777,14 +24777,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "عبد الله ميلودي",
           "phone": "",
           "rowId": 7,
@@ -24802,8 +24802,8 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -24883,8 +24883,8 @@
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "زروق آمنة",
           "phone": "",
           "rowId": 11,
@@ -24902,14 +24902,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "مرخوفي خديجة",
           "phone": "",
           "rowId": 12,
@@ -24927,14 +24927,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "مرخوفي زينب",
           "phone": "",
           "rowId": 13,
@@ -24952,14 +24952,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "ليان بن محمود",
           "phone": "",
           "rowId": 14,
@@ -24977,8 +24977,8 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -25076,8 +25076,8 @@
           "totalAttendance": 0
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "تقاء بالقط",
           "phone": "",
           "rowId": 3,
@@ -25095,14 +25095,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "مهاوة عبد الكريم",
           "phone": "",
           "rowId": 4,
@@ -25120,14 +25120,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "مهاوة صافية",
           "phone": "",
           "rowId": 5,
@@ -25145,14 +25145,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "باي اليسع",
           "phone": "",
           "rowId": 6,
@@ -25170,8 +25170,8 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -25226,8 +25226,8 @@
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "ابراهيم زقب",
           "phone": "",
           "rowId": 9,
@@ -25245,8 +25245,8 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -25276,8 +25276,8 @@
           "totalAttendance": 0
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "عيشوش سجود",
           "phone": "",
           "rowId": 11,
@@ -25295,14 +25295,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "تجانية لينة",
           "phone": "",
           "rowId": 12,
@@ -25320,14 +25320,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "تجاني فاطمة الزهراء",
           "phone": "",
           "rowId": 13,
@@ -25345,14 +25345,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "واده مباركة",
           "phone": "",
           "rowId": 14,
@@ -25370,14 +25370,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "غالية انفال",
           "phone": "",
           "rowId": 15,
@@ -25395,8 +25395,8 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -25444,8 +25444,8 @@
       "subject": "رياضيات",
       "students": [
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "غدير بشير احمد",
           "phone": "",
           "rowId": 1,
@@ -25463,8 +25463,8 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -25494,8 +25494,8 @@
           "totalAttendance": 0
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "رحومة انصاف",
           "phone": "",
           "rowId": 3,
@@ -25513,14 +25513,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "محمد عز الدين قادي",
           "phone": "",
           "rowId": 4,
@@ -25538,8 +25538,8 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -25594,8 +25594,8 @@
           "totalAttendance": 0
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "حنيش مدركة",
           "phone": "",
           "rowId": 7,
@@ -25613,14 +25613,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "خديجة عزي",
           "phone": "",
           "rowId": 8,
@@ -25638,8 +25638,8 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -25669,8 +25669,8 @@
           "totalAttendance": 0
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "دو محمد محي الدين",
           "phone": "",
           "rowId": 10,
@@ -25688,8 +25688,8 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -25862,8 +25862,8 @@
       "subject": "علوم",
       "students": [
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "زين بشير",
           "phone": "",
           "rowId": 1,
@@ -25881,14 +25881,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "قريرح وجدان",
           "phone": "",
           "rowId": 2,
@@ -25906,14 +25906,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "هميسي نور اليقين",
           "phone": "",
           "rowId": 3,
@@ -25931,14 +25931,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "عبد الله ميلودي",
           "phone": "",
           "rowId": 4,
@@ -25956,8 +25956,8 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -25987,8 +25987,8 @@
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "رزوق امنه",
           "phone": "",
           "rowId": 6,
@@ -26006,14 +26006,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "مرخوفي خديجة",
           "phone": "",
           "rowId": 7,
@@ -26031,14 +26031,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "مرخوفي زينب",
           "phone": "",
           "rowId": 8,
@@ -26056,8 +26056,8 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -26087,8 +26087,8 @@
           "totalAttendance": 0
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "تقاء بالقط",
           "phone": "",
           "rowId": 10,
@@ -26106,14 +26106,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "اريج غندير عون",
           "phone": "",
           "rowId": 11,
@@ -26131,14 +26131,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "ليان بن محمود",
           "phone": "",
           "rowId": 12,
@@ -26156,14 +26156,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "منة الله احمادي",
           "phone": "",
           "rowId": 13,
@@ -26181,8 +26181,8 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -26212,8 +26212,8 @@
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "نور اسراء شنوف",
           "phone": "",
           "rowId": 15,
@@ -26231,8 +26231,8 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -26280,8 +26280,8 @@
       "subject": "علوم",
       "students": [
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "الأخوة ياسمين",
           "phone": "",
           "rowId": 1,
@@ -26299,14 +26299,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "امل سويد",
           "phone": "",
           "rowId": 2,
@@ -26324,14 +26324,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "باي اليسع",
           "phone": "",
           "rowId": 3,
@@ -26349,14 +26349,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "جاب الله الهادي",
           "phone": "",
           "rowId": 4,
@@ -26374,14 +26374,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "هبة غنادرة",
           "phone": "",
           "rowId": 5,
@@ -26399,14 +26399,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "واده مباركة",
           "phone": "",
           "rowId": 6,
@@ -26424,14 +26424,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "غالية انفال",
           "phone": "",
           "rowId": 7,
@@ -26449,8 +26449,8 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -26505,8 +26505,8 @@
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "لعويني رائد",
           "phone": "",
           "rowId": 10,
@@ -26524,8 +26524,8 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -26580,8 +26580,8 @@
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "لوجين حويذق",
           "phone": "",
           "rowId": 13,
@@ -26599,14 +26599,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "مهاوة عبد الكريم",
           "phone": "",
           "rowId": 14,
@@ -26624,14 +26624,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "مهاوة صافية",
           "phone": "",
           "rowId": 15,
@@ -26649,14 +26649,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "أنفال بن موسى",
           "phone": "",
           "rowId": 16,
@@ -26674,8 +26674,8 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         }
@@ -26698,8 +26698,8 @@
       "subject": "فيزياء",
       "students": [
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "عباسي ياسمين",
           "phone": "",
           "rowId": 1,
@@ -26717,14 +26717,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "زغدي شفاء",
           "phone": "",
           "rowId": 2,
@@ -26742,14 +26742,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "زروق امنه",
           "phone": "",
           "rowId": 3,
@@ -26767,8 +26767,8 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -26798,8 +26798,8 @@
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "مرخوفي خديجة",
           "phone": "",
           "rowId": 5,
@@ -26817,14 +26817,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "مرخوفي زينب",
           "phone": "",
           "rowId": 6,
@@ -26842,8 +26842,8 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -26898,8 +26898,8 @@
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "امير مسعودي",
           "phone": "",
           "rowId": 9,
@@ -26917,14 +26917,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "ابرار بن عمارة",
           "phone": "",
           "rowId": 10,
@@ -26942,14 +26942,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "عبد الله ميلودي",
           "phone": "",
           "rowId": 11,
@@ -26967,8 +26967,8 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
@@ -27023,8 +27023,8 @@
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "ولاء بقاص",
           "phone": "",
           "rowId": 14,
@@ -27042,14 +27042,14 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },
         {
-          "fee": 10000,
-          "debt": 10000,
+          "fee": 0,
+          "debt": 0,
           "name": "غدير بشير احمد",
           "phone": "",
           "rowId": 15,
@@ -27067,8 +27067,8 @@
             "",
             ""
           ],
-          "schoolEarn": 2500,
-          "teacherPay": 7500,
+          "schoolEarn": 0,
+          "teacherPay": 0,
           "totalReceived": 0,
           "totalAttendance": 1
         },

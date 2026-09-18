@@ -205,12 +205,21 @@ export const calcStudentFinancesPure = (
     fee = totalReceived;
   }
 
+  // Rule: If the student attended only ONE session and did NOT pay,
+  // the session does NOT count for the school and does NOT count for the teacher.
+  const isSingleUnpaidSession = totalAttendance === 1 && totalReceived <= 0;
+
+  if (isSingleUnpaidSession) {
+    fee = 0;
+  }
+
   // Teacher payout rule: 75% for VIP groups and 60% for normal groups of the student fee.
-  // The teacher gets this whether the student has paid or not (school waits for debt).
+  // The teacher gets this whether the student has paid or not (school waits for debt),
+  // EXCEPT when the student attended only 1 session and didn't pay (or is exempt with discount '0').
   const teacherRatio = isVipGroup ? 0.75 : 0.60;
-  const teacherPay = student.discount === '0' ? 0 : Math.round(fee * teacherRatio);
-  const schoolEarn = Math.max(0, fee - teacherPay);
-  const debt = Math.max(0, fee - totalReceived);
+  const teacherPay = (student.discount === '0' || isSingleUnpaidSession) ? 0 : Math.round(fee * teacherRatio);
+  const schoolEarn = isSingleUnpaidSession ? 0 : Math.max(0, fee - teacherPay);
+  const debt = isSingleUnpaidSession ? 0 : Math.max(0, fee - totalReceived);
 
   return {
     ...student,
@@ -2335,15 +2344,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     let totalPossibleSlots = 0;
 
     realStudents.forEach((s) => {
+      const isSingleUnpaid =
+        (s.totalAttendance ?? (s.attendance || []).filter((a) => a === 'P' || a === 'M').length) === 1 &&
+        (s.totalReceived || 0) <= 0;
+
       totalExpected += s.fee || 0;
       totalReceived += s.totalReceived || 0;
       totalTeacherPay += s.teacherPay || 0;
       totalSchoolEarn += s.schoolEarn || 0;
       totalDebt += s.debt && s.debt > 0 ? s.debt : 0;
-      totalPresentSlots += (s.attendance || []).filter((a) => a === 'P' || a === 'M').length;
 
-      const info = getStudentSessionInfo(s.attendance, cycleSessions);
-      totalPossibleSlots += info.countedSessions > 0 ? info.countedSessions : cycleSessions;
+      if (!isSingleUnpaid) {
+        totalPresentSlots += (s.attendance || []).filter((a) => a === 'P' || a === 'M').length;
+        const info = getStudentSessionInfo(s.attendance, cycleSessions);
+        totalPossibleSlots += info.countedSessions > 0 ? info.countedSessions : cycleSessions;
+      }
     });
 
     const attendanceRate = totalPossibleSlots > 0 ? Math.round((totalPresentSlots / totalPossibleSlots) * 100) : 0;
@@ -2509,19 +2524,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         let sch = 0;
         let debt = 0;
 
+        const isSingleUnpaid =
+          (s.totalAttendance ?? (s.attendance || []).filter((a) => a === 'P' || a === 'M').length) === 1 &&
+          (s.totalReceived || 0) <= 0;
+
         if (isAllPeriod) {
           fee = s.fee || 0;
           rec = s.totalReceived || 0;
-          tea = s.teacherPay || (s.discount === '0' ? 0 : Math.round(fee * teacherRatio));
-          sch = s.schoolEarn || (fee - tea);
-          debt = s.debt || Math.max(0, fee - rec);
+          tea = typeof s.teacherPay === 'number' ? s.teacherPay : (s.discount === '0' || isSingleUnpaid ? 0 : Math.round(fee * teacherRatio));
+          sch = typeof s.schoolEarn === 'number' ? s.schoolEarn : (fee - tea);
+          debt = typeof s.debt === 'number' ? s.debt : Math.max(0, fee - rec);
         } else {
-          const fraction = totalSessions > 0 ? matchedIndices.length / totalSessions : 1;
-          fee = Math.round((s.fee || 0) * fraction);
-          rec = matchedIndices.reduce((sum, idx) => sum + (Number(s.payments?.[idx]) || 0), 0);
-          tea = s.discount === '0' ? 0 : Math.round(fee * teacherRatio);
-          sch = fee - tea;
-          debt = Math.max(0, fee - rec);
+          if (isSingleUnpaid) {
+            fee = 0;
+            rec = 0;
+            tea = 0;
+            sch = 0;
+            debt = 0;
+          } else {
+            const fraction = totalSessions > 0 ? matchedIndices.length / totalSessions : 1;
+            fee = Math.round((s.fee || 0) * fraction);
+            rec = matchedIndices.reduce((sum, idx) => sum + (Number(s.payments?.[idx]) || 0), 0);
+            tea = s.discount === '0' ? 0 : Math.round(fee * teacherRatio);
+            sch = fee - tea;
+            debt = Math.max(0, fee - rec);
+          }
         }
 
         totalStudentsSet.add(`${s.name}_${gid}`);

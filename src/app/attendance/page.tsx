@@ -1298,7 +1298,8 @@ export default function AttendancePage() {
               filteredStudents.map((student, sIdx) => {
                 const cycleSessions = group.sessionCount || 4;
                 const sessionInfo = getStudentSessionInfo(student.attendance, cycleSessions);
-                const studentCountedSessions = sessionInfo.countedSessions > 0 ? sessionInfo.countedSessions : cycleSessions;
+                const isSingleUnpaid = student.totalAttendance === 1 && (student.totalReceived || 0) <= 0;
+                const studentCountedSessions = isSingleUnpaid ? 0 : (sessionInfo.countedSessions > 0 ? sessionInfo.countedSessions : cycleSessions);
 
                 return (
                   <tr key={student.rowId}>
@@ -1429,23 +1430,49 @@ export default function AttendancePage() {
 
                     {/* Debt */}
                     <td style={{ textAlign: 'center' }}>
-                      <span
-                        style={{
-                          fontWeight: 800,
-                          fontSize: '0.9rem',
-                          color: student.debt > 0 ? 'var(--status-absent)' : 'var(--status-present)'
-                        }}
-                      >
-                        {student.debt > 0 ? `${student.debt.toLocaleString()} دج` : 'مسدد ✓'}
-                      </span>
+                      {isSingleUnpaid ? (
+                        <span
+                          style={{
+                            fontWeight: 700,
+                            fontSize: '0.8rem',
+                            padding: '3px 8px',
+                            borderRadius: 'var(--md-shape-sm)',
+                            backgroundColor: 'var(--md-sys-color-surface-container)',
+                            color: 'var(--md-sys-color-outline)'
+                          }}
+                          title="حضور حصة واحدة فقط بدون تسديد — الحصة غير محتسبة للمدرسة والأستاذ"
+                        >
+                          غير محتسب
+                        </span>
+                      ) : (
+                        <span
+                          style={{
+                            fontWeight: 800,
+                            fontSize: '0.9rem',
+                            color: student.debt > 0 ? 'var(--status-absent)' : 'var(--status-present)'
+                          }}
+                        >
+                          {student.debt > 0 ? `${student.debt.toLocaleString()} دج` : 'مسدد ✓'}
+                        </span>
+                      )}
                     </td>
 
                     {/* Total Attendance */}
                     <td
                       style={{ textAlign: 'center', fontWeight: 800 }}
-                      title={`${student.totalAttendance} حضور من أصل ${studentCountedSessions} حصص محتسبة لهذا التلميذ`}
+                      title={
+                        isSingleUnpaid
+                          ? 'حضور حصة واحدة فقط بدون تسديد — حصة غير محتسبة للمدرسة والأستاذ'
+                          : `${student.totalAttendance} حضور من أصل ${studentCountedSessions} حصص محتسبة لهذا التلميذ`
+                      }
                     >
-                      {student.totalAttendance} / {studentCountedSessions}
+                      {isSingleUnpaid ? (
+                        <span style={{ color: 'var(--md-sys-color-outline)' }}>
+                          {student.totalAttendance} / 0
+                        </span>
+                      ) : (
+                        `${student.totalAttendance} / ${studentCountedSessions}`
+                      )}
                     </td>
 
                     {/* Actions */}
