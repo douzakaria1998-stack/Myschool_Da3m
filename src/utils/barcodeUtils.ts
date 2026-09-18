@@ -107,6 +107,37 @@ export function normalizeArabicName(text: string): string {
     .replace(/\s+/g, ' ');
 }
 
+// AZERTY and Arabic-Indic digit translation table for barcode payload extraction
+const PAYLOAD_DIGIT_MAP: Record<string, string> = {
+  '&': '1',
+  'é': '2', 'É': '2',
+  '"': '3',
+  "'": '4',
+  '(': '5',
+  '-': '6',
+  '§': '6',
+  'è': '7', 'È': '7',
+  '_': '8',
+  '!': '8',
+  'ç': '9', 'Ç': '9',
+  'à': '0', 'À': '0',
+  '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4',
+  '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9',
+  '0': '0', '1': '1', '2': '2', '3': '3', '4': '4',
+  '5': '5', '6': '6', '7': '7', '8': '8', '9': '9'
+};
+
+function decodePayloadDigits(str: string): string {
+  let res = '';
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (PAYLOAD_DIGIT_MAP[ch] !== undefined) {
+      res += PAYLOAD_DIGIT_MAP[ch];
+    }
+  }
+  return res;
+}
+
 /**
  * Generates an exhaustive array of search candidates for any scanned or typed string.
  * Guarantees finding the student regardless of:
@@ -204,8 +235,8 @@ export function getBarcodeCandidates(raw: string): string[] {
       candidates.add(`${gid1}${rNum}`);
     }
 
-    // Pattern: STU prefix with serial (e.g. STU-27000008, STU-26000008, STU27000008)
-    const mStu = upper.match(/^STU[-_]?(\d+)$/);
+    // Pattern: STU prefix with serial (including interleaved typing noise like SYTU, STYU, SUT, etc.)
+    const mStu = upper.match(/^(?:STU|S[A-Z0-9_]{0,2}T[A-Z0-9_]{0,2}U|SYTU|STYU)[-_]?(\d+)$/);
     if (mStu) {
       let digits = mStu[1];
       if (/^6(2[67]\d{6})$/.test(digits)) {
@@ -239,41 +270,27 @@ export function getBarcodeCandidates(raw: string): string[] {
         candidates.add(`STU27${digits.slice(2)}`);
       }
     }
+
+    // Pattern: Extract embedded 8-digit student serial anywhere in string (e.g. SYTU-27000405 -> 27000405)
+    const decodedTotal = decodePayloadDigits(upper);
+    const mEmbeddedSerial = decodedTotal.match(/(2[67]\d{6})/);
+    if (mEmbeddedSerial) {
+      const digits = mEmbeddedSerial[1];
+      candidates.add(`STU-${digits}`);
+      candidates.add(`STU${digits}`);
+      candidates.add(digits);
+      if (digits.startsWith('27')) {
+        candidates.add(`STU-26${digits.slice(2)}`);
+        candidates.add(`STU26${digits.slice(2)}`);
+      } else if (digits.startsWith('26')) {
+        candidates.add(`STU-27${digits.slice(2)}`);
+        candidates.add(`STU27${digits.slice(2)}`);
+      }
+    }
   }
 
   // Filter out empty strings
   return Array.from(candidates).filter((c) => c && c.length > 0);
-}
-
-// AZERTY and Arabic-Indic digit translation table for barcode payload extraction
-const PAYLOAD_DIGIT_MAP: Record<string, string> = {
-  '&': '1',
-  'é': '2', 'É': '2',
-  '"': '3',
-  "'": '4',
-  '(': '5',
-  '-': '6',
-  '§': '6',
-  'è': '7', 'È': '7',
-  '_': '8',
-  '!': '8',
-  'ç': '9', 'Ç': '9',
-  'à': '0', 'À': '0',
-  '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4',
-  '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9',
-  '0': '0', '1': '1', '2': '2', '3': '3', '4': '4',
-  '5': '5', '6': '6', '7': '7', '8': '8', '9': '9'
-};
-
-function decodePayloadDigits(str: string): string {
-  let res = '';
-  for (let i = 0; i < str.length; i++) {
-    const ch = str[i];
-    if (PAYLOAD_DIGIT_MAP[ch] !== undefined) {
-      res += PAYLOAD_DIGIT_MAP[ch];
-    }
-  }
-  return res;
 }
 
 /**
@@ -293,11 +310,10 @@ export function normalizeScannedBarcode(raw: string): string {
     return trimmed.toUpperCase();
   }
 
-  // 1. Check for student barcode patterns: STU (or Arabic سفع, ستو, لإ, لأ)
-  // Matches: STU-..., STU)..., STU_..., سفع)..., ستو-..., etc.
-  // Note: '-' is placed first in [-&é...] so it is never treated as a character range!
+  // 1. Check for student barcode patterns: STU (or fuzzy interleaved like SYTU, STYU, etc., or Arabic سفع, ستو, لإ, لأ)
+  // Matches: STU-..., SYTU-..., STU)..., STU_..., سفع)..., ستو-..., etc.
   const stuMatches = Array.from(
-    trimmed.matchAll(/(?:STU|سفع|ستو|لإ|لأ)[-_)°\s]*([-&éÉ"'(èÈ_!çÇàÀ0-9٠-٩]+)/gi)
+    trimmed.matchAll(/(?:STU|S[A-Za-z0-9_]{0,3}T[A-Za-z0-9_]{0,3}U|SYTU|STYU|سفع|ستو|لإ|لأ)[-_)°\s]*([^\r\n,;]+)/gi)
   );
   if (stuMatches.length > 0) {
     // If multiple STU scans exist, ALWAYS take the newest (last) one!
@@ -319,6 +335,13 @@ export function normalizeScannedBarcode(raw: string): string {
     if (digits.length > 0) {
       return `STU-${digits}`;
     }
+  }
+
+  // 1b. Direct embedded 8-digit student serial anywhere in string (e.g. "y27000405", "gd27000405gd", "27y000405")
+  const decodedTotal = decodePayloadDigits(trimmed);
+  const mTotal = decodedTotal.match(/(2[67]\d{6})/);
+  if (mTotal) {
+    return `STU-${mTotal[1]}`;
   }
 
   // 2. Check for group barcode patterns: BAC / BACV (or Arabic لاشؤ, لاضؤ)

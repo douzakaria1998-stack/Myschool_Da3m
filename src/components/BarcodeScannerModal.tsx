@@ -516,18 +516,21 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       if (e.key === 'Enter') {
         const isFocusedOnScanner = document.activeElement === scannerInputRef.current;
         const burstChars = burst.map((b) => b.char).join('').trim();
+        const normalizedBurst = normalizeScannedBarcode(burstChars);
         const avgInterval = burst.length > 1 ? (now - burst[0].time) / (burst.length - 1) : 999;
         const isHardwareBurst =
           isScannerActiveRef.current ||
           burstChars.toUpperCase().startsWith('STU') ||
-          (burstChars.length >= 4 && avgInterval < 55) ||
-          Boolean(findStudentByCode(burstChars));
+          normalizedBurst.toUpperCase().startsWith('STU') ||
+          (burstChars.length >= 4 && avgInterval < 75) ||
+          Boolean(findStudentByCode(burstChars)) ||
+          Boolean(findStudentByCode(normalizedBurst));
 
         if (isFocusedOnScanner) {
           e.preventDefault();
           scannerBurstRef.current = [];
           isScannerActiveRef.current = false;
-          handleBarcodeSubmit();
+          handleBarcodeSubmit(undefined, normalizedBurst || burstChars);
           return;
         }
 
@@ -536,14 +539,19 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
           e.preventDefault();
           e.stopPropagation();
 
-          // Restore the focused input back to its clean pre-burst state
+          // Restore the focused input back to its clean pre-burst state and keep user typing cursor!
           if (burstTargetElRef.current && burstTargetElRef.current !== scannerInputRef.current) {
             restoreReactInputElement(burstTargetElRef.current, preBurstValueRef.current);
+            try {
+              burstTargetElRef.current.focus();
+              const vLen = burstTargetElRef.current.value.length;
+              burstTargetElRef.current.setSelectionRange(vLen, vLen);
+            } catch (err) {}
           }
 
           scannerBurstRef.current = [];
           isScannerActiveRef.current = false;
-          handleBarcodeSubmit(undefined, burstChars);
+          handleBarcodeSubmit(undefined, normalizedBurst || burstChars);
           return;
         }
 
@@ -558,14 +566,37 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
         return;
       }
 
-      // Reset auto-clear timer (if typing paused for more than 110ms, burst is done/cancelled)
+      // Reset auto-clear / auto-submit timer (fires ultra-fast in 85ms if no Enter received)
       if (scannerResetTimerRef.current) {
         clearTimeout(scannerResetTimerRef.current);
       }
       scannerResetTimerRef.current = setTimeout(() => {
+        const currentBurst = scannerBurstRef.current;
+        if (currentBurst.length >= 4 && isScannerActiveRef.current) {
+          const currentChars = currentBurst.map((b) => b.char).join('').trim();
+          const norm = normalizeScannedBarcode(currentChars);
+          if (
+            norm.toUpperCase().startsWith('STU') ||
+            norm.toUpperCase().startsWith('BAC') ||
+            Boolean(findStudentByCode(norm))
+          ) {
+            if (burstTargetElRef.current && burstTargetElRef.current !== scannerInputRef.current) {
+              restoreReactInputElement(burstTargetElRef.current, preBurstValueRef.current);
+              try {
+                burstTargetElRef.current.focus();
+                const vLen = burstTargetElRef.current.value.length;
+                burstTargetElRef.current.setSelectionRange(vLen, vLen);
+              } catch (err) {}
+            }
+            scannerBurstRef.current = [];
+            isScannerActiveRef.current = false;
+            handleBarcodeSubmit(undefined, norm);
+            return;
+          }
+        }
         scannerBurstRef.current = [];
         isScannerActiveRef.current = false;
-      }, 110);
+      }, 85);
 
       if (e.key === 'Backspace') {
         if (scannerBurstRef.current.length > 0) {
@@ -588,8 +619,8 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
         // Second or subsequent character in rapid succession
         scannerBurstRef.current.push({ char: e.key, time: now });
 
-        // Hardware scanner speed check: superhuman interval (< 45ms)
-        if (interval < 45) {
+        // Hardware scanner speed check: superhuman interval (< 55ms)
+        if (interval < 55) {
           isScannerActiveRef.current = true;
         }
 
@@ -602,6 +633,11 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
           // 2. Roll back the first character that slipped through before burst detection!
           if (burstTargetElRef.current && burstTargetElRef.current !== scannerInputRef.current) {
             restoreReactInputElement(burstTargetElRef.current, preBurstValueRef.current);
+            try {
+              burstTargetElRef.current.focus();
+              const vLen = burstTargetElRef.current.value.length;
+              burstTargetElRef.current.setSelectionRange(vLen, vLen);
+            } catch (err) {}
           }
         }
       }
@@ -627,16 +663,17 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       scanTimeoutRef.current = null;
     }
 
-    const rawCode = (directCode !== undefined ? directCode : barcodeInput).trim();
-    if (!rawCode) return;
+    const rawInput = (directCode !== undefined ? directCode : barcodeInput).trim();
+    if (!rawInput) return;
 
-    // Display scanned code in right-hand barcode input box
-    if (directCode) {
-      setBarcodeInput(directCode);
-      setTimeout(() => {
-        setBarcodeInput('');
-      }, 1800);
-    }
+    // Clean and normalize the barcode immediately (handles SYTU, interleaved typing, AZERTY layouts, etc.)
+    const rawCode = normalizeScannedBarcode(rawInput) || rawInput;
+
+    // Display cleaned code in right-hand barcode input box
+    setBarcodeInput(rawCode);
+    setTimeout(() => {
+      setBarcodeInput('');
+    }, 1800);
 
     let currentActiveGroups = activeGroups;
 
