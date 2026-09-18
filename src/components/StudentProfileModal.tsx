@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState } from 'react';
-import { StudentRecord, GroupSheet } from '../types';
 import { useApp, calcStudentFinancesPure } from '../context/AppContext';
 import {
   X,
