@@ -18,7 +18,7 @@ export const AZERTY_LETTER_SWAP: Record<string, string> = {
 
 // On French AZERTY keyboard, unshifted number row produces symbols:
 // Key 1 -> '&', Key 2 -> 'é', Key 3 -> '"', Key 4 -> ''', Key 5 -> '('
-// Key 6 -> '-', Key 7 -> 'è', Key 8 -> '_', Key 9 -> 'ç', Key 0 -> 'à'
+// Key 6 -> '-' (French) or '§' (Belgian), Key 7 -> 'è', Key 8 -> '_' (French) or '!' (Belgian), Key 9 -> 'ç', Key 0 -> 'à'
 // Key right of 0 (US hyphen '-') -> ')' unshifted, '°' shifted
 export const AZERTY_DIGIT_MAP: Record<string, string> = {
   '&': '1',
@@ -27,8 +27,10 @@ export const AZERTY_DIGIT_MAP: Record<string, string> = {
   "'": '4',
   '(': '5',
   '-': '6',
+  '§': '6',
   'è': '7', 'È': '7',
   '_': '8',
+  '!': '8',
   'ç': '9', 'Ç': '9',
   'à': '0', 'À': '0',
   ')': '-',
@@ -121,6 +123,14 @@ export function getBarcodeCandidates(raw: string): string[] {
   candidates.add(clean);
   candidates.add(clean.toUpperCase());
   candidates.add(clean.toLowerCase());
+
+  // 1b. Normalized scanned barcode
+  const normalized = normalizeScannedBarcode(clean);
+  if (normalized && normalized !== clean) {
+    candidates.add(normalized);
+    candidates.add(normalized.toUpperCase());
+    candidates.add(normalized.toLowerCase());
+  }
 
   // 2. AZERTY decoding:
   // 2a. Full AZERTY (swapping letters Q<->A, W<->Z, and decoding digits)
@@ -235,186 +245,143 @@ export function getBarcodeCandidates(raw: string): string[] {
   return Array.from(candidates).filter((c) => c && c.length > 0);
 }
 
+// AZERTY and Arabic-Indic digit translation table for barcode payload extraction
+const PAYLOAD_DIGIT_MAP: Record<string, string> = {
+  '&': '1',
+  'é': '2', 'É': '2',
+  '"': '3',
+  "'": '4',
+  '(': '5',
+  '-': '6',
+  '§': '6',
+  'è': '7', 'È': '7',
+  '_': '8',
+  '!': '8',
+  'ç': '9', 'Ç': '9',
+  'à': '0', 'À': '0',
+  '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4',
+  '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9',
+  '0': '0', '1': '1', '2': '2', '3': '3', '4': '4',
+  '5': '5', '6': '6', '7': '7', '8': '8', '9': '9'
+};
+
+function decodePayloadDigits(str: string): string {
+  let res = '';
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (PAYLOAD_DIGIT_MAP[ch] !== undefined) {
+      res += PAYLOAD_DIGIT_MAP[ch];
+    }
+  }
+  return res;
+}
+
 /**
  * Normalizes any scanned barcode string into standard English uppercase (e.g. STU-27000101 or BAC01-1)
  * regardless of the host operating system keyboard layout (Arabic 101, Arabic 102, French AZERTY, English QWERTY).
  *
+ * Fully supports all barcodes containing digits 6 and 8 across all layouts!
  * Automatically clears previous scans if new barcodes are scanned into an existing search bar!
  * If the input is normal user typing (e.g. Arabic name or phone number), it leaves it completely untouched!
  */
 export function normalizeScannedBarcode(raw: string): string {
   if (!raw) return '';
-  let trimmed = raw.trim();
+  const trimmed = raw.trim();
 
-  // Strip accidental AZERTY artifact '6' before 27 or 26 serials:
-  // e.g. STU-627000273 -> STU-27000273, STU627000273 -> STU-27000273, 627000273 -> STU-27000273
-  trimmed = trimmed.replace(/^STU[-_]?6(2[67]\d{6})/i, 'STU-$1');
-  if (/^6(2[67]\d{6})$/.test(trimmed)) {
-    trimmed = `STU-${trimmed.slice(1)}`;
-  }
-
-  // Map of AZERTY number row characters to digits
-  // Note: '-' is intentionally omitted so it remains the hyphen delimiter in STU- and BAC-!
-  const azertyMap: Record<string, string> = {
-    '&': '1',
-    'é': '2', 'É': '2',
-    '"': '3',
-    "'": '4',
-    '(': '5',
-    'è': '7', 'È': '7',
-    'ç': '9', 'Ç': '9',
-    'à': '0', 'À': '0',
-    '§': '6'
-  };
-
-  const arabicIndicMap: Record<string, string> = {
-    '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4',
-    '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9'
-  };
-
-  // 1. If input contains multiple barcodes (e.g. repeated scans: STU-27000220STU-27000220STU-27000220):
-  // ALWAYS keep ONLY the newest (last) barcode!
-  const barcodeRegex = /(?:STU[-_]?\d{4,10}|(?:BAC|BACV)[-_]?\d+[-_]?\d*)/gi;
-  const allBarcodes = trimmed.match(barcodeRegex);
-  if (allBarcodes && allBarcodes.length > 1) {
-    let lastBarcode = allBarcodes[allBarcodes.length - 1].toUpperCase();
-    lastBarcode = lastBarcode.replace(/^STU[-_]?6(2[67]\d{6})/i, 'STU-$1');
-    const m = lastBarcode.match(/^STU[-_]?(\d+)$/);
-    if (m) {
-      let digits = m[1];
-      if (/^6(2[67]\d{6})$/.test(digits)) digits = digits.slice(1);
-      return `STU-${digits}`;
-    }
-    return lastBarcode.replace(/_/g, '-');
-  }
-
-  // If there's 1 barcode and it's appended after other text (e.g. "محمدSTU-27000220" or "0661122334STU-27000220")
-  if (allBarcodes && allBarcodes.length === 1 && !trimmed.toUpperCase().startsWith(allBarcodes[0].toUpperCase())) {
-    let single = allBarcodes[0].toUpperCase();
-    single = single.replace(/^STU[-_]?6(2[67]\d{6})/i, 'STU-$1');
-    const m = single.match(/^STU[-_]?(\d+)$/);
-    if (m) {
-      let digits = m[1];
-      if (/^6(2[67]\d{6})$/.test(digits)) digits = digits.slice(1);
-      return `STU-${digits}`;
-    }
-    return single.replace(/_/g, '-');
-  }
-
-  // 2. If input already is a single clean English barcode format, standardize casing & format
-  if (/^STU[-_]?\d+$/i.test(trimmed)) {
-    const m = trimmed.toUpperCase().match(/^STU[-_]?(\d+)$/);
-    if (m) {
-      let digits = m[1];
-      if (/^6(2[67]\d{6})$/.test(digits)) {
-        digits = digits.slice(1);
-      }
-      return `STU-${digits}`;
-    }
+  // Incomplete user typing like "STU", "STU-", "BAC", preserve as is without inventing digits
+  if (/^STU[-_]?$/i.test(trimmed) || /^BACV?[-_]?$/i.test(trimmed)) {
     return trimmed.toUpperCase();
   }
-  if (/^(?:BAC|BACV)[-_]?\d+[-_]?\d*$/i.test(trimmed)) {
-    return trimmed.toUpperCase().replace(/_/g, '-');
-  }
 
-  // 3. If input has an old barcode and a new scan in French AZERTY or Arabic was appended:
-  // e.g. "STU-27000101_éèàààèéç('لإ"
-  if (
-    allBarcodes &&
-    allBarcodes.length === 1 &&
-    (/[éèàç&"'()§]/.test(trimmed) || /(?:سفع|لإ|لأ|ستو|لاشؤ|لاضؤ)/.test(trimmed))
-  ) {
-    const remaining = trimmed.replace(allBarcodes[0], '').trim();
-    if (remaining.length >= 4) {
-      const decodedNew = normalizeScannedBarcode(remaining);
-      if (decodedNew && decodedNew !== remaining) {
-        return decodedNew;
+  // 1. Check for student barcode patterns: STU (or Arabic سفع, ستو, لإ, لأ)
+  // Matches: STU-..., STU)..., STU_..., سفع)..., ستو-..., etc.
+  // Note: '-' is placed first in [-&é...] so it is never treated as a character range!
+  const stuMatches = Array.from(
+    trimmed.matchAll(/(?:STU|سفع|ستو|لإ|لأ)[-_)°\s]*([-&éÉ"'(èÈ_!çÇàÀ0-9٠-٩]+)/gi)
+  );
+  if (stuMatches.length > 0) {
+    // If multiple STU scans exist, ALWAYS take the newest (last) one!
+    const lastMatch = stuMatches[stuMatches.length - 1];
+    let digits = decodePayloadDigits(lastMatch[1]);
+
+    // Strip accidental leading '6' artifact if 9 digits starting with 627 or 626:
+    if (/^6(2[67]\d{6})$/.test(digits)) {
+      digits = digits.slice(1);
+    }
+
+    if (digits.length >= 6) {
+      const serialMatches = Array.from(digits.matchAll(/(27\d{6}|26\d{6}|27\d{4,6}|26\d{4,6})/g));
+      if (serialMatches.length > 0) {
+        return `STU-${serialMatches[serialMatches.length - 1][1]}`;
       }
+      return `STU-${digits.slice(-8)}`;
+    }
+    if (digits.length > 0) {
+      return `STU-${digits}`;
     }
   }
 
-  // 4. Detect scanner artifacts:
-  const hasAzertyDigits = /[éèàç&"'()§]/.test(trimmed);
+  // 2. Check for group barcode patterns: BAC / BACV (or Arabic لاشؤ, لاضؤ)
+  // Pattern: (prefix)(delimiter?)(groupNum)(delimiter)(studentNum)
+  // Examples: BAC01-6, BAC01-- (AZERTY 6), BAC01-_ (AZERTY 8), BAC01)- (AZERTY 6), BACà&)- (AZERTY 01-6)
+  const bacMatches = Array.from(
+    trimmed.matchAll(/(BACV|BAC|لاشؤ|لاضؤ)[-_)°\s]*([-&éÉ"'(èÈ_!çÇàÀ0-9٠-٩]+)[-_)°\s]+([-&éÉ"'(èÈ_!çÇàÀ0-9٠-٩]+)/gi)
+  );
+  if (bacMatches.length > 0) {
+    const lastBac = bacMatches[bacMatches.length - 1];
+    const prefix = lastBac[1].toUpperCase().startsWith('BACV') ? 'BACV' : 'BAC';
+    const groupNum = decodePayloadDigits(lastBac[2]);
+    const studentNum = decodePayloadDigits(lastBac[3]);
+
+    if (groupNum && studentNum) {
+      const gPadded = groupNum.padStart(2, '0');
+      return `${prefix}${gPadded}-${parseInt(studentNum, 10)}`;
+    }
+  }
+
+  // 2b. Group-only barcode without student row (e.g. BAC01 or BACà&)
+  const bacGroupMatches = Array.from(
+    trimmed.matchAll(/(BACV|BAC|لاشؤ|لاضؤ)[-_)°\s]*([-&éÉ"'(èÈ_!çÇàÀ0-9٠-٩]+)$/gi)
+  );
+  if (bacGroupMatches.length > 0) {
+    const lastBac = bacGroupMatches[bacGroupMatches.length - 1];
+    const prefix = lastBac[1].toUpperCase().startsWith('BACV') ? 'BACV' : 'BAC';
+    const groupNum = decodePayloadDigits(lastBac[2]);
+    if (groupNum) {
+      return `${prefix}${groupNum.padStart(2, '0')}`;
+    }
+  }
+
+  // 3. Raw AZERTY or Arabic-Indic scan without prefix:
+  // e.g. "éèààà&à-" -> STU-27000106, "éèààà&à_" -> STU-27000108, "é-_--_&à" -> STU-26866810
+  const hasAzertySymbols = /[éèàç&"'()§_]/.test(trimmed);
   const hasArabicScannerKey = /(?:سفع|لإ|لأ|ستو|لاشؤ|لاضؤ)/.test(trimmed);
   const hasArabicIndic = /[٠-٩]/.test(trimmed);
-  const hasStuOrBac = /(?:STU|BAC|BACV)/i.test(trimmed);
-  const hasConcatSerials = /^\d{12,}$/.test(trimmed);
 
-  // If none of the scanner signatures exist, this is regular user typing (e.g. Arabic name or phone number), leave untouched!
-  if (!hasAzertyDigits && !hasArabicScannerKey && !hasArabicIndic && !hasStuOrBac && !hasConcatSerials) {
-    return raw;
-  }
-
-  // Incomplete user typing like "STU" or "STU-", preserve as is without inventing digits
-  if (/^STU[-_]?$/i.test(trimmed)) {
-    return trimmed.toUpperCase();
-  }
-
-  // Extract digits by translating AZERTY symbols, Arabic-indic digits, or standard digits
-  let extractedDigits = '';
-  for (let i = 0; i < trimmed.length; i++) {
-    const ch = trimmed[i];
-    if (azertyMap[ch] !== undefined) {
-      extractedDigits += azertyMap[ch];
-    } else if (arabicIndicMap[ch] !== undefined) {
-      extractedDigits += arabicIndicMap[ch];
-    } else if (/\d/.test(ch)) {
-      extractedDigits += ch;
+  if (hasAzertySymbols || hasArabicScannerKey || hasArabicIndic) {
+    let allDigits = decodePayloadDigits(trimmed);
+    if (/^6(2[67]\d{6})$/.test(allDigits)) {
+      allDigits = allDigits.slice(1);
+    }
+    if (allDigits.length >= 6) {
+      const serialMatches = Array.from(allDigits.matchAll(/(27\d{6}|26\d{6}|27\d{4,6}|26\d{4,6})/g));
+      if (serialMatches.length > 0) {
+        return `STU-${serialMatches[serialMatches.length - 1][1]}`;
+      }
+      return `STU-${allDigits.slice(-8)}`;
     }
   }
 
-  // Strip leading '6' if it was accidentally captured before 27 or 26 serials
-  extractedDigits = extractedDigits.replace(/^6(2[67]\d{6})/, '$1');
-
-  // If we extracted student serials (e.g. 2700XXXX or 2600XXXX, standard 8 digits)
-  if (extractedDigits.length >= 6) {
-    const matches27 = Array.from(extractedDigits.matchAll(/(27\d{6}|26\d{6}|27\d{4,6}|26\d{4,6})/g));
-    if (matches27.length > 0) {
-      // Take the LAST serial if multiple scans occurred!
-      const lastMatch = matches27[matches27.length - 1][0];
-      return `STU-${lastMatch}`;
-    }
-    if (hasStuOrBac || hasArabicScannerKey || hasAzertyDigits) {
-      return `STU-${extractedDigits.slice(-8)}`;
-    }
-  }
-
-  // Check group barcodes like BAC01-1 or BACV01-1
-  const textDecoded = trimmed
-    .replace(/لاشؤ[-_]?/g, 'BAC-')
-    .replace(/لاضؤ[-_]?/g, 'BAC-')
-    .replace(/سفع[-_]?/g, 'STU-')
-    .replace(/ستو[-_]?/g, 'STU-')
-    .replace(/لإ[-_]?/g, 'STU-')
-    .replace(/لأ[-_]?/g, 'STU-');
-
-  let converted = '';
-  for (let i = 0; i < textDecoded.length; i++) {
-    const ch = textDecoded[i];
-    if (azertyMap[ch] !== undefined) {
-      converted += azertyMap[ch];
-    } else if (arabicIndicMap[ch] !== undefined) {
-      converted += arabicIndicMap[ch];
-    } else if (ch === ')') {
-      converted += '-';
-    } else {
-      converted += ch;
-    }
-  }
-
-  const mBac = converted.toUpperCase().match(/^(?:BAC|BACV)[-_]?\d+[-_]?\d*$/);
-  if (mBac) {
-    return converted.toUpperCase().replace(/_/g, '-');
-  }
-
-  const mFinalStu = converted.toUpperCase().match(/^STU[-_]?(\d+)$/);
-  if (mFinalStu) {
-    let digits = mFinalStu[1];
-    if (/^6(2[67]\d{6})$/.test(digits)) {
+  // 4. Raw English serials typed/scanned (e.g. 27000106, 27000108, 26866810, 627000273)
+  if (/^6?2[67]\d{6}$/.test(trimmed)) {
+    let digits = trimmed;
+    if (digits.startsWith('6') && digits.length === 9) {
       digits = digits.slice(1);
     }
     return `STU-${digits}`;
   }
 
+  // Regular user typing (e.g. Arabic name or phone number)
   return raw;
 }
+
