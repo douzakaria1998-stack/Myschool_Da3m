@@ -35,7 +35,6 @@ import ThermalReceiptsModal from '../../components/ThermalReceiptsModal';
 import EditGroupModal from '../../components/EditGroupModal';
 import RenewGroupModal from '../../components/RenewGroupModal';
 import GroupSearchSelect from '../../components/GroupSearchSelect';
-import BarcodeScannerModal from '../../components/BarcodeScannerModal';
 import GroupBadgesModal from '../../components/GroupBadgesModal';
 import SecurityPinModal from '../../components/SecurityPinModal';
 import { normalizeScannedBarcode } from '../../utils/barcodeUtils';
@@ -74,7 +73,6 @@ export default function AttendancePage() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [filterDebt, setFilterDebt] = useState<'all' | 'debt' | 'paid' | 'exempt'>('all');
   const [activeStudentForPayment, setActiveStudentForPayment] = useState<StudentRecord | null>(null);
-  const [isBarcodeScannerOpen, setIsBarcodeScannerOpen] = useState(false);
   const [isAddStudentOpen, setIsAddStudentOpen] = useState(false);
   const [isThermalModalOpen, setIsThermalModalOpen] = useState(false);
   const [isEditFinancesOpen, setIsEditFinancesOpen] = useState(false);
@@ -512,8 +510,8 @@ export default function AttendancePage() {
 
         {/* Action buttons */}
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          <button
-            onClick={() => setIsBarcodeScannerOpen(true)}
+          <Link
+            href={`/scanner?groupId=${group.groupId}`}
             className="m3-btn m3-btn-sm"
             style={{
               display: 'flex',
@@ -524,13 +522,14 @@ export default function AttendancePage() {
               fontWeight: 800,
               boxShadow: '0 2px 8px rgba(79, 70, 229, 0.35)',
               border: 'none',
-              cursor: 'pointer'
+              cursor: 'pointer',
+              textDecoration: 'none'
             }}
-            title="مسح بطاقات الحضور بالباركود سريعاً وتأكيد الدفع والتعويض وطباعة الوصل"
+            title="الانتقال إلى محطة مسح الباركود والبطاقات الذكية لهذا الفوج"
           >
             <Scan size={16} />
             <span>قارئ الباركود والبطاقات ⚡</span>
-          </button>
+          </Link>
 
           <button
             onClick={() => setIsAddStudentOpen(true)}
@@ -1519,14 +1518,6 @@ export default function AttendancePage() {
         <RenewGroupModal
           sourceGroupId={group.groupId}
           onClose={() => setIsRenewModalOpen(false)}
-        />
-      )}
-
-      {/* Barcode / Card Scanner & Covering Modal */}
-      {isBarcodeScannerOpen && (
-        <BarcodeScannerModal
-          initialGroupId={group.groupId}
-          onClose={() => setIsBarcodeScannerOpen(false)}
         />
       )}
 

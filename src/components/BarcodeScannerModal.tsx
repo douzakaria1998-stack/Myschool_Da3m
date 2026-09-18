@@ -36,14 +36,16 @@ import {
   getTodayArabicDayName,
   getDefaultSessionIndex
 } from '../utils/sessionUtils';
+import Link from 'next/link';
 import { getBarcodeCandidates, normalizeArabicName, normalizeScannedBarcode } from '../utils/barcodeUtils';
 
 interface Props {
   initialGroupId?: string;
-  onClose: () => void;
+  onClose?: () => void;
+  isScreen?: boolean;
 }
 
-export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) {
+export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen = false }: Props) {
   const {
     data,
     updateAttendance,
@@ -889,24 +891,112 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
     return { present, makeup, absent, unmarked, total };
   }, [activeGroups, data.groupData]);
 
-  return (
-    <div className="m3-dialog-backdrop" onClick={onClose} style={{ zIndex: 110 }}>
-      <div
-        className="m3-dialog"
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          maxWidth: '720px',
-          maxHeight: '88vh',
-          width: '95%',
-          padding: '10px 14px',
-          backgroundColor: 'var(--md-sys-color-surface)',
-          borderRadius: 'var(--md-shape-lg)',
-          boxShadow: 'var(--md-elevation-4)',
-          position: 'relative',
-          overflowY: 'auto'
-        }}
-      >
-        {/* Modal Top Actions */}
+  const modalContent = (
+    <div
+      className={isScreen ? "scanner-screen-card" : "m3-dialog"}
+      onClick={isScreen ? undefined : (e) => e.stopPropagation()}
+      style={isScreen ? {
+        width: '100%',
+        maxWidth: '1280px',
+        margin: '0 auto',
+        padding: '24px',
+        backgroundColor: 'var(--md-sys-color-surface)',
+        borderRadius: 'var(--md-shape-xl)',
+        boxShadow: 'var(--md-elevation-1)',
+        border: '1px solid var(--md-sys-color-outline-variant)',
+        position: 'relative',
+        boxSizing: 'border-box'
+      } : {
+        maxWidth: '720px',
+        maxHeight: '88vh',
+        width: '95%',
+        padding: '10px 14px',
+        backgroundColor: 'var(--md-sys-color-surface)',
+        borderRadius: 'var(--md-shape-lg)',
+        boxShadow: 'var(--md-elevation-4)',
+        position: 'relative',
+        overflowY: 'auto'
+      }}
+    >
+      {/* Screen Header when rendered as full page */}
+      {isScreen && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: '20px',
+            paddingBottom: '16px',
+            borderBottom: '1px solid var(--md-sys-color-outline-variant)',
+            flexWrap: 'wrap',
+            gap: '12px'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+            <div
+              style={{
+                width: '46px',
+                height: '46px',
+                borderRadius: 'var(--md-shape-md)',
+                background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#ffffff',
+                boxShadow: '0 4px 12px rgba(79, 70, 229, 0.3)'
+              }}
+            >
+              <Scan size={24} />
+            </div>
+            <div>
+              <h1
+                style={{
+                  margin: 0,
+                  fontSize: '1.4rem',
+                  fontWeight: 800,
+                  color: 'var(--md-sys-color-on-surface)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px'
+                }}
+              >
+                محطة مسح الباركود السريع
+                <span
+                  style={{
+                    fontSize: '0.72rem',
+                    fontWeight: 800,
+                    padding: '3px 9px',
+                    borderRadius: 'var(--md-shape-full)',
+                    backgroundColor: '#ecfdf5',
+                    color: '#047857',
+                    border: '1px solid #a7f3d0'
+                  }}
+                >
+                  ● المحطة جاهزة للمسح
+                </span>
+              </h1>
+              <p
+                style={{
+                  margin: '4px 0 0',
+                  fontSize: '0.85rem',
+                  color: 'var(--md-sys-color-on-surface-variant)'
+                }}
+              >
+                مسح بطاقات التلاميذ وتسجيل الحضور التلقائي، تسوية المستحقات المالية وطباعة الوصولات
+              </p>
+            </div>
+          </div>
+          <Link
+            href="/"
+            className="m3-btn m3-btn-outlined m3-btn-sm"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontWeight: 700 }}
+          >
+            <span>← العودة للوحة التحكم</span>
+          </Link>
+        </div>
+      )}
+
+      {/* Modal / Station Top Actions */}
         <div
           style={{
             display: 'flex',
@@ -1023,13 +1113,16 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
               <span>طابور الطباعة ({printQueue.length})</span>
             </button>
 
-            <button
-              onClick={onClose}
-              className="m3-btn-text"
-              style={{ borderRadius: '50%', width: '26px', height: '26px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-            >
-              <X size={16} />
-            </button>
+            {!isScreen && onClose && (
+              <button
+                onClick={onClose}
+                className="m3-btn-text"
+                style={{ borderRadius: '50%', width: '26px', height: '26px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                title="إغلاق النافذة"
+              >
+                <X size={16} />
+              </button>
+            )}
           </div>
         </div>
 
@@ -2274,6 +2367,19 @@ export default function BarcodeScannerModal({ initialGroupId, onClose }: Props) 
           </div>
         )}
       </div>
+  );
+
+  if (isScreen) {
+    return (
+      <div className="scanner-screen-page" style={{ width: '100%', paddingBottom: '32px' }}>
+        {modalContent}
+      </div>
+    );
+  }
+
+  return (
+    <div className="m3-dialog-backdrop" onClick={onClose} style={{ zIndex: 110 }}>
+      {modalContent}
     </div>
   );
 }

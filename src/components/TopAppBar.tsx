@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import { useApp } from '../context/AppContext';
 import { Sun, Moon, Download, GraduationCap, School, CloudCheck, CloudOff, RefreshCw, Scan } from 'lucide-react';
-import BarcodeScannerModal from './BarcodeScannerModal';
 
 export default function TopAppBar() {
   const {
@@ -18,8 +18,6 @@ export default function TopAppBar() {
     lastSyncedAt,
     syncNow
   } = useApp();
-
-  const [isScannerOpen, setIsScannerOpen] = useState(false);
 
   const [isManualSyncing, setIsManualSyncing] = useState(false);
 
@@ -155,11 +153,11 @@ export default function TopAppBar() {
           )}
         </button>
 
-        {/* Fast Barcode / Card Scanner Button */}
-        <button
-          onClick={() => setIsScannerOpen(true)}
+        {/* Fast Barcode / Card Scanner Screen Link */}
+        <Link
+          href="/scanner"
           className="m3-btn m3-btn-sm"
-          title={lang === 'ar' ? 'قارئ الباركود ومسح البطاقات السريع' : 'Fast Barcode / Card Scanner'}
+          title={lang === 'ar' ? 'الانتقال إلى محطة مسح الباركود' : 'Go to Barcode Scanner Station'}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -171,12 +169,13 @@ export default function TopAppBar() {
             border: 'none',
             cursor: 'pointer',
             padding: '6px 12px',
-            borderRadius: 'var(--md-shape-full)'
+            borderRadius: 'var(--md-shape-full)',
+            textDecoration: 'none'
           }}
         >
           <Scan size={15} />
           <span>{lang === 'ar' ? 'قارئ الباركود ⚡' : 'Scan ⚡'}</span>
-        </button>
+        </Link>
 
         {/* Quick Export Backup */}
         <button
@@ -209,14 +208,6 @@ export default function TopAppBar() {
           {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
         </button>
       </div>
-
-      {/* Barcode Scanner Modal */}
-      {isScannerOpen && (
-        <BarcodeScannerModal
-          initialGroupId={selectedGroup}
-          onClose={() => setIsScannerOpen(false)}
-        />
-      )}
     </header>
   );
 }

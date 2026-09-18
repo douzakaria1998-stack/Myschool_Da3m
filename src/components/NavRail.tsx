@@ -7,6 +7,7 @@ import { useApp } from '../context/AppContext';
 import {
   LayoutDashboard,
   CalendarCheck,
+  Scan,
   Users,
   GraduationCap,
   CreditCard,
@@ -31,6 +32,12 @@ export default function NavRail() {
       icon: CalendarCheck,
       labelAr: 'كشف الحضور والمالية',
       labelEn: 'Attendance & Finance'
+    },
+    {
+      href: '/scanner',
+      icon: Scan,
+      labelAr: 'محطة مسح الباركود',
+      labelEn: 'Scanner Station'
     },
     {
       href: '/groups',
