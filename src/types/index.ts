@@ -1,4 +1,4 @@
-export type AttendanceStatus = 'P' | 'A' | 'M' | 'S' | '';
+export type AttendanceStatus = 'P' | 'A' | 'M' | 'S' | 'C' | 'ح' | 'غ' | 'م' | '';
 
 export type DiscountType = '1' | '0.8' | '0' | 'تعويض' | string;
 

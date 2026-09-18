@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
-import { StudentRecord, GroupSheet, QueuedReceipt, DiscountType } from '../types';
+import { StudentRecord, GroupSheet, QueuedReceipt, DiscountType, AttendanceStatus } from '../types';
 import {
   Scan,
   X,
@@ -34,7 +34,9 @@ import {
   DollarSign,
   Check,
   RotateCcw,
-  CheckCircle
+  CheckCircle,
+  Bell,
+  CheckCheck
 } from 'lucide-react';
 import { playSuccessChime, playWarningAlert } from '../utils/soundUtils';
 import { printSingleThermalReceipt, printBatchThermalReceipts, ThermalReceiptData } from '../utils/printUtils';
@@ -80,10 +82,10 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     detectCurrentActiveGroupAndSession(data.groupData, data.groups, new Date())
   );
 
-  // Fast continuous scan mode: automatically marks attendance and warns of debt without blocking the scanner
+  // Fast continuous scan mode
   const [fastScanMode, setFastScanMode] = useState<boolean>(false);
 
-  // Active Groups configuration (ONLY shows groups scheduled at the current time: 1h before to 1h after start time)
+  // Active Groups configuration
   const [activeGroups, setActiveGroups] = useState<{ groupId: string; sessionIndex: number }[]>(() => {
     const initialDetect = detectCurrentActiveGroupAndSession(data.groupData, data.groups, new Date());
     if (initialDetect.matchingGroups.length > 0) {
@@ -104,15 +106,40 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
   const [newCoverGroupId, setNewCoverGroupId] = useState<string>('');
   const [newCoverGroupSessionIdx, setNewCoverGroupSessionIdx] = useState<number>(0);
 
-  // Recent scans live history list
+  // Recent scans live history list (on the Right side)
   const [recentScans, setRecentScans] = useState<
     Array<{
       id: string;
       studentName: string;
       groupId: string;
       sessionIndex: number;
-      status: 'P' | 'M' | 'DEBT';
+      status: 'P' | 'M' | 'DEBT' | 'COVER_REQ';
       debt?: number;
+      time: string;
+    }>
+  >([]);
+
+  // =========================================================================
+  // LIVE ACTION / NOTIFICATION QUEUE (ON THE LEFT SIDE)
+  // All scanner notifications (covering requests, unpaid students) appear here!
+  // =========================================================================
+  const [pendingCoverRequest, setPendingCoverRequest] = useState<{
+    id: string;
+    student: StudentRecord;
+    homeGroupId: string;
+    studentEnrolledGroups: string[];
+    targetActiveGroupId: string;
+    sessionIdx: number;
+    time: string;
+  } | null>(null);
+
+  const [pendingDebtors, setPendingDebtors] = useState<
+    Array<{
+      id: string;
+      student: StudentRecord;
+      groupId: string;
+      sessionIdx: number;
+      debt: number;
       time: string;
     }>
   >([]);
@@ -153,7 +180,6 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     setActiveGroups((prev) =>
       prev.map((item, i) => (i === index ? { groupId: newGroupId, sessionIndex: sIdx } : item))
     );
-    resetForNextStudent();
   };
 
   const handleUpdateActiveSession = (index: number, newSessionIdx: number) => {
@@ -183,16 +209,15 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       setCurrentDetection(res);
       if (autoDetectSchedule) {
         if (res.matchingGroups.length > 0) {
-          const detectedConfigs = res.matchingGroups.map((m) => ({
+          const detected = res.matchingGroups.map((m) => ({
             groupId: m.group.groupId,
             sessionIndex: m.sessionIndex
           }));
           setActiveGroups((prev) => {
-            // Keep covering groups untouched when auto-updating
             const currentCoverings = prev.filter((g) => coveringGroupIds.includes(g.groupId));
-            const combined = [...detectedConfigs];
+            const combined = [...detected];
             currentCoverings.forEach((cg) => {
-              if (!combined.some((g) => g.groupId === cg.groupId)) {
+              if (!currentActiveGroupsHas(combined, cg.groupId)) {
                 combined.push(cg);
               }
             });
@@ -208,6 +233,9 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
         }
       }
     };
+
+    const currentActiveGroupsHas = (arr: { groupId: string }[], gid: string) => arr.some((g) => g.groupId === gid);
+
     checkSchedule();
     const timer = setInterval(checkSchedule, 20000);
     return () => clearInterval(timer);
@@ -218,24 +246,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
   const scannerInputRef = useRef<HTMLInputElement>(null);
   const scanTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Scanned Student resolution
-  const [scannedResult, setScannedResult] = useState<{
-    student: StudentRecord;
-    homeGroupId: string;
-    isInActiveGroup: boolean;
-    studentEnrolledGroups: string[];
-  } | null>(null);
-
-  // Scan session execution context
-  const [currentScanContext, setCurrentScanContext] = useState<{
-    groupId: string;
-    sessionIdx: number;
-    isCover: boolean;
-    originalGid?: string;
-    student: StudentRecord;
-  } | null>(null);
-
-  // Multi-Match Candidate state
+  // Multi-Match Candidate state (when student enrolled in 2 concurrent active groups)
   const [multiActiveCandidate, setMultiActiveCandidate] = useState<{
     student: StudentRecord;
     matchingActiveGroups: { groupId: string; sessionIndex: number }[];
@@ -247,22 +258,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     };
   } | null>(null);
 
-  // Workflow Dialog States
-  const [showCoverDialog, setShowCoverDialog] = useState(false);
-  const [selectedOriginalGroup, setSelectedOriginalGroup] = useState('');
-  const [coverTargetActiveGroupId, setCoverTargetActiveGroupId] = useState<string>('');
-
-  const [showUnpaidDialog, setShowUnpaidDialog] = useState(false);
-  const [willPayNow, setWillPayNow] = useState<boolean | null>(null);
-  const [payAmount, setPayAmount] = useState<string>('');
-  const [unpaidInfo, setUnpaidInfo] = useState<{
-    effectiveDebt: number;
-    expectedCycleFee: number;
-    perSessionPrice: number;
-    totalPaid: number;
-    isNewUnpaid: boolean;
-  } | null>(null);
-
+  // Flash Success / Warning Notification Banner (top of right scanner box)
   const [flashSuccess, setFlashSuccess] = useState<{
     name: string;
     statusText: string;
@@ -270,6 +266,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     isWarning?: boolean;
   } | null>(null);
 
+  // End Session Confirmation Modal
   const [showEndSessionConfirm, setShowEndSessionConfirm] = useState(false);
   const [endSessionTarget, setEndSessionTarget] = useState<{ groupId: string; sessionIndex: number } | 'ALL' | null>(null);
   const [endSessionStats, setEndSessionStats] = useState<{
@@ -279,14 +276,16 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     groupLabel?: string;
   } | null>(null);
 
+  // Print Queue Modal view
   const [showQueueModal, setShowQueueModal] = useState(false);
 
   // ==========================================
-  // LEFT OPERATIONS PANEL STATE (العمليات السريعة)
+  // LEFT OPERATIONS PANEL STATE
+  // Tabs: 'queue' (Live Queue) | 'add' (Add student) | 'pay' (Paid student) | 'change' (Change student) | 'cover' (Covering)
   // ==========================================
-  const [leftTab, setLeftTab] = useState<'add' | 'pay' | 'change' | 'cover'>('add');
+  const [leftTab, setLeftTab] = useState<'queue' | 'add' | 'pay' | 'change' | 'cover'>('queue');
 
-  // Tab 1: Add Student State
+  // Tab: Add Student State
   const [addGid, setAddGid] = useState<string>(() => activeGroupId || data.groups[0]?.id || '');
   const [addName, setAddName] = useState<string>('');
   const [addPhone, setAddPhone] = useState<string>('');
@@ -294,19 +293,19 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
   const [addInitialPay, setAddInitialPay] = useState<string>('');
   const [addSuccess, setAddSuccess] = useState<{ name: string; barcode: string; group: string; rowId: number } | null>(null);
 
-  // Tab 2: Pay Student State
+  // Tab: Pay Student State
   const [paySearchQuery, setPaySearchQuery] = useState<string>('');
   const [paySelectedStudent, setPaySelectedStudent] = useState<{ student: StudentRecord; groupId: string } | null>(null);
   const [payCustomAmount, setPayCustomAmount] = useState<string>('');
   const [paySuccessMsg, setPaySuccessMsg] = useState<string | null>(null);
 
-  // Tab 3: Change Student Group State
+  // Tab: Change Student Group State
   const [changeSearchQuery, setChangeSearchQuery] = useState<string>('');
   const [changeSelectedStudent, setChangeSelectedStudent] = useState<{ student: StudentRecord; fromGroupId: string } | null>(null);
   const [changeTargetGroupId, setChangeTargetGroupId] = useState<string>('');
   const [changeSuccessMsg, setChangeSuccessMsg] = useState<string | null>(null);
 
-  // Tab 4: Covering Attendance Registration State
+  // Tab: Covering Student Attendance State
   const [coverSearchQuery, setCoverSearchQuery] = useState<string>('');
   const [coverSelectedStudent, setCoverSelectedStudent] = useState<{ student: StudentRecord; originalGroupId: string } | null>(null);
   const [coverTargetGid, setCoverTargetGid] = useState<string>(() => activeGroupId || data.groups[0]?.id || '');
@@ -333,8 +332,6 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
 
       if (
         !isUserTypingElsewhere &&
-        !showCoverDialog &&
-        !showUnpaidDialog &&
         !showEndSessionConfirm &&
         !showQueueModal &&
         !showAddCoverGroupModal &&
@@ -345,14 +342,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       }
     }, 500);
     return () => clearInterval(timer);
-  }, [
-    showCoverDialog,
-    showUnpaidDialog,
-    showEndSessionConfirm,
-    showQueueModal,
-    showAddCoverGroupModal,
-    multiActiveCandidate
-  ]);
+  }, [showEndSessionConfirm, showQueueModal, showAddCoverGroupModal, multiActiveCandidate]);
 
   // Clean up scan timer on unmount
   useEffect(() => {
@@ -363,36 +353,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     };
   }, []);
 
-  // Reset scanner state for the next student
-  const resetForNextStudent = () => {
-    if (scanTimeoutRef.current) {
-      clearTimeout(scanTimeoutRef.current);
-      scanTimeoutRef.current = null;
-    }
-    setBarcodeInput('');
-    setScannedResult(null);
-    setCurrentScanContext(null);
-    setMultiActiveCandidate(null);
-    setShowCoverDialog(false);
-    setSelectedOriginalGroup('');
-    setCoverTargetActiveGroupId('');
-    setShowUnpaidDialog(false);
-    setWillPayNow(null);
-    setPayAmount('');
-    setUnpaidInfo(null);
-    setTimeout(() => {
-      const activeEl = document.activeElement;
-      const isUserTypingElsewhere =
-        activeEl &&
-        (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT') &&
-        activeEl !== scannerInputRef.current;
-      if (!isUserTypingElsewhere) {
-        scannerInputRef.current?.focus();
-      }
-    }, 50);
-  };
-
-  // Find student across all groups by barcode, phone, ID or name using decoded candidate permutations
+  // Find student across all groups by barcode, phone, ID or name
   const findStudentByCode = (code: string, targetGroupId: string = activeGroupId) => {
     if (!code) return null;
     const cleanRaw = code.trim();
@@ -508,7 +469,6 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      // Don't intercept in full modal dialogs
       if (showEndSessionConfirm || showQueueModal || showAddCoverGroupModal) {
         return;
       }
@@ -536,12 +496,12 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
           return;
         }
 
-        // Hardware scanner typed while admin was focused elsewhere!
+        // Hardware scanner typed while admin was focused elsewhere in the operations panel!
         if (looksLikeBarcode && burstChars.length >= 1) {
           e.preventDefault();
           e.stopPropagation();
 
-          // Revert the input field value that was polluted by the scanner burst
+          // Clean the target input field value that got polluted by the scanner burst
           if (burstTargetElRef.current && burstTargetElRef.current !== scannerInputRef.current) {
             burstTargetElRef.current.value = preBurstValueRef.current;
             burstTargetElRef.current.dispatchEvent(new Event('input', { bubbles: true }));
@@ -552,7 +512,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
           return;
         }
 
-        // Normal human hit Enter on an input in the operations panel: let the form submit normally!
+        // Normal human hit Enter on an input in the operations panel
         recentBurstRef.current = [];
         return;
       }
@@ -601,13 +561,6 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     const rawCode = (directCode !== undefined ? directCode : barcodeInput).trim();
     if (!rawCode) return;
 
-    if (showUnpaidDialog) {
-      setShowUnpaidDialog(false);
-      setWillPayNow(null);
-      setPayAmount('');
-      setUnpaidInfo(null);
-    }
-
     let currentActiveGroups = activeGroups;
 
     if (autoDetectSchedule) {
@@ -617,7 +570,6 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
           groupId: m.group.groupId,
           sessionIndex: m.sessionIndex
         }));
-        // Preserve covering groups
         const coverings = currentActiveGroups.filter((g) => coveringGroupIds.includes(g.groupId));
         currentActiveGroups = [...detected];
         coverings.forEach((cg) => {
@@ -634,7 +586,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       setFlashSuccess({
         name: 'لا يوجد أي فوج نشط الآن',
         statusText: 'يرجى تفعيل فوج دراسي أو إضافة فوج تعويض',
-        details: 'يمكنك الضغط على زر "+ إضافة فوج نشط" أو "+ إضافة فوج تعويض لهذا اليوم"',
+        details: 'يمكنك الضغط على زر "+ إضافة فوج نشط" أو "+ إضافة فوج تعويض لهذا اليوم 🔄"',
         isWarning: true
       });
       setBarcodeInput('');
@@ -647,31 +599,72 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     if (!result) {
       playWarningAlert();
       setFlashSuccess({
-        name: `رمز غير معروف: "${rawCode}"`,
+        name: `رمز غير مسجل: "${rawCode}"`,
         statusText: 'لم يتم العثور على التلميذ في أي فوج',
-        details: 'يمكنك إضافة التلميذ مباشرة من لوحة العمليات السريعة على اليسار 👈',
+        details: 'يمكنك إضافة تلميذ جديد مباشرة من تبويب "➕ إضافة تلميذ" على اليسار 👈',
         isWarning: true
       });
       setBarcodeInput('');
       return;
     }
 
-    // 1. Identify which of the currently active groups this student belongs to
+    // 1. Check which of the currently active groups this student belongs to
     const matchingActive = currentActiveGroups.filter((ag) =>
       result.studentEnrolledGroups.includes(ag.groupId)
     );
 
+    // =========================================================================
+    // CASE A: Student NOT in any active group (COVERING / TRANSFER REQUEST)
+    // As requested: The notification goes to the LEFT SIDE, NOT the bottom of the right side!
+    // =========================================================================
     if (matchingActive.length === 0) {
-      // Student is not enrolled in any currently active or covering group -> trigger covering flow
-      setScannedResult(result);
-      setCoverTargetActiveGroupId(currentActiveGroups[0]?.groupId || primaryGid);
-      setSelectedOriginalGroup(result.studentEnrolledGroups[0] || result.homeGroupId);
-      setShowCoverDialog(true);
+      const nowStr = new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' });
+      const targetGid = currentActiveGroups[0]?.groupId || primaryGid;
+      const targetSession = currentActiveGroups[0]?.sessionIndex ?? activeSessionIdx;
+
+      setPendingCoverRequest({
+        id: `${Date.now()}-${Math.random()}`,
+        student: result.student,
+        homeGroupId: result.studentEnrolledGroups[0] || result.homeGroupId,
+        studentEnrolledGroups: result.studentEnrolledGroups,
+        targetActiveGroupId: targetGid,
+        sessionIdx: targetSession,
+        time: nowStr
+      });
+
+      // Switch left tab to live queue so admin sees it instantly!
+      setLeftTab('queue');
+      playWarningAlert();
+
+      // Short flash notice on right
+      setFlashSuccess({
+        name: result.student.name,
+        statusText: `تلميذ من فوج آخر (${result.studentEnrolledGroups[0] || result.homeGroupId})`,
+        details: `تم توجيه خيارات التعويض والتحويل إلى اللوحة اليسرى 👈`,
+        isWarning: true
+      });
+
+      // Add to recent scans log on right
+      setRecentScans((prev) => [
+        {
+          id: `${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+          studentName: result.student.name,
+          groupId: targetGid,
+          sessionIndex: targetSession,
+          status: 'COVER_REQ',
+          time: nowStr
+        },
+        ...prev.slice(0, 9)
+      ]);
+
+      setBarcodeInput('');
       return;
     }
 
+    // =========================================================================
+    // CASE B: Exactly 1 match among active groups -> INSTANT AUTOMATIC ROUTE!
+    // =========================================================================
     if (matchingActive.length === 1) {
-      // Exactly 1 match among active groups -> INSTANT AUTOMATIC ROUTE!
       const targetAg = matchingActive[0];
       const targetGroup = data.groupData[targetAg.groupId];
       const targetStudent =
@@ -682,18 +675,14 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
               normalizeArabicName(s.name) === normalizeArabicName(result.student.name))
         ) || result.student;
 
-      const resolvedResult = {
-        ...result,
-        student: targetStudent,
-        homeGroupId: targetAg.groupId,
-        isInActiveGroup: true
-      };
-      setScannedResult(resolvedResult);
       proceedToPaymentCheck(targetStudent, targetAg.groupId, targetAg.sessionIndex, false);
+      setBarcodeInput('');
       return;
     }
 
-    // matchingActive.length > 1:
+    // =========================================================================
+    // CASE C: Student enrolled in 2+ concurrent active groups
+    // =========================================================================
     const unattendedMatches = matchingActive.filter((ag) => {
       const g = data.groupData[ag.groupId];
       const s = g?.students?.find(
@@ -716,20 +705,15 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
               normalizeArabicName(s.name) === normalizeArabicName(result.student.name))
         ) || result.student;
 
-      const resolvedResult = {
-        ...result,
-        student: targetStudent,
-        homeGroupId: targetAg.groupId,
-        isInActiveGroup: true
-      };
-      setScannedResult(resolvedResult);
       proceedToPaymentCheck(targetStudent, targetAg.groupId, targetAg.sessionIndex, false);
+      setBarcodeInput('');
     } else {
       setMultiActiveCandidate({
         student: result.student,
         matchingActiveGroups: matchingActive,
         result
       });
+      setBarcodeInput('');
     }
   };
 
@@ -741,14 +725,6 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     isCover: boolean = false,
     originalGid?: string
   ) => {
-    setCurrentScanContext({
-      groupId,
-      sessionIdx,
-      isCover,
-      originalGid,
-      student
-    });
-
     const isAlreadyPresent = student.attendance?.[sessionIdx] === 'P';
 
     const targetGroup = data.groupData[groupId] || activeGroup;
@@ -814,15 +790,16 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       isPaid = false;
     }
 
-    // CRITICAL: Always record attendance immediately upon scan!
+    // CRITICAL: Always record attendance immediately upon scan so student walks into class!
     if (isCover && originalGid) {
       recordCoverAttendance(groupId, originalGid, student.rowId, sessionIdx);
     } else {
       updateAttendance(groupId, student.rowId, sessionIdx, 'P');
     }
 
-    // Add to Live Recent Scans History
     const nowTimeStr = new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    // Add to Live Recent Scans History on the Right
     setRecentScans((prev) => [
       {
         id: `${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
@@ -837,153 +814,57 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     ]);
 
     if (isPaid) {
+      // Paid student: Instant chime & quick confirmation
       playSuccessChime();
       setFlashSuccess({
         name: student.name,
         statusText: isAlreadyPresent
-          ? 'التلميذ مسجل حاضر بالفعل ✓'
+          ? 'مسجل حاضر بالفعل ✓'
           : isCover
           ? 'حاضر (حصة تعويض) ✓'
           : 'حاضر (مسدد بالكامل) ✓',
         details: `فوج ${groupId} • الحصة ${sessionIdx + 1}`
       });
 
-      setTimeout(() => {
-        setFlashSuccess(null);
-        resetForNextStudent();
-      }, 1500);
+      setTimeout(() => setFlashSuccess(null), 1600);
     } else {
+      // Unpaid student:
+      // 1. Marked present immediately!
+      // 2. Warning chime plays.
+      // 3. PUSHED TO THE UNPAID WAITING QUEUE ON THE LEFT SIDE!
+      // 4. Scanner on the right NEVER BLOCKS other students!
       playWarningAlert();
 
-      if (fastScanMode) {
-        setFlashSuccess({
-          name: student.name,
-          statusText: `حاضر ⚠️ (مدين: ${effectiveDebt.toLocaleString()} دج)`,
-          details: `فوج ${groupId} • الحصة ${sessionIdx + 1}`,
-          isWarning: true
-        });
-
-        setTimeout(() => {
-          setFlashSuccess(null);
-          resetForNextStudent();
-        }, 1600);
-      } else {
-        setUnpaidInfo({
-          effectiveDebt,
-          expectedCycleFee,
-          perSessionPrice,
-          totalPaid,
-          isNewUnpaid: totalPaid === 0
-        });
-        setShowUnpaidDialog(true);
-        setPayAmount(String(effectiveDebt > 0 ? effectiveDebt : perSessionPrice));
-      }
-    }
-  };
-
-  const handleUnpaidNoPayment = (allowEntryAsDebtor: boolean = true) => {
-    if (!scannedResult || !currentScanContext) return;
-    const { groupId, student } = currentScanContext;
-
-    const debtToShow = unpaidInfo?.effectiveDebt || student.debt || 0;
-    setFlashSuccess({
-      name: student.name,
-      statusText: 'تم تأكيد الحضور كمدين ⚠️',
-      details: `فوج ${groupId} • المتبقي في الذمة: ${debtToShow.toLocaleString()} دج`,
-      isWarning: true
-    });
-
-    setTimeout(() => {
-      setFlashSuccess(null);
-      resetForNextStudent();
-    }, 1300);
-  };
-
-  const handleProcessPayment = (printImmediately: boolean) => {
-    if (!scannedResult || !currentScanContext) return;
-    const { groupId, sessionIdx, isCover, originalGid, student } = currentScanContext;
-
-    const amountNum = Number(payAmount) || 0;
-    const targetGroup = data.groupData[groupId];
-
-    if (isCover && originalGid) {
-      recordCoverAttendance(groupId, originalGid, student.rowId, sessionIdx, amountNum);
-    } else {
-      recordAttendanceAndPayment(groupId, student.rowId, sessionIdx, isCover ? 'M' : 'P', amountNum);
-    }
-
-    playSuccessChime();
-
-    const receiptNo = `${groupId}-${student.rowId.toString().padStart(3, '0')}`;
-    const now = new Date();
-    const dateStr = now.toLocaleDateString('ar-DZ');
-    const timeStr = now.toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' });
-
-    const totalFee = unpaidInfo?.expectedCycleFee || student.fee || (targetGroup?.type?.includes('10000') ? 10000 : 2500);
-    const totalPaid = (student.totalReceived || 0) + amountNum;
-    const balance = totalPaid - totalFee;
-
-    const receiptData: ThermalReceiptData = {
-      receiptNo,
-      centerName: data.centerName,
-      cycle: data.cycle,
-      academicYear: data.academicYear,
-      date: dateStr,
-      time: timeStr,
-      studentName: student.name,
-      studentPhone: student.phone,
-      groupId: groupId,
-      subject: targetGroup?.subject || '',
-      teacherName: targetGroup?.teacherName || '',
-      amount: amountNum,
-      totalFee,
-      totalPaid,
-      balance,
-      isCover,
-      originalGroup: originalGid
-    };
-
-    if (printImmediately) {
-      printSingleThermalReceipt(receiptData);
-    } else {
-      addToPrintQueue({
-        id: `queue-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-        receiptNo,
-        groupId: groupId,
-        subject: targetGroup?.subject || '',
-        teacherName: targetGroup?.teacherName || '',
-        studentRowId: student.rowId,
-        studentName: student.name,
-        studentPhone: student.phone,
-        amount: amountNum,
-        totalFee,
-        totalPaid,
-        balance,
-        date: dateStr,
-        time: timeStr,
-        sessionIndex: sessionIdx,
-        isCover,
-        originalGroup: originalGid
+      setPendingDebtors((prev) => {
+        // Add to queue (from oldest to newest) without duplicates
+        const filtered = prev.filter((d) => d.student.name.trim() !== student.name.trim() || d.groupId !== groupId);
+        return [
+          ...filtered,
+          {
+            id: `${Date.now()}-${Math.random()}`,
+            student,
+            groupId,
+            sessionIdx,
+            debt: effectiveDebt,
+            time: nowTimeStr
+          }
+        ];
       });
+
+      setLeftTab('queue');
+
+      setFlashSuccess({
+        name: student.name,
+        statusText: `حاضر ⚠️ (مدين: ${effectiveDebt.toLocaleString()} دج)`,
+        details: `أُضيف لقائمة انتظار غير المسددين على اليسار 👈`,
+        isWarning: true
+      });
+
+      setTimeout(() => setFlashSuccess(null), 1800);
     }
-
-    // Update status in recent scans to present / paid
-    setRecentScans((prev) =>
-      prev.map((s) => (s.studentName === student.name && s.groupId === groupId ? { ...s, status: 'P', debt: 0 } : s))
-    );
-
-    setFlashSuccess({
-      name: student.name,
-      statusText: printImmediately ? 'تم الدفع وطباعة الوصل فوراً ✓' : 'تم الدفع وتأجيل الطباعة للطابور ✓',
-      details: `فوج ${groupId} • تم استلام: ${amountNum.toLocaleString()} دج`
-    });
-
-    setTimeout(() => {
-      setFlashSuccess(null);
-      resetForNextStudent();
-    }, 1300);
   };
 
+  // Automated Absence Tracking: End Session
   const handleConfirmEndSession = () => {
     if (endSessionTarget === 'ALL') {
       let totalPresent = 0;
@@ -1022,7 +903,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     real.forEach((s) => {
       const val = s.attendance?.[sIdx];
       const st = typeof val === 'string' ? val.trim().toUpperCase() : '';
-      if (st === 'P' || st === 'ح') present++;
+      if (st === 'P' || st === 'ح' || st === 'C') present++;
       else if (st === 'M' || st === 'م') makeup++;
       else if (st === 'A' || st === 'غ') absent++;
       else unmarked++;
@@ -1081,10 +962,155 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
   );
 
   // ==========================================
-  // HANDLERS FOR OPERATIONS PANEL
+  // HANDLERS FOR LIVE ACTION QUEUE (LEFT PANEL)
   // ==========================================
 
-  // Tab 1: Add Student
+  // Choice 1: Temporary Covering (stays in original group, credited with 'C')
+  const handleAcceptTemporaryCover = () => {
+    if (!pendingCoverRequest) return;
+    const { student, homeGroupId, targetActiveGroupId, sessionIdx } = pendingCoverRequest;
+
+    recordCoverAttendance(targetActiveGroupId, homeGroupId, student.rowId, sessionIdx);
+    playSuccessChime();
+
+    // Update status in recent scans
+    setRecentScans((prev) =>
+      prev.map((s) =>
+        s.studentName === student.name && s.groupId === targetActiveGroupId
+          ? { ...s, status: 'M' }
+          : s
+      )
+    );
+
+    setFlashSuccess({
+      name: student.name,
+      statusText: `تم تسجيل حضور التعويض في فوجه الأصلي (${homeGroupId}) ✓`,
+      details: `يحضر الآن كتعويض في فوج ${targetActiveGroupId} (الحصة ${sessionIdx + 1})`
+    });
+
+    setPendingCoverRequest(null);
+    setTimeout(() => setFlashSuccess(null), 2500);
+  };
+
+  // Choice 2: Permanent Transfer (transfers student to active group permanently)
+  const handleAcceptPermanentTransfer = () => {
+    if (!pendingCoverRequest) return;
+    const { student, homeGroupId, targetActiveGroupId, sessionIdx } = pendingCoverRequest;
+
+    const ok = transferStudent(homeGroupId, targetActiveGroupId, student.rowId);
+    if (ok) {
+      // Mark as present 'P' in new group
+      updateAttendance(targetActiveGroupId, student.rowId, sessionIdx, 'P');
+      playSuccessChime();
+
+      setRecentScans((prev) =>
+        prev.map((s) =>
+          s.studentName === student.name && s.groupId === targetActiveGroupId
+            ? { ...s, status: 'P' }
+            : s
+        )
+      );
+
+      setFlashSuccess({
+        name: student.name,
+        statusText: `تم تحويل التلميذ نهائياً إلى فوج ${targetActiveGroupId} ✓`,
+        details: `تم نقله من ${homeGroupId} وتسجيله حاضراً في الحصة ${sessionIdx + 1}`
+      });
+
+      setPendingCoverRequest(null);
+      setTimeout(() => setFlashSuccess(null), 2500);
+    } else {
+      alert('تعذر إتمام عملية النقل');
+    }
+  };
+
+  // Debtor Quick Action: Settle Payment
+  const handleSettleDebtorInQueue = (debtorItem: typeof pendingDebtors[0], amount?: number, printNow: boolean = true) => {
+    const { student, groupId, sessionIdx, debt } = debtorItem;
+    const amountNum = amount !== undefined ? amount : debt;
+    if (amountNum <= 0) return;
+
+    recordAttendanceAndPayment(groupId, student.rowId, sessionIdx, 'P', amountNum);
+    playSuccessChime();
+
+    const receiptNo = `${groupId}-${student.rowId.toString().padStart(3, '0')}`;
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('ar-DZ');
+    const timeStr = now.toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' });
+    const targetGroup = data.groupData[groupId];
+    const totalFee = student.fee || 2500;
+    const totalPaid = (student.totalReceived || 0) + amountNum;
+    const balance = totalPaid - totalFee;
+
+    const receiptData: ThermalReceiptData = {
+      receiptNo,
+      centerName: data.centerName,
+      cycle: data.cycle,
+      academicYear: data.academicYear,
+      date: dateStr,
+      time: timeStr,
+      studentName: student.name,
+      studentPhone: student.phone,
+      groupId,
+      subject: targetGroup?.subject || '',
+      teacherName: targetGroup?.teacherName || '',
+      amount: amountNum,
+      totalFee,
+      totalPaid,
+      balance,
+      isCover: false
+    };
+
+    if (printNow) {
+      printSingleThermalReceipt(receiptData);
+    } else {
+      addToPrintQueue({
+        id: `queue-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        receiptNo,
+        groupId,
+        subject: targetGroup?.subject || '',
+        teacherName: targetGroup?.teacherName || '',
+        studentRowId: student.rowId,
+        studentName: student.name,
+        studentPhone: student.phone,
+        amount: amountNum,
+        totalFee,
+        totalPaid,
+        balance,
+        date: dateStr,
+        time: timeStr,
+        sessionIndex: sessionIdx,
+        isCover: false
+      });
+    }
+
+    // Remove from pending debtors
+    setPendingDebtors((prev) => prev.filter((d) => d.id !== debtorItem.id));
+
+    // Update status in recent scans
+    setRecentScans((prev) =>
+      prev.map((s) => (s.studentName === student.name && s.groupId === groupId ? { ...s, status: 'P', debt: 0 } : s))
+    );
+
+    setFlashSuccess({
+      name: student.name,
+      statusText: `تم تسديد ${amountNum.toLocaleString()} دج بنجاح ✓`,
+      details: printNow ? 'تمت طباعة الوصل الحراري' : 'أُضيف لطابور الطباعة'
+    });
+
+    setTimeout(() => setFlashSuccess(null), 2000);
+  };
+
+  // Debtor Quick Action: Confirm entry as debtor (dismiss from waiting queue)
+  const handleDismissDebtorFromQueue = (debtorId: string) => {
+    setPendingDebtors((prev) => prev.filter((d) => d.id !== debtorId));
+  };
+
+  // ==========================================
+  // HANDLERS FOR MANUAL TABS (ADD, PAY, TRANSFER, COVER)
+  // ==========================================
+
+  // Tab 2: Add Student
   const handleAddStudentSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!addName.trim()) {
@@ -1123,7 +1149,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     }
   };
 
-  // Tab 2: Pay Student
+  // Tab 3: Pay Student Search Submit
   const handlePayStudentSubmit = (printImmediately: boolean) => {
     if (!paySelectedStudent) return;
     const { student, groupId } = paySelectedStudent;
@@ -1133,11 +1159,9 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       return;
     }
 
-    // Record payment in group
     const targetGroup = data.groupData[groupId];
     const sessionCount = targetGroup?.sessionDates?.length || targetGroup?.sessionCount || 4;
     const currentPayments = Array.isArray(student.payments) ? [...student.payments] : Array(sessionCount).fill('');
-    // Put payment into current session or first open slot
     currentPayments[0] = (parseFloat(String(currentPayments[0] || 0)) || 0) + amountNum;
     updateStudentFullFinances(groupId, student.rowId, currentPayments, student.discount);
 
@@ -1200,7 +1224,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     setTimeout(() => setPaySuccessMsg(null), 4000);
   };
 
-  // Tab 3: Change Student Group
+  // Tab 4: Manual Change Student Group
   const handleTransferStudentSubmit = () => {
     if (!changeSelectedStudent) return;
     const { student, fromGroupId } = changeSelectedStudent;
@@ -1221,7 +1245,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     }
   };
 
-  // Tab 4: Covering Student Attendance
+  // Tab 5: Manual Covering Registration
   const handleCoverStudentSubmit = () => {
     if (!coverSelectedStudent) return;
     const { student, originalGroupId } = coverSelectedStudent;
@@ -1235,7 +1259,6 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     recordCoverAttendance(targetGid, originalGroupId, student.rowId, coverSessionIdx, payAmt);
     playSuccessChime();
 
-    // Add to recent scans
     setRecentScans((prev) => [
       {
         id: `${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
@@ -1243,13 +1266,13 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
         groupId: targetGid,
         sessionIndex: coverSessionIdx,
         status: 'M',
-        time: new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        time: new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' })
       },
       ...prev.slice(0, 9)
     ]);
 
     setCoverSuccessMsg(
-      `تم تسجيل حضور التعويض (M) للتلميذ "${student.name}" في فوج ${targetGid} (الحصة ${coverSessionIdx + 1}) بنجاح ✓`
+      `تم تسجيل حضور التعويض للتلميذ "${student.name}" في فوجه الأصلي ${originalGroupId} وفوج ${targetGid} بنجاح ✓`
     );
     setCoverSelectedStudent(null);
     setCoverSearchQuery('');
@@ -1257,8 +1280,12 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     setTimeout(() => setCoverSuccessMsg(null), 4000);
   };
 
+  // Total pending items in the Live Queue
+  const totalQueueCount = (pendingCoverRequest ? 1 : 0) + pendingDebtors.length;
+
   // ==========================================
   // RENDER: CODEBAR SECTION (اليمين)
+  // Continuous scanning, clean, unobstructed!
   // ==========================================
   const renderCodebarSection = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -1295,7 +1322,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
               display: 'inline-flex',
               alignItems: 'center',
               gap: '4px',
-              padding: '4px 9px',
+              padding: '4px 10px',
               borderRadius: '6px',
               boxShadow: '0 2px 6px rgba(245, 158, 11, 0.3)'
             }}
@@ -1414,7 +1441,6 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                     position: 'relative'
                   }}
                 >
-                  {/* Badge if covering group for today */}
                   {isCoveringToday && (
                     <div
                       style={{
@@ -1540,7 +1566,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
 
                     <div>
                       <span style={{ fontSize: '0.66rem', fontWeight: 700, color: 'var(--md-sys-color-on-surface-variant)', display: 'block' }}>
-                        الحصة المستهدفة:
+                        الحصة:
                       </span>
                       <select
                         value={ag.sessionIndex}
@@ -1641,7 +1667,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
               <span>لا يوجد أي فوج دراسي في هذا الوقت</span>
             </div>
             <p style={{ margin: '4px 0 8px', fontSize: '0.74rem', color: '#7c2d12' }}>
-              تظهر الأفواج تلقائياً قبل ساعة من موعد بدايتها، أو يمكنك إضافة فوج تعويض أو تفعيل فوج يدوياً.
+              تظهر الأفواج تلقائياً، أو يمكنك إضافة فوج تعويض لهذا اليوم أو تفعيل فوج يدوياً.
             </p>
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
               <button
@@ -1683,7 +1709,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
           <span style={{ fontSize: '0.94rem', fontWeight: 900 }}>{sessionStats.present}</span>
         </div>
         <div style={{ backgroundColor: '#fef3c7', color: '#b45309', padding: '4px 6px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
-          <span style={{ fontSize: '0.7rem', fontWeight: 700 }}>تعويض (M):</span>
+          <span style={{ fontSize: '0.7rem', fontWeight: 700 }}>تعويض (M/C):</span>
           <span style={{ fontSize: '0.94rem', fontWeight: 900 }}>{sessionStats.makeup}</span>
         </div>
         <div style={{ backgroundColor: '#fee2e2', color: '#b91c1c', padding: '4px 6px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
@@ -1737,7 +1763,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                 }}
               >
                 <Sparkles size={11} />
-                <span>مسح فوري متواصل: {fastScanMode ? 'مفعّل ⚡' : 'معطل'}</span>
+                <span>مسح متواصل: {fastScanMode ? 'مفعّل ⚡' : 'معطل'}</span>
               </button>
             </div>
 
@@ -1786,7 +1812,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
         </div>
       </form>
 
-      {/* Flash Success / Warning Banner */}
+      {/* Short Toast Banner on Right */}
       {flashSuccess && (
         <div
           style={{
@@ -1800,244 +1826,26 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
             {flashSuccess.isWarning ? (
-              <AlertTriangle size={20} color="#c2410c" />
+              <AlertTriangle size={18} color="#c2410c" />
             ) : (
-              <CheckCircle2 size={20} color="#15803d" />
+              <CheckCircle2 size={18} color="#15803d" />
             )}
-            <span style={{ fontWeight: 900, fontSize: '1rem', color: flashSuccess.isWarning ? '#c2410c' : '#15803d' }}>
+            <span style={{ fontWeight: 900, fontSize: '0.94rem', color: flashSuccess.isWarning ? '#c2410c' : '#15803d' }}>
               {flashSuccess.name}
             </span>
-            <span style={{ fontWeight: 800, fontSize: '0.85rem', color: flashSuccess.isWarning ? '#9a3412' : '#166534' }}>
+            <span style={{ fontWeight: 800, fontSize: '0.82rem', color: flashSuccess.isWarning ? '#9a3412' : '#166534' }}>
               — {flashSuccess.statusText}
             </span>
           </div>
           {flashSuccess.details && (
-            <div style={{ fontSize: '0.76rem', color: flashSuccess.isWarning ? '#7c2d12' : '#14532d', marginTop: '2px' }}>
+            <div style={{ fontSize: '0.74rem', color: flashSuccess.isWarning ? '#7c2d12' : '#14532d', marginTop: '2px' }}>
               {flashSuccess.details}
             </div>
           )}
         </div>
       )}
 
-      {/* Dialog 1: Covering Pop-in Dialog */}
-      {showCoverDialog && scannedResult && (
-        <div
-          style={{
-            backgroundColor: '#fffbeb',
-            border: '1.5px solid #fde68a',
-            borderRadius: 'var(--md-shape-md)',
-            padding: '10px 14px'
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#b45309', marginBottom: '6px' }}>
-            <AlertTriangle size={18} />
-            <h4 style={{ fontSize: '0.9rem', fontWeight: 800, margin: 0 }}>
-              تنبيه: التلميذ ليس مسجلاً في أي من الأفواج النشطة حالياً
-            </h4>
-          </div>
-
-          <p style={{ fontSize: '0.8rem', color: '#92400e', margin: '4px 0 8px', lineHeight: 1.4 }}>
-            التلميذ <strong>&quot;{scannedResult.student.name}&quot;</strong> مسجل في ({scannedResult.studentEnrolledGroups?.join(' ، ') || scannedResult.homeGroupId}).
-            {' '}هل التلميذ في <strong>حصة تعويض</strong>؟
-          </p>
-
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
-            <div style={{ flex: 1, minWidth: '160px' }}>
-              <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 700, color: '#92400e', marginBottom: '2px' }}>
-                الفوج المراد حضوره:
-              </label>
-              <select
-                value={coverTargetActiveGroupId || activeGroups[0]?.groupId}
-                onChange={(e) => setCoverTargetActiveGroupId(e.target.value)}
-                className="m3-input"
-                style={{ width: '100%', fontWeight: 700, padding: '3px 6px', fontSize: '0.78rem', height: '28px' }}
-              >
-                {activeGroups.map((ag) => (
-                  <option key={ag.groupId} value={ag.groupId}>
-                    فوج {ag.groupId} ({data.groupData[ag.groupId]?.subject || ''}) • الحصة {ag.sessionIndex + 1}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div style={{ flex: 1, minWidth: '160px' }}>
-              <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 700, color: '#92400e', marginBottom: '2px' }}>
-                الفوج الأصلي للتلميذ:
-              </label>
-              <select
-                value={selectedOriginalGroup}
-                onChange={(e) => setSelectedOriginalGroup(e.target.value)}
-                className="m3-input"
-                style={{ width: '100%', fontWeight: 700, padding: '3px 6px', fontSize: '0.78rem', height: '28px' }}
-              >
-                {scannedResult.studentEnrolledGroups?.map((gid) => (
-                  <option key={gid} value={gid}>
-                    فوج {gid} ★ ({data.groupData[gid]?.subject || ''})
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button
-              type="button"
-              onClick={() => {
-                const targetGid = coverTargetActiveGroupId || activeGroups[0]?.groupId || activeGroupId;
-                const targetAg = activeGroups.find((g) => g.groupId === targetGid);
-                const targetSessionIdx = targetAg ? targetAg.sessionIndex : activeSessionIdx;
-                setShowCoverDialog(false);
-                proceedToPaymentCheck(scannedResult.student, targetGid, targetSessionIdx, true, selectedOriginalGroup);
-              }}
-              className="m3-btn m3-btn-primary"
-              style={{ backgroundColor: '#d97706', borderColor: '#d97706', fontWeight: 800, fontSize: '0.76rem', height: '30px' }}
-            >
-              نعم (تسجيل كحصة تعويض M)
-            </button>
-            <button
-              type="button"
-              onClick={resetForNextStudent}
-              className="m3-btn m3-btn-outlined"
-              style={{ borderColor: '#d97706', color: '#b45309', fontSize: '0.76rem', height: '30px' }}
-            >
-              إلغاء
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Dialog 2: Unpaid / Debt Pop-in Dialog */}
-      {showUnpaidDialog && scannedResult && (
-        <div
-          style={{
-            backgroundColor: '#fef2f2',
-            border: '1.5px solid #f87171',
-            borderRadius: 'var(--md-shape-md)',
-            padding: '10px 14px',
-            boxShadow: '0 2px 8px rgba(239, 68, 68, 0.1)'
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', marginBottom: '6px', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Volume2 size={18} color="#b91c1c" className="animate-pulse" />
-              <span style={{ backgroundColor: '#dcfce7', color: '#15803d', border: '1px solid #bbf7d0', padding: '1px 6px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 800 }}>
-                ✓ مسجل حاضر الآن
-              </span>
-              <span style={{ fontSize: '0.86rem', fontWeight: 900, color: '#b91c1c' }}>
-                تنبيه: على التلميذ مستحقات مالية
-              </span>
-            </div>
-
-            <span
-              style={{
-                backgroundColor: '#fee2e2',
-                border: '1px solid #fca5a5',
-                color: '#b91c1c',
-                padding: '2px 8px',
-                borderRadius: '5px',
-                fontWeight: 900,
-                fontSize: '0.84rem'
-              }}
-            >
-              المطلوب: {(unpaidInfo?.effectiveDebt || scannedResult.student.debt || 0).toLocaleString()} دج
-            </span>
-          </div>
-
-          <div
-            style={{
-              fontSize: '0.78rem',
-              color: '#991b1b',
-              marginBottom: '8px',
-              backgroundColor: '#fff',
-              padding: '6px 10px',
-              borderRadius: '6px',
-              border: '1px solid #fecaca'
-            }}
-          >
-            التلميذ: <strong>{scannedResult.student.name}</strong> • فوج: <strong>{currentScanContext?.groupId}</strong>
-          </div>
-
-          {willPayNow === null ? (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
-              <span style={{ fontWeight: 800, fontSize: '0.8rem', color: '#7f1d1d' }}>
-                هل يريد التلميذ الدفع الآن؟
-              </span>
-              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  onClick={() => setWillPayNow(true)}
-                  className="m3-btn m3-btn-primary"
-                  style={{ backgroundColor: '#15803d', borderColor: '#15803d', fontWeight: 800, fontSize: '0.76rem', height: '28px' }}
-                >
-                  نعم (تسديد الآن)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleUnpaidNoPayment(true)}
-                  className="m3-btn m3-btn-outlined"
-                  style={{ borderColor: '#b91c1c', color: '#b91c1c', backgroundColor: '#fff', fontWeight: 800, fontSize: '0.76rem', height: '28px' }}
-                >
-                  متابعة كمدين (حاضر ✓)
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
-                <label style={{ fontSize: '0.76rem', fontWeight: 700, color: '#991b1b' }}>المبلغ المستلم:</label>
-                <input
-                  type="number"
-                  value={payAmount}
-                  onChange={(e) => setPayAmount(e.target.value)}
-                  className="m3-input"
-                  style={{ width: '120px', height: '28px', fontWeight: 900, color: '#15803d' }}
-                  autoFocus
-                />
-                {unpaidInfo && unpaidInfo.effectiveDebt > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setPayAmount(String(unpaidInfo.effectiveDebt))}
-                    className="m3-btn m3-btn-outlined m3-btn-sm"
-                    style={{ fontSize: '0.7rem', height: '26px' }}
-                  >
-                    كامل المبلغ ({unpaidInfo.effectiveDebt.toLocaleString()} دج)
-                  </button>
-                )}
-              </div>
-
-              <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
-                <button
-                  type="button"
-                  onClick={() => handleProcessPayment(true)}
-                  className="m3-btn m3-btn-primary"
-                  style={{ backgroundColor: '#00639b', fontWeight: 800, fontSize: '0.74rem', height: '28px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                >
-                  <Printer size={13} />
-                  <span>حفظ وطباعة وصل</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleProcessPayment(false)}
-                  className="m3-btn"
-                  style={{ backgroundColor: '#0284c7', color: '#fff', fontWeight: 800, fontSize: '0.74rem', height: '28px' }}
-                >
-                  تأجيل للطابور
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setWillPayNow(null)}
-                  className="m3-btn m3-btn-text"
-                  style={{ fontSize: '0.74rem', height: '28px' }}
-                >
-                  رجوع
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Live Recent Scans History Card */}
+      {/* Live Recent Scans History Card (Right side) */}
       <div
         style={{
           border: '1px solid var(--md-sys-color-outline-variant)',
@@ -2069,7 +1877,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
             لا توجد عمليات مسح حتى الآن. مرر بطاقات التلاميذ ليظهر سجل الحضور هنا تلقائياً.
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '180px', overflowY: 'auto' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '200px', overflowY: 'auto' }}>
             {recentScans.map((scan) => (
               <div
                 key={scan.id}
@@ -2077,7 +1885,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
-                  padding: '4px 8px',
+                  padding: '5px 8px',
                   borderRadius: '5px',
                   backgroundColor: 'var(--md-sys-color-surface-container-lowest)',
                   border: '1px solid var(--md-sys-color-outline-variant)',
@@ -2110,6 +1918,11 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                       مدين ({scan.debt?.toLocaleString()} دج) ⚠️
                     </span>
                   )}
+                  {scan.status === 'COVER_REQ' && (
+                    <span style={{ backgroundColor: '#eff6ff', color: '#1d4ed8', padding: '1px 6px', borderRadius: '4px', fontWeight: 800, fontSize: '0.68rem' }}>
+                      طلب تعويض 👈
+                    </span>
+                  )}
                 </div>
               </div>
             ))}
@@ -2120,10 +1933,10 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
   );
 
   // ==========================================
-  // RENDER: OPERATIONS PANEL (اليسار)
+  // RENDER: OPERATIONS & LIVE ACTION QUEUE (اليسار)
+  // All notifications (covering requests, unpaid waiting list) appear here!
   // ==========================================
   const renderOperationsPanel = () => {
-    // Autocomplete results for tabs
     const paySearchResults = searchStudentsAcrossCenter(paySearchQuery);
     const changeSearchResults = searchStudentsAcrossCenter(changeSearchQuery);
     const coverSearchResults = searchStudentsAcrossCenter(coverSearchQuery);
@@ -2134,7 +1947,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
           backgroundColor: 'var(--md-sys-color-surface)',
           borderRadius: 'var(--md-shape-lg)',
           border: '1px solid var(--md-sys-color-outline-variant)',
-          boxShadow: '0 2px 10px rgba(0,0,0,0.04)',
+          boxShadow: '0 2px 12px rgba(0,0,0,0.05)',
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column'
@@ -2155,42 +1968,101 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
         >
           <div>
             <h3 style={{ margin: 0, fontSize: '1.02rem', fontWeight: 900, color: 'var(--md-sys-color-on-surface)' }}>
-              لوحة العمليات السريعة للمسؤول
+              لوحة الإجراءات المباشرة والعمليات السريعة
             </h3>
             <p style={{ margin: '2px 0 0', fontSize: '0.72rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
-              إدارة التلاميذ والمستحقات والتعويض بالتوازي مع قارئ الباركود دون مقاطعة
+              تظهر هنا فورياً تنبيهات الباركود (التعويض، غير المسددين) وتعمل بالتوازي دون تعطيل المسح
             </p>
           </div>
-          <span
-            style={{
-              fontSize: '0.68rem',
-              fontWeight: 800,
-              backgroundColor: '#ecfdf5',
-              color: '#047857',
-              border: '1px solid #a7f3d0',
-              padding: '2px 8px',
-              borderRadius: '12px'
-            }}
-          >
-            ● يعمل بالتوازي مع الباركود
-          </span>
+          {totalQueueCount > 0 ? (
+            <span
+              style={{
+                fontSize: '0.7rem',
+                fontWeight: 900,
+                backgroundColor: '#fee2e2',
+                color: '#b91c1c',
+                border: '1px solid #fca5a5',
+                padding: '2px 8px',
+                borderRadius: '12px'
+              }}
+              className="animate-pulse"
+            >
+              ● {totalQueueCount} إجراء معلق بحاجة لمتابعة
+            </span>
+          ) : (
+            <span
+              style={{
+                fontSize: '0.68rem',
+                fontWeight: 800,
+                backgroundColor: '#ecfdf5',
+                color: '#047857',
+                border: '1px solid #a7f3d0',
+                padding: '2px 8px',
+                borderRadius: '12px'
+              }}
+            >
+              ● جاهز لاستقبال الإشعارات
+            </span>
+          )}
         </div>
 
-        {/* 4 Tabs Bar */}
+        {/* Tabs Bar */}
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(4, 1fr)',
+            gridTemplateColumns: '1.2fr 1fr 1fr 1fr 1fr',
             backgroundColor: 'var(--md-sys-color-surface-container-low)',
             borderBottom: '1px solid var(--md-sys-color-outline-variant)'
           }}
         >
+          {/* TAB 1: Live Queue */}
+          <button
+            type="button"
+            onClick={() => setLeftTab('queue')}
+            style={{
+              padding: '9px 2px',
+              fontSize: '0.74rem',
+              fontWeight: 800,
+              border: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '4px',
+              backgroundColor: leftTab === 'queue' ? 'var(--md-sys-color-surface)' : 'transparent',
+              color: leftTab === 'queue' ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-on-surface-variant)',
+              borderBottom: leftTab === 'queue' ? '3px solid var(--md-sys-color-primary)' : '3px solid transparent'
+            }}
+          >
+            <Bell size={13} />
+            <span>قائمة الإجراءات</span>
+            {totalQueueCount > 0 && (
+              <span
+                style={{
+                  backgroundColor: '#b91c1c',
+                  color: '#fff',
+                  borderRadius: '50%',
+                  width: '18px',
+                  height: '18px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '0.65rem',
+                  fontWeight: 900
+                }}
+              >
+                {totalQueueCount}
+              </span>
+            )}
+          </button>
+
+          {/* TAB 2: Add Student */}
           <button
             type="button"
             onClick={() => setLeftTab('add')}
             style={{
-              padding: '9px 4px',
-              fontSize: '0.78rem',
+              padding: '9px 2px',
+              fontSize: '0.74rem',
               fontWeight: 800,
               border: 'none',
               cursor: 'pointer',
@@ -2200,20 +2072,20 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
               gap: '4px',
               backgroundColor: leftTab === 'add' ? 'var(--md-sys-color-surface)' : 'transparent',
               color: leftTab === 'add' ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-on-surface-variant)',
-              borderBottom: leftTab === 'add' ? '3px solid var(--md-sys-color-primary)' : '3px solid transparent',
-              transition: 'all 0.15s ease'
+              borderBottom: leftTab === 'add' ? '3px solid var(--md-sys-color-primary)' : '3px solid transparent'
             }}
           >
-            <UserPlus size={14} />
+            <UserPlus size={13} />
             <span>إضافة تلميذ</span>
           </button>
 
+          {/* TAB 3: Pay Student */}
           <button
             type="button"
             onClick={() => setLeftTab('pay')}
             style={{
-              padding: '9px 4px',
-              fontSize: '0.78rem',
+              padding: '9px 2px',
+              fontSize: '0.74rem',
               fontWeight: 800,
               border: 'none',
               cursor: 'pointer',
@@ -2223,20 +2095,20 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
               gap: '4px',
               backgroundColor: leftTab === 'pay' ? 'var(--md-sys-color-surface)' : 'transparent',
               color: leftTab === 'pay' ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-on-surface-variant)',
-              borderBottom: leftTab === 'pay' ? '3px solid var(--md-sys-color-primary)' : '3px solid transparent',
-              transition: 'all 0.15s ease'
+              borderBottom: leftTab === 'pay' ? '3px solid var(--md-sys-color-primary)' : '3px solid transparent'
             }}
           >
-            <CreditCard size={14} />
+            <CreditCard size={13} />
             <span>تسديد مستحقات</span>
           </button>
 
+          {/* TAB 4: Change Student */}
           <button
             type="button"
             onClick={() => setLeftTab('change')}
             style={{
-              padding: '9px 4px',
-              fontSize: '0.78rem',
+              padding: '9px 2px',
+              fontSize: '0.74rem',
               fontWeight: 800,
               border: 'none',
               cursor: 'pointer',
@@ -2246,20 +2118,20 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
               gap: '4px',
               backgroundColor: leftTab === 'change' ? 'var(--md-sys-color-surface)' : 'transparent',
               color: leftTab === 'change' ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-on-surface-variant)',
-              borderBottom: leftTab === 'change' ? '3px solid var(--md-sys-color-primary)' : '3px solid transparent',
-              transition: 'all 0.15s ease'
+              borderBottom: leftTab === 'change' ? '3px solid var(--md-sys-color-primary)' : '3px solid transparent'
             }}
           >
-            <ArrowLeftRight size={14} />
+            <ArrowLeftRight size={13} />
             <span>نقل تلميذ</span>
           </button>
 
+          {/* TAB 5: Covering */}
           <button
             type="button"
             onClick={() => setLeftTab('cover')}
             style={{
-              padding: '9px 4px',
-              fontSize: '0.78rem',
+              padding: '9px 2px',
+              fontSize: '0.74rem',
               fontWeight: 800,
               border: 'none',
               cursor: 'pointer',
@@ -2269,18 +2141,283 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
               gap: '4px',
               backgroundColor: leftTab === 'cover' ? 'var(--md-sys-color-surface)' : 'transparent',
               color: leftTab === 'cover' ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-on-surface-variant)',
-              borderBottom: leftTab === 'cover' ? '3px solid var(--md-sys-color-primary)' : '3px solid transparent',
-              transition: 'all 0.15s ease'
+              borderBottom: leftTab === 'cover' ? '3px solid var(--md-sys-color-primary)' : '3px solid transparent'
             }}
           >
-            <CalendarCheck size={14} />
+            <CalendarCheck size={13} />
             <span>تسجيل تعويض</span>
           </button>
         </div>
 
         {/* Tab Body */}
         <div style={{ padding: '14px', minHeight: '380px', display: 'flex', flexDirection: 'column' }}>
-          {/* TAB 1: ADD STUDENT */}
+          {/* ========================================================================= */}
+          {/* TAB 1: LIVE NOTIFICATION & ACTION QUEUE                                   */}
+          {/* ========================================================================= */}
+          {leftTab === 'queue' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {/* SECTION A: SCANNER COVERING & TRANSFER REQUEST CARD */}
+              {pendingCoverRequest && (
+                <div
+                  style={{
+                    backgroundColor: '#fffbeb',
+                    border: '2px solid #f59e0b',
+                    borderRadius: 'var(--md-shape-md)',
+                    padding: '12px 14px',
+                    boxShadow: '0 4px 12px rgba(245, 158, 11, 0.15)'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#b45309' }}>
+                      <AlertTriangle size={20} className="animate-pulse" />
+                      <h4 style={{ margin: 0, fontSize: '0.94rem', fontWeight: 900 }}>
+                        طلب تعويض / تحويل وارد من قارئ الباركود ⚡
+                      </h4>
+                    </div>
+                    <span style={{ fontSize: '0.72rem', color: '#92400e', fontWeight: 700 }}>
+                      {pendingCoverRequest.time}
+                    </span>
+                  </div>
+
+                  <div
+                    style={{
+                      backgroundColor: '#ffffff',
+                      padding: '8px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid #fde68a',
+                      marginBottom: '10px',
+                      fontSize: '0.82rem',
+                      lineHeight: 1.5
+                    }}
+                  >
+                    <div>
+                      التلميذ: <strong style={{ fontSize: '0.94rem', color: '#b45309' }}>{pendingCoverRequest.student.name}</strong>
+                    </div>
+                    <div style={{ color: '#475569', fontSize: '0.76rem', marginTop: '2px' }}>
+                      مسجل في: <strong>فوج {pendingCoverRequest.homeGroupId}</strong> ({data.groupData[pendingCoverRequest.homeGroupId]?.subject || ''})
+                      <br />
+                      يحضر الآن في: <strong>فوج {pendingCoverRequest.targetActiveGroupId}</strong> (الحصة {pendingCoverRequest.sessionIdx + 1})
+                    </div>
+                  </div>
+
+                  <p style={{ margin: '0 0 8px', fontSize: '0.76rem', color: '#92400e', fontWeight: 800 }}>
+                    اختر الإجراء المطلوب للتلميذ:
+                  </p>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {/* CHOICE 1: Temporary Covering */}
+                    <button
+                      type="button"
+                      onClick={handleAcceptTemporaryCover}
+                      className="m3-btn"
+                      style={{
+                        backgroundColor: '#d97706',
+                        color: '#ffffff',
+                        fontWeight: 800,
+                        fontSize: '0.8rem',
+                        padding: '8px 12px',
+                        borderRadius: '6px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        textAlign: 'right'
+                      }}
+                    >
+                      <div>
+                        <div>🔄 خيار 1: حصة تعويض مؤقتة (مع البقاء في فوجه الأصلي {pendingCoverRequest.homeGroupId})</div>
+                        <div style={{ fontSize: '0.68rem', fontWeight: 500, opacity: 0.9 }}>
+                          تُحتسب الحصة كحضور تعويض (C) في فوجه الأصلي، ويسجل حاضراً في حصة اليوم
+                        </div>
+                      </div>
+                      <span style={{ fontSize: '0.74rem', backgroundColor: 'rgba(255,255,255,0.2)', padding: '2px 8px', borderRadius: '4px' }}>
+                        تنفيذ التعويض ✓
+                      </span>
+                    </button>
+
+                    {/* CHOICE 2: Permanent Transfer */}
+                    <button
+                      type="button"
+                      onClick={handleAcceptPermanentTransfer}
+                      className="m3-btn"
+                      style={{
+                        backgroundColor: '#4f46e5',
+                        color: '#ffffff',
+                        fontWeight: 800,
+                        fontSize: '0.8rem',
+                        padding: '8px 12px',
+                        borderRadius: '6px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        textAlign: 'right'
+                      }}
+                    >
+                      <div>
+                        <div>🔀 خيار 2: تحويل نهائي للتلميذ (الانتقال دائماً إلى فوج {pendingCoverRequest.targetActiveGroupId})</div>
+                        <div style={{ fontSize: '0.68rem', fontWeight: 500, opacity: 0.9 }}>
+                          يُنقل التلميذ دائماً للفوج الحالي ويُسجل حاضراً رسمياً (P) في حصة اليوم
+                        </div>
+                      </div>
+                      <span style={{ fontSize: '0.74rem', backgroundColor: 'rgba(255,255,255,0.2)', padding: '2px 8px', borderRadius: '4px' }}>
+                        نقل نهائي ✓
+                      </span>
+                    </button>
+
+                    {/* Dismiss */}
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '2px' }}>
+                      <button
+                        type="button"
+                        onClick={() => setPendingCoverRequest(null)}
+                        className="m3-btn-text"
+                        style={{ fontSize: '0.74rem', color: '#92400e', fontWeight: 700 }}
+                      >
+                        إلغاء وتجاهل الطلب ✕
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* SECTION B: UNPAID / DEBTORS WAITING LIST (from oldest to newest) */}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <CreditCard size={16} color="var(--md-sys-color-primary)" />
+                    <span style={{ fontSize: '0.86rem', fontWeight: 900, color: 'var(--md-sys-color-on-surface)' }}>
+                      قائمة انتظار غير المسددين ({pendingDebtors.length}):
+                    </span>
+                  </div>
+                  {pendingDebtors.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setPendingDebtors([])}
+                      className="m3-btn-text"
+                      style={{ fontSize: '0.68rem', color: '#b91c1c' }}
+                    >
+                      تفريغ القائمة
+                    </button>
+                  )}
+                </div>
+
+                {pendingDebtors.length === 0 && !pendingCoverRequest ? (
+                  <div
+                    style={{
+                      border: '1.5px dashed var(--md-sys-color-outline-variant)',
+                      borderRadius: '8px',
+                      padding: '24px 16px',
+                      textAlign: 'center',
+                      color: 'var(--md-sys-color-outline)'
+                    }}
+                  >
+                    <CheckCheck size={28} color="#059669" style={{ margin: '0 auto 6px' }} />
+                    <div style={{ fontWeight: 800, fontSize: '0.88rem', color: '#065f46' }}>
+                      لا توجد طلبات تعويض أو ديون معلقة حالياً
+                    </div>
+                    <div style={{ fontSize: '0.74rem', color: 'var(--md-sys-color-on-surface-variant)', marginTop: '4px' }}>
+                      عندما يمسح تلميذ غير مسدد أو تلميذ من فوج آخر بطاقته في اليمين، سيظهر هنا فوراً في القائمة لتسوية وضعه.
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {pendingDebtors.map((debtor, idx) => (
+                      <div
+                        key={debtor.id}
+                        style={{
+                          backgroundColor: '#fef2f2',
+                          border: '1px solid #fecaca',
+                          borderRadius: '8px',
+                          padding: '10px 12px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '6px'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span
+                              style={{
+                                width: '20px',
+                                height: '20px',
+                                borderRadius: '50%',
+                                backgroundColor: '#b91c1c',
+                                color: '#fff',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '0.68rem',
+                                fontWeight: 900
+                              }}
+                            >
+                              {idx + 1}
+                            </span>
+                            <strong style={{ fontSize: '0.9rem', color: '#7f1d1d' }}>{debtor.student.name}</strong>
+                            <span style={{ fontSize: '0.72rem', color: '#991b1b' }}>
+                              (فوج {debtor.groupId} • ح{debtor.sessionIdx + 1})
+                            </span>
+                          </div>
+
+                          <span style={{ fontSize: '0.72rem', color: '#991b1b', fontWeight: 700 }}>
+                            {debtor.time}
+                          </span>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
+                          <span style={{ fontSize: '0.84rem', fontWeight: 900, color: '#b91c1c' }}>
+                            الدين المتبقي: {debtor.debt.toLocaleString()} دج
+                          </span>
+
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            <button
+                              type="button"
+                              onClick={() => handleSettleDebtorInQueue(debtor, debtor.debt, true)}
+                              className="m3-btn m3-btn-sm m3-btn-primary"
+                              style={{
+                                backgroundColor: '#15803d',
+                                borderColor: '#15803d',
+                                fontSize: '0.74rem',
+                                padding: '3px 8px',
+                                height: '28px',
+                                fontWeight: 800,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px'
+                              }}
+                              title="تسديد كامل الدين وطباعة الوصل فوراً"
+                            >
+                              <Printer size={12} />
+                              <span>تسديد كامل ({debtor.debt}) 🖨️</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleDismissDebtorFromQueue(debtor.id)}
+                              className="m3-btn m3-btn-sm m3-btn-outlined"
+                              style={{
+                                borderColor: '#b91c1c',
+                                color: '#b91c1c',
+                                backgroundColor: '#fff',
+                                fontSize: '0.72rem',
+                                padding: '3px 8px',
+                                height: '28px',
+                                fontWeight: 800
+                              }}
+                              title="تأكيد الدخول كمدين وحذف من القائمة"
+                            >
+                              حاضر كمدين ✓
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ========================================================================= */}
+          {/* TAB 2: ADD NEW STUDENT                                                    */}
+          {/* ========================================================================= */}
           {leftTab === 'add' && (
             <div>
               {addSuccess && (
@@ -2302,16 +2439,14 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                     <br />
                     الرمز الشريطي: <strong style={{ letterSpacing: '1px' }}>{addSuccess.barcode}</strong>
                   </div>
-                  <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
-                    <button
-                      type="button"
-                      onClick={() => setAddSuccess(null)}
-                      className="m3-btn m3-btn-outlined m3-btn-sm"
-                      style={{ fontSize: '0.72rem', height: '26px' }}
-                    >
-                      إضافة تلميذ آخر
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAddSuccess(null)}
+                    className="m3-btn m3-btn-outlined m3-btn-sm"
+                    style={{ fontSize: '0.72rem', height: '26px', marginTop: '6px' }}
+                  >
+                    إضافة تلميذ آخر
+                  </button>
                 </div>
               )}
 
@@ -2417,24 +2552,26 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                   type="submit"
                   className="m3-btn m3-btn-primary"
                   style={{
-                    marginTop: '8px',
-                    height: '38px',
+                    marginTop: '6px',
+                    height: '36px',
                     fontWeight: 800,
-                    fontSize: '0.86rem',
+                    fontSize: '0.84rem',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     gap: '6px'
                   }}
                 >
-                  <UserPlus size={16} />
+                  <UserPlus size={15} />
                   <span>إضافة التلميذ وتوليد بطاقة الباركود ⚡</span>
                 </button>
               </form>
             </div>
           )}
 
-          {/* TAB 2: PAY STUDENT */}
+          {/* ========================================================================= */}
+          {/* TAB 3: PAY STUDENT (MANUAL SEARCH)                                        */}
+          {/* ========================================================================= */}
           {leftTab === 'pay' && (
             <div>
               {paySuccessMsg && (
@@ -2454,7 +2591,6 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                 </div>
               )}
 
-              {/* Search Box */}
               <div style={{ marginBottom: '10px', position: 'relative' }}>
                 <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '3px' }}>
                   البحث عن التلميذ (بالاسم أو الهاتف أو الباركود):
@@ -2477,7 +2613,6 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                   />
                 </div>
 
-                {/* Dropdown search results */}
                 {paySearchQuery.trim().length >= 2 && !paySelectedStudent && (
                   <div
                     style={{
@@ -2540,7 +2675,6 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                 )}
               </div>
 
-              {/* Selected Student Finance Card */}
               {paySelectedStudent && (
                 <div
                   style={{
@@ -2572,7 +2706,6 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                     </button>
                   </div>
 
-                  {/* Financial Counters */}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', textAlign: 'center' }}>
                     <div style={{ backgroundColor: '#f1f5f9', padding: '4px', borderRadius: '4px' }}>
                       <div style={{ fontSize: '0.66rem', color: '#475569' }}>المستحق:</div>
@@ -2594,12 +2727,11 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                     </div>
                   </div>
 
-                  {/* Amount Input and Quick Buttons */}
                   <div>
                     <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, marginBottom: '2px' }}>
                       المبلغ المراد تسديده الآن (دج):
                     </label>
-                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '6px' }}>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                       <input
                         type="number"
                         value={payCustomAmount}
@@ -2620,7 +2752,6 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                     </div>
                   </div>
 
-                  {/* Action Buttons */}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginTop: '4px' }}>
                     <button
                       type="button"
@@ -2664,7 +2795,9 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
             </div>
           )}
 
-          {/* TAB 3: CHANGE STUDENT GROUP */}
+          {/* ========================================================================= */}
+          {/* TAB 4: MANUAL CHANGE STUDENT GROUP                                        */}
+          {/* ========================================================================= */}
           {leftTab === 'change' && (
             <div>
               {changeSuccessMsg && (
@@ -2684,7 +2817,6 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                 </div>
               )}
 
-              {/* Search Box */}
               <div style={{ marginBottom: '10px', position: 'relative' }}>
                 <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '3px' }}>
                   ابحث عن التلميذ المراد نقله:
@@ -2764,7 +2896,6 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                 )}
               </div>
 
-              {/* Transfer Form Card */}
               {changeSelectedStudent && (
                 <div
                   style={{
@@ -2860,7 +2991,9 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
             </div>
           )}
 
-          {/* TAB 4: COVERING REGISTRATION */}
+          {/* ========================================================================= */}
+          {/* TAB 5: MANUAL COVERING REGISTRATION                                       */}
+          {/* ========================================================================= */}
           {leftTab === 'cover' && (
             <div>
               {coverSuccessMsg && (
@@ -2880,7 +3013,6 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                 </div>
               )}
 
-              {/* Search Box */}
               <div style={{ marginBottom: '10px', position: 'relative' }}>
                 <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '3px' }}>
                   البحث عن التلميذ لتسجيل حصة تعويض:
@@ -2960,7 +3092,6 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                 )}
               </div>
 
-              {/* Covering Form Card */}
               {coverSelectedStudent && (
                 <div
                   style={{
@@ -3038,7 +3169,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                       type="number"
                       value={coverAmountInput}
                       onChange={(e) => setCoverAmountInput(e.target.value)}
-                      placeholder="0 دج (إن دفع لحصة التعويض)"
+                      placeholder="0 دج"
                       className="m3-input"
                       style={{ width: '100%', height: '32px', fontSize: '0.8rem' }}
                     />
@@ -3062,7 +3193,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                     }}
                   >
                     <CalendarCheck size={16} />
-                    <span>تسجيل حضور التعويض (M) الآن ⚡</span>
+                    <span>تسجيل حضور التعويض (C في الأصلي و M في الحالي) ⚡</span>
                   </button>
                 </div>
               )}
@@ -3106,7 +3237,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
             }
       }
     >
-      {/* Page Header (when isScreen = true) */}
+      {/* Page Header */}
       {isScreen && (
         <div
           style={{
@@ -3148,7 +3279,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                   gap: '8px'
                 }}
               >
-                محطة مسح الباركود والعمليات السريعة
+                محطة مسح الباركود وإدارة العمليات المباشرة
                 <span
                   style={{
                     fontSize: '0.72rem',
@@ -3160,7 +3291,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                     border: '1px solid #a7f3d0'
                   }}
                 >
-                  ● الماسح نشط ويعمل في الخلفية ⚡
+                  ● المسح مستمر دون توقف في الخلفية ⚡
                 </span>
               </h1>
               <p
@@ -3170,7 +3301,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                   color: 'var(--md-sys-color-on-surface-variant)'
                 }}
               >
-                مسح البطاقات وتسجيل الحضور المباشر، مع إمكانية إضافة التلاميذ وتسديد المستحقات بالتوازي
+                اليمين: مسح بطاقات التلاميذ بدون توقف • اليسار: استقبال إشعارات التعويض وقائمة غير المسددين
               </p>
             </div>
           </div>
@@ -3195,7 +3326,6 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
           <div className="operations-column">{renderOperationsPanel()}</div>
         </div>
       ) : (
-        /* Dialog Modal View */
         <div>{renderCodebarSection()}</div>
       )}
 
@@ -3476,13 +3606,6 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                               normalizeArabicName(s.name) === normalizeArabicName(multiActiveCandidate.result.student.name))
                         ) || multiActiveCandidate.result.student;
 
-                      const resolved = {
-                        ...multiActiveCandidate.result,
-                        student: targetStudent,
-                        homeGroupId: ag.groupId,
-                        isInActiveGroup: true
-                      };
-                      setScannedResult(resolved);
                       setMultiActiveCandidate(null);
                       proceedToPaymentCheck(targetStudent, ag.groupId, ag.sessionIndex, false);
                     }}

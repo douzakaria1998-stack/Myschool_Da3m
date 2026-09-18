@@ -57,7 +57,8 @@ interface AppContextType {
     originalGroupId: string,
     studentRowId: number,
     sessionIndex: number,
-    paymentAmount?: number
+    paymentAmount?: number,
+    targetOriginalSessionIdx?: number
   ) => void;
   // Student Actions
   cycleAttendance: (groupId: string, rowId: number, sessionIndex: number) => AttendanceStatus;
@@ -179,8 +180,8 @@ export const calcStudentFinancesPure = (
 
   // Attendance counts
   const cycleAttendance = (student.attendance || []).slice(0, cycleSessions);
-  const attendedCount = cycleAttendance.filter((a) => a === 'P').length;
-  const makeupCount = cycleAttendance.filter((a) => a === 'M').length;
+  const attendedCount = cycleAttendance.filter((a) => a === 'P' || a === 'C' || a === 'ح').length;
+  const makeupCount = cycleAttendance.filter((a) => a === 'M' || a === 'م').length;
   const totalAttendance = attendedCount + makeupCount;
 
   // RULE: If student attended only 1 session and did not pay:
@@ -1252,7 +1253,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     originalGroupId: string,
     studentRowId: number,
     sessionIndex: number,
-    paymentAmount?: number
+    paymentAmount?: number,
+    targetOriginalSessionIdx?: number
   ) => {
     const currentData = dataRef.current;
     const activeGroup = currentData.groupData[activeGroupId];
@@ -1262,9 +1264,39 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const originalStudent = originalGroup?.students.find((s) => s.rowId === studentRowId);
     if (!originalStudent) return;
 
-    let updatedActiveGroup = { ...activeGroup };
+    // 1. In ORIGINAL group (e.g. BAC05): mark the session as 'C' (Covered)
+    const origSessionCount = originalGroup.sessionDates?.length || originalGroup.sessionCount || 4;
+    let origIdx = targetOriginalSessionIdx !== undefined ? targetOriginalSessionIdx : sessionIndex;
+    if (origIdx >= origSessionCount) origIdx = origSessionCount - 1;
+
+    // If that session was already attended ('P' or 'C'), find the first open/unattended session
+    if (originalStudent.attendance?.[origIdx] === 'P' || originalStudent.attendance?.[origIdx] === 'C') {
+      const firstOpen = (originalStudent.attendance || []).findIndex(
+        (att, i) => i < origSessionCount && att !== 'P' && att !== 'C'
+      );
+      if (firstOpen !== -1) origIdx = firstOpen;
+    }
+
+    const newOrigAttendance: AttendanceStatus[] = [...(originalStudent.attendance || [])];
+    while (newOrigAttendance.length < origSessionCount) newOrigAttendance.push('');
+    newOrigAttendance[origIdx] = 'C';
+
+    const updatedOriginalStudent = calculateStudentFinances(
+      { ...originalStudent, attendance: newOrigAttendance },
+      originalGroup.type,
+      currentData.pricingTiers,
+      originalGroup
+    );
+
+    const updatedOriginalGroup: GroupSheet = {
+      ...originalGroup,
+      students: originalGroup.students.map((s) => (s.rowId === studentRowId ? updatedOriginalStudent : s))
+    };
+
+    // 2. In ACTIVE group (e.g. BAC01): record student attendance as 'M' (Make-up/Cover)
+    let updatedActiveGroup: GroupSheet = { ...activeGroup };
     const existingInActive = activeGroup.students.find(
-      (s) => s.name.trim() === originalStudent.name.trim()
+      (s) => s.name.trim().toLowerCase() === originalStudent.name.trim().toLowerCase()
     );
 
     if (existingInActive) {
@@ -1319,6 +1351,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       ...currentData,
       groupData: {
         ...currentData.groupData,
+        [originalGroupId]: updatedOriginalGroup,
         [activeGroupId]: updatedActiveGroup
       }
     };
