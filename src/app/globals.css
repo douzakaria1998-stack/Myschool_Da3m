@@ -480,3 +480,17 @@ body {
 .animate-spin {
   animation: spin 1s linear infinite;
 }
+
+/* Scanner Split Screen Layout */
+.scanner-split-grid {
+  display: grid;
+  grid-template-columns: minmax(460px, 1.22fr) minmax(400px, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+@media (max-width: 1040px) {
+  .scanner-split-grid {
+    grid-template-columns: 1fr;
+  }
+}

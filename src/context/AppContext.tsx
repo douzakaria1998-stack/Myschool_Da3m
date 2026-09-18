@@ -87,6 +87,7 @@ interface AppContextType {
     payments: { groupId: string; paymentAmount: number | string }[]
   ) => { groupId: string; rowId: number; fee: number; paidNow: number; totalReceived: number; debt: number }[];
   deleteStudent: (groupId: string, rowId: number) => void;
+  transferStudent: (fromGroupId: string, toGroupId: string, studentRowId: number) => boolean;
   updateStudent: (groupId: string, rowId: number, fields: Partial<StudentRecord>) => void;
   // Group & Teacher Actions
   addGroup: (group: GroupMeta) => void;
@@ -1732,6 +1733,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     persistData(updatedData);
   };
 
+  // Transfer student from one group to another
+  const transferStudent = (fromGroupId: string, toGroupId: string, studentRowId: number): boolean => {
+    const currentData = dataRef.current;
+    const fromGroup = currentData.groupData[fromGroupId];
+    const toGroup = currentData.groupData[toGroupId];
+    if (!fromGroup || !toGroup) return false;
+
+    const originalStudent = fromGroup.students.find((s) => s.rowId === studentRowId);
+    if (!originalStudent) return false;
+
+    const newStudent = addStudent(toGroupId, {
+      name: originalStudent.name,
+      phone: originalStudent.phone,
+      discount: originalStudent.discount,
+      barcode: originalStudent.barcode
+    });
+
+    if (!newStudent) return false;
+
+    deleteStudent(fromGroupId, studentRowId);
+    return true;
+  };
+
   // Update student arbitrary fields
   const updateStudent = (groupId: string, rowId: number, fields: Partial<StudentRecord>) => {
     const currentData = dataRef.current;
@@ -2624,6 +2648,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         enrollStudentMultiGroups,
         recordMultiGroupPayment,
         deleteStudent,
+        transferStudent,
         updateStudent,
         addGroup,
         renewGroupWithStudents,
