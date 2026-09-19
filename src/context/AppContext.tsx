@@ -1686,11 +1686,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         while (newPayments.length < sessionCount) newPayments.push('');
 
         if (payNum > 0) {
-          // Find first session with 0/empty payment, or add to session 0
-          let targetIdx = newPayments.findIndex((p) => p === '' || p === 0 || p === '0');
-          if (targetIdx === -1) targetIdx = 0;
-          const currentP = Number(newPayments[targetIdx]) || 0;
-          newPayments[targetIdx] = currentP + payNum;
+          const existingReceived = (currentStudent.payments || []).reduce<number>((sum, p) => {
+            const val = typeof p === 'number' ? p : parseFloat(String(p));
+            return sum + (isNaN(val) ? 0 : val);
+          }, 0);
+
+          // If the student already has 0 debt and already paid at least this amount, avoid double charging
+          if (currentStudent.debt === 0 && existingReceived >= payNum && existingReceived > 0) {
+            // Already paid, do not duplicate
+          } else {
+            // Find first session with 0/empty payment, or add to session 0
+            let targetIdx = newPayments.findIndex((p) => p === '' || p === 0 || p === '0');
+            if (targetIdx === -1) targetIdx = 0;
+            const currentP = Number(newPayments[targetIdx]) || 0;
+            newPayments[targetIdx] = currentP + payNum;
+          }
         }
 
         const calculated = calculateStudentFinances(
