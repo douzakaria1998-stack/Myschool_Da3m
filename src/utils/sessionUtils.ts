@@ -629,6 +629,73 @@ export function isGroupActive(
 }
 
 /**
+ * Determines whether a group has ended all its sessions in the current cycle:
+ * 1. If explicit status is 'inactive' -> ended
+ * 2. If group reached or completed its last session (currentSession >= totalSessions) -> ended
+ * 3. If group has defined session dates and today is strictly past the last session date -> ended
+ * Otherwise, the group is ongoing (active).
+ */
+export function isGroupEnded(
+  groupSheet?: {
+    status?: 'active' | 'inactive';
+    sessionCount?: number;
+    sessionDates?: string[];
+    students?: StudentRecord[];
+    type?: string;
+    groupId?: string;
+  } | null,
+  groupMeta?: {
+    status?: 'active' | 'inactive';
+    sessionCount?: number;
+    sessionDates?: string[];
+    type?: string;
+    id?: string;
+  } | null,
+  pricingTiers?: PricingTier[]
+): boolean {
+  if (!groupSheet && !groupMeta) return false;
+
+  // 1. Explicit inactive status means group has concluded
+  if (groupSheet?.status === 'inactive' || groupMeta?.status === 'inactive') {
+    return true;
+  }
+
+  const totalSessions = getGroupCycleTotalSessions(
+    groupMeta || { sessionCount: groupSheet?.sessionCount, type: groupSheet?.type, sessionDates: groupSheet?.sessionDates },
+    groupSheet || undefined,
+    pricingTiers
+  );
+
+  if (totalSessions <= 0) return false;
+
+  // 2. Check if the group attendance has reached the final cycle session
+  const students = (groupSheet?.students || []).filter((s) => !isSummaryRow(s, groupSheet?.groupId || groupMeta?.id));
+  if (students.length > 0) {
+    const currentSession = getGroupCurrentSession(students, totalSessions);
+    if (currentSession >= totalSessions) {
+      return true;
+    }
+  }
+
+  // 3. Check if all scheduled dates for the cycle have already passed
+  const dates = groupSheet?.sessionDates || groupMeta?.sessionDates;
+  if (dates && dates.length >= totalSessions) {
+    const lastDateStr = dates[totalSessions - 1];
+    if (lastDateStr) {
+      const formatted = formatToYYYYMMDD(lastDateStr);
+      if (formatted && /^\d{4}\/\d{2}\/\d{2}$/.test(formatted)) {
+        const todayStr = formatToYYYYMMDD(new Date());
+        if (todayStr > formatted) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
  * Sorts groups so that:
  * 1. Active groups always appear FIRST.
  * 2. Inactive (completed) groups appear LAST.
@@ -801,13 +868,15 @@ export interface StudentSessionInfo {
  * Calculates session counting rules for a student:
  * - Empty cells before the student's first recorded attendance (P/A/M/S) do NOT count (un-enrolled / pre-enrollment sessions).
  * - Empty cells after the student has recorded attendance DO count (officially registered in the group).
- * - RULE: If student attended only 1 session and did NOT pay, the session does NOT count for the school or teacher.
- * - But if student attended 1 session and PAID, it DOES count for both school and teacher.
+ * - RULE: If student attended only 1 session and did NOT pay, the session does NOT count for the school or teacher,
+ *   BUT ONLY when the group has ended all its sessions (isGroupEnded).
+ * - While the group is ongoing (e.g. today was the first session), count the session normally.
  */
 export function getStudentSessionInfo(
   attendance: (string | null | undefined)[],
   cycleSessions: number = 4,
-  payments?: (number | string | null | undefined)[] | number
+  payments?: (number | string | null | undefined)[] | number,
+  isGroupEnded: boolean = false
 ): StudentSessionInfo {
   const cycleAtt = (attendance || []).slice(0, cycleSessions);
   const hasSuspended = cycleAtt.includes('S');
@@ -824,8 +893,10 @@ export function getStudentSessionInfo(
     ? payments
     : 0;
 
-  // RULE 1: If student attended only 1 session and did not pay, the session does not count for school or teacher
-  const isOneSessionUnpaid = totalAttended === 1 && totalReceived === 0;
+  // RULE 1: If student attended only 1 session and did not pay:
+  // ONLY apply when the group has ended all sessions!
+  // While the group is ongoing (e.g. today was session 1), count the session normally.
+  const isOneSessionUnpaid = isGroupEnded && totalAttended === 1 && totalReceived === 0;
   if (isOneSessionUnpaid) {
     return {
       firstActiveIndex: -1,
@@ -835,8 +906,9 @@ export function getStudentSessionInfo(
   }
 
   // RULE 2: If student attended only 1 session and DID pay, count ONLY this 1 session.
-  // Subsequent / empty sessions do NOT count until the student is marked present for a second session.
-  const isOneSessionPaid = totalAttended === 1 && totalReceived > 0;
+  // ONLY apply when the group has ended all sessions (drop-out who paid only for 1 session).
+  // While the group is ongoing, count normally as part of the cycle.
+  const isOneSessionPaid = isGroupEnded && totalAttended === 1 && totalReceived > 0;
   if (isOneSessionPaid) {
     const attendedIndex = Math.max(
       0,

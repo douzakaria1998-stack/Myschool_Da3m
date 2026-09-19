@@ -44,6 +44,7 @@ import {
   formatGroupTime,
   getGroupStatus,
   isGroupActive,
+  isGroupEnded,
   isSummaryRow,
   formatToYYYYMMDD,
   generateSessionDates,
@@ -1296,7 +1297,8 @@ export default function AttendancePage() {
             ) : (
               filteredStudents.map((student, sIdx) => {
                 const cycleSessions = group.sessionCount || 4;
-                const sessionInfo = getStudentSessionInfo(student.attendance, cycleSessions, student.totalReceived);
+                const groupEnded = isGroupEnded(group, undefined, data.pricingTiers);
+                const sessionInfo = getStudentSessionInfo(student.attendance, cycleSessions, student.totalReceived, groupEnded);
                 const studentCountedSessions = sessionInfo.countedSessions;
 
                 return (
@@ -1450,6 +1452,7 @@ export default function AttendancePage() {
 
                     {/* Total Attendance */}
                     <td
+                      dir="ltr"
                       style={{ textAlign: 'center', fontWeight: 800 }}
                       title={`${student.totalAttendance} حضور من أصل ${studentCountedSessions} حصص محتسبة لهذا التلميذ`}
                     >

@@ -27,6 +27,7 @@ import {
   getStudentSessionInfo,
   generateUniqueStudentBarcode,
   isGroupActive,
+  isGroupEnded,
   getNextSessionDateAfter,
   getUpcomingSessionDate,
   sortGroupsActiveFirstOldToNew
@@ -144,6 +145,9 @@ export const calcStudentFinancesPure = (
     sessionCount?: number;
     isVip?: boolean;
     groupId?: string;
+    status?: 'active' | 'inactive';
+    sessionDates?: string[];
+    students?: StudentRecord[];
   }
 ): StudentRecord => {
   const isVipGroup =
@@ -184,11 +188,22 @@ export const calcStudentFinancesPure = (
   const makeupCount = cycleAttendance.filter((a) => a === 'M' || a === 'م').length;
   const totalAttendance = attendedCount + makeupCount;
 
+  // Check if group has ended all sessions in its cycle
+  const groupEnded = Boolean(
+    isGroupEnded(groupFinances, undefined, pricingTiers) ||
+    (
+      Array.isArray(student.attendance) &&
+      student.attendance.length >= cycleSessions &&
+      ['P', 'A', 'M', 'S', 'ح', 'غ', 'م'].includes(String(student.attendance[cycleSessions - 1] || '').trim().toUpperCase())
+    )
+  );
+
   // RULE: If student attended only 1 session and did not pay:
   // The session does NOT count for the school (fee = 0, schoolEarn = 0, debt = 0)
-  // and does NOT count for the teacher (teacherPay = 0).
-  // But if student attended 1 session and PAID, it DOES count for both school and teacher.
-  const isOneSessionUnpaid = totalAttendance === 1 && totalReceived === 0 && student.discount !== 'تعويض';
+  // and does NOT count for the teacher (teacherPay = 0),
+  // BUT ONLY when the group has ended all its sessions (groupEnded).
+  // While the group is ongoing (e.g. today was session 1), count the session normally.
+  const isOneSessionUnpaid = groupEnded && totalAttendance === 1 && totalReceived === 0 && student.discount !== 'تعويض';
 
   if (isOneSessionUnpaid) {
     return {
@@ -203,7 +218,7 @@ export const calcStudentFinancesPure = (
   }
 
   // Calculate session info
-  const sessionInfo = getStudentSessionInfo(student.attendance, cycleSessions, totalReceived);
+  const sessionInfo = getStudentSessionInfo(student.attendance, cycleSessions, totalReceived, groupEnded);
   const countedSessions = sessionInfo.countedSessions > 0 ? sessionInfo.countedSessions : cycleSessions;
 
   // Fee calculation based on discount and counted sessions
@@ -423,7 +438,8 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
           ...gSheet,
           groupId: finalGid,
           isVip: isVipGroup,
-          sessionCount: 4
+          sessionCount: gSheet.sessionCount || 4,
+          students: cleanStudents
         }
       );
 
@@ -2409,6 +2425,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const cycleSessions = group.sessionCount || 4;
     let totalPossibleSlots = 0;
 
+    const groupEnded = isGroupEnded(group, undefined, dataRef.current.pricingTiers);
+
     realStudents.forEach((s) => {
       totalExpected += s.fee || 0;
       totalReceived += s.totalReceived || 0;
@@ -2417,8 +2435,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       totalDebt += s.debt && s.debt > 0 ? s.debt : 0;
       totalPresentSlots += (s.attendance || []).filter((a) => a === 'P' || a === 'M').length;
 
-      const info = getStudentSessionInfo(s.attendance, cycleSessions, s.totalReceived);
-      const isOneSessionUnpaid = (s.attendance || []).filter((a) => a === 'P' || a === 'M').length === 1 && (s.totalReceived || 0) === 0 && s.discount !== 'تعويض';
+      const info = getStudentSessionInfo(s.attendance, cycleSessions, s.totalReceived, groupEnded);
+      const isOneSessionUnpaid = groupEnded && (s.attendance || []).filter((a) => a === 'P' || a === 'M').length === 1 && (s.totalReceived || 0) === 0 && s.discount !== 'تعويض';
       totalPossibleSlots += info.countedSessions > 0 ? info.countedSessions : (isOneSessionUnpaid ? 0 : cycleSessions);
     });
 
