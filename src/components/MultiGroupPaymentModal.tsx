@@ -248,7 +248,7 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
         return {
           ...item,
           isSelected: nextSelected,
-          payingNow: nextSelected ? (item.currentDebt > 0 ? item.currentDebt : item.totalFee) : ''
+          payingNow: nextSelected ? (item.currentDebt > 0 ? item.currentDebt : '') : ''
         };
       })
     );
@@ -352,15 +352,15 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
     return i.currentDebt > 0 || i.isNewEnrollment;
   });
 
+  const selectedItems = groupItems.filter((i) => i.isSelected);
   const payingItems = groupItems.filter((i) => i.isSelected && Number(i.payingNow) > 0);
   const totalPaidNow = payingItems.reduce((sum, i) => sum + (Number(i.payingNow) || 0), 0);
-  const totalFees = groupItems.filter((i) => i.isSelected).reduce((sum, i) => sum + i.totalFee, 0);
-  const totalRemainingDebt = groupItems
-    .filter((i) => i.isSelected)
-    .reduce((sum, i) => {
-      const pay = Number(i.payingNow) || 0;
-      return sum + Math.max(0, i.currentDebt - pay);
-    }, 0);
+  const totalPreviouslyPaid = selectedItems.reduce((sum, i) => sum + (i.totalReceived || 0), 0);
+  const totalFees = selectedItems.reduce((sum, i) => sum + i.totalFee, 0);
+  const totalRemainingDebt = selectedItems.reduce((sum, i) => {
+    const pay = Number(i.payingNow) || 0;
+    return sum + Math.max(0, i.currentDebt - pay);
+  }, 0);
 
   // Save payments & print combined receipt
   const handleSaveAndPrint = (shouldPrint: boolean) => {
@@ -393,7 +393,19 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
     playSuccessChime();
 
     if (shouldPrint) {
-      handlePrintReceipt(results);
+      // Also include any selected items that had 0 payingNow (already paid) in the receipt
+      const nonPayingSelected = selectedItems
+        .filter((i) => !(Number(i.payingNow) > 0))
+        .map((item) => ({
+          groupId: item.groupId,
+          rowId: 0,
+          fee: item.totalFee,
+          paidNow: 0,
+          totalReceived: item.totalReceived,
+          debt: item.currentDebt
+        }));
+
+      handlePrintReceipt([...results, ...nonPayingSelected]);
       setTimeout(() => {
         setIsSaving(false);
         onClose();
@@ -402,6 +414,30 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
       setIsSaving(false);
       onClose();
     }
+  };
+
+  // Print Combined Unified Receipt Only (Without recording any payment)
+  const handlePrintOnly = () => {
+    if (!selectedStudent) {
+      alert('يرجى اختيار تلميذ أولاً');
+      return;
+    }
+
+    if (selectedItems.length === 0) {
+      alert('يرجى تحديد فوج واحد على الأقل لطباعة الوصل');
+      return;
+    }
+
+    const receiptRecords = selectedItems.map((item) => ({
+      groupId: item.groupId,
+      rowId: 0,
+      fee: item.totalFee,
+      paidNow: Number(item.payingNow) || 0,
+      totalReceived: item.totalReceived,
+      debt: Math.max(0, item.currentDebt - (Number(item.payingNow) || 0))
+    }));
+
+    handlePrintReceipt(receiptRecords);
   };
 
   // Print Combined Unified Receipt
@@ -441,10 +477,11 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
     const receiptNo = `PAY-${Date.now().toString().slice(-6)}`;
 
     const recordsToPrint = receiptScope === 'paid_only'
-      ? results.filter((r) => r.paidNow > 0)
+      ? results.filter((r) => r.paidNow > 0 || r.totalReceived > 0)
       : results;
 
-    const grandTotalPaid = recordsToPrint.reduce((s, r) => s + r.paidNow, 0);
+    const grandTotalPaidNow = recordsToPrint.reduce((s, r) => s + r.paidNow, 0);
+    const grandTotalReceived = recordsToPrint.reduce((s, r) => s + (r.paidNow > 0 ? r.paidNow : r.totalReceived), 0);
     const grandTotalDebt = recordsToPrint.reduce((s, r) => s + r.debt, 0);
 
     if (receiptFormat === 'thermal') {
@@ -510,11 +547,14 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
             ${recordsToPrint
               .map((rec) => {
                 const g = data.groups.find((grp) => grp.id === rec.groupId);
+                const amountStr = rec.paidNow > 0
+                  ? `+ ${rec.paidNow.toLocaleString()} دج (الآن)`
+                  : `${rec.totalReceived.toLocaleString()} دج`;
                 return `
                 <div class="group-box">
                   <div class="flex-row bold">
                     <span>${rec.groupId} - ${g?.subject || ''}</span>
-                    <span>+ ${rec.paidNow.toLocaleString()} دج</span>
+                    <span>${amountStr}</span>
                   </div>
                   <div class="flex-row" style="color: #333; font-size: 9px;">
                     <span>الأستاذ: ${g?.teacherName || ''}</span>
@@ -527,8 +567,8 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
 
             <div class="divider"></div>
             <div class="flex-row bold" style="font-size: 13px; border: 1.5px solid #000; padding: 4px; background: #eee;">
-              <span>المجموع المسدد الآن:</span>
-              <span>${grandTotalPaid.toLocaleString()} دج</span>
+              <span>${grandTotalPaidNow > 0 ? 'المجموع المسدد الآن:' : 'إجمالي المبالغ المسددة:'}</span>
+              <span>${(grandTotalPaidNow > 0 ? grandTotalPaidNow : grandTotalReceived).toLocaleString()} دج</span>
             </div>
             <div class="flex-row bold" style="font-size: 11px; margin-top: 3px;">
               <span>إجمالي المتبقي كدين:</span>
@@ -595,7 +635,7 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
                   <th>المادة</th>
                   <th>الأستاذ</th>
                   <th>المبلغ المستحق</th>
-                  <th>المسدد الآن</th>
+                  <th>${grandTotalPaidNow > 0 ? 'المسدد الآن' : 'المبلغ المسدد'}</th>
                   <th>الوضعية</th>
                 </tr>
               </thead>
@@ -603,15 +643,16 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
                 ${recordsToPrint
                   .map((rec) => {
                     const g = data.groups.find((grp) => grp.id === rec.groupId);
+                    const amountDisplay = rec.paidNow > 0 ? rec.paidNow : rec.totalReceived;
                     return `
                     <tr>
                       <td style="font-weight: bold; text-align: center;">${rec.groupId}</td>
                       <td>${g?.subject || ''}</td>
                       <td>${g?.teacherName || ''}</td>
                       <td style="text-align: center;">${rec.fee.toLocaleString()} دج</td>
-                      <td style="text-align: center; font-weight: bold; color: #0284c7;">${rec.paidNow.toLocaleString()} دج</td>
+                      <td style="text-align: center; font-weight: bold; color: #0284c7;">${amountDisplay.toLocaleString()} دج</td>
                       <td style="text-align: center; color: ${rec.debt > 0 ? '#b91c1c' : '#15803d'};">
-                        ${rec.debt > 0 ? `متبقي دين: ${rec.debt.toLocaleString()} دج` : 'خالص ✓'}
+                        ${rec.debt > 0 ? `متبقي دين: ${rec.debt.toLocaleString()} دج` : 'مسدد بالكامل ✓'}
                       </td>
                     </tr>
                   `;
@@ -622,8 +663,8 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
 
             <div class="totals-box">
               <div class="flex-row">
-                <span>المبلغ الإجمالي المسدد الآن:</span>
-                <span class="total-paid">${grandTotalPaid.toLocaleString()} دج</span>
+                <span>${grandTotalPaidNow > 0 ? 'المبلغ الإجمالي المسدد الآن:' : 'إجمالي المبالغ المسددة:'}</span>
+                <span class="total-paid">${(grandTotalPaidNow > 0 ? grandTotalPaidNow : grandTotalReceived).toLocaleString()} دج</span>
               </div>
               <div class="flex-row" style="color: ${grandTotalDebt > 0 ? '#b91c1c' : '#15803d'}; font-weight: bold;">
                 <span>إجمالي الديون المتبقية:</span>
@@ -1180,8 +1221,8 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
               {/* Totals Summary Banner */}
               <div
                 style={{
-                  backgroundColor: '#f0fdf4',
-                  border: '1.5px solid #86efac',
+                  backgroundColor: totalPaidNow > 0 ? '#f0fdf4' : '#f0f9ff',
+                  border: `1.5px solid ${totalPaidNow > 0 ? '#86efac' : '#bae6fd'}`,
                   borderRadius: 'var(--md-shape-md)',
                   padding: '6px 12px',
                   display: 'flex',
@@ -1193,20 +1234,24 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
                 }}
               >
                 <div>
-                  <span style={{ fontSize: '0.76rem', color: '#166534', fontWeight: 700 }}>
-                    الأفواج المحددة للدفع: <strong>{payingItems.length} فوج</strong>
+                  <span style={{ fontSize: '0.76rem', color: totalPaidNow > 0 ? '#166534' : '#0369a1', fontWeight: 700 }}>
+                    {totalPaidNow > 0 ? (
+                      <>الأفواج المحددة للدفع: <strong>{payingItems.length} فوج</strong></>
+                    ) : (
+                      <>الأفواج المحددة للوصل: <strong>{selectedItems.length} فوج</strong> <span style={{ fontSize: '0.7rem', fontWeight: 500 }}>(طباعة وصل فقط)</span></>
+                    )}
                   </span>
-                  <div style={{ fontSize: '0.72rem', color: '#15803d', marginTop: '1px' }}>
+                  <div style={{ fontSize: '0.72rem', color: totalPaidNow > 0 ? '#15803d' : '#0284c7', marginTop: '1px' }}>
                     المتبقي كدين بعد هذا التسديد: <strong>{totalRemainingDebt.toLocaleString()} دج</strong>
                   </div>
                 </div>
 
                 <div style={{ textAlign: 'left' }}>
-                  <span style={{ fontSize: '0.74rem', color: '#166534', fontWeight: 700, display: 'block' }}>
-                    المبلغ الإجمالي المستلم الآن:
+                  <span style={{ fontSize: '0.74rem', color: totalPaidNow > 0 ? '#166534' : '#0369a1', fontWeight: 700, display: 'block' }}>
+                    {totalPaidNow > 0 ? 'المبلغ الإجمالي المستلم الآن:' : 'المستحقات المسددة مسبقاً:'}
                   </span>
-                  <span style={{ fontSize: '1.25rem', fontWeight: 900, color: '#15803d' }}>
-                    {totalPaidNow.toLocaleString()}{' '}
+                  <span style={{ fontSize: '1.25rem', fontWeight: 900, color: totalPaidNow > 0 ? '#15803d' : '#0284c7' }}>
+                    {(totalPaidNow > 0 ? totalPaidNow : totalPreviouslyPaid).toLocaleString()}{' '}
                     <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>دج</span>
                   </span>
                 </div>
@@ -1300,16 +1345,39 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
           </button>
 
           {selectedStudent && (
-            <div style={{ display: 'flex', gap: '8px' }}>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <button
+                type="button"
+                onClick={handlePrintOnly}
+                disabled={selectedItems.length === 0}
+                className="m3-btn m3-btn-outlined"
+                style={{
+                  borderColor: '#0284c7',
+                  color: '#0284c7',
+                  fontWeight: 800,
+                  height: '30px',
+                  fontSize: '0.78rem',
+                  padding: '3px 12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px'
+                }}
+                title="طباعة أو إعادة استخراج الوصل الموحد للأفواج المحددة دون تسجيل أي دفع جديد"
+              >
+                <Printer size={15} />
+                <span>طباعة الوصل فقط 🖨️</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => handleSaveAndPrint(false)}
                 disabled={isSaving || payingItems.length === 0}
                 className="m3-btn m3-btn-tonal"
                 style={{ fontWeight: 800, height: '30px', fontSize: '0.78rem', padding: '3px 12px' }}
+                title="حفظ المبالغ المدخلة كدفعات جديدة دون طباعة"
               >
                 <Check size={15} />
-                <span>حفظ بدون طباعة</span>
+                <span>حفظ دفع بدون طباعة</span>
               </button>
 
               <button
@@ -1329,9 +1397,10 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
                   gap: '6px',
                   boxShadow: '0 2px 6px rgba(2, 132, 199, 0.25)'
                 }}
+                title="تسجيل دفعة مالية جديدة وطباعة الوصل الموحد"
               >
                 <Printer size={15} />
-                <span>حفظ وطباعة الوصل الموحد 🖨️</span>
+                <span>تسجيل الدفع وطباعة الوصل 🖨️</span>
               </button>
             </div>
           )}
