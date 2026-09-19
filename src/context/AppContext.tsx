@@ -130,6 +130,60 @@ interface AppContextType {
 const STORAGE_KEY = 'da3m_center_management_data_v1';
 const THEME_KEY = 'da3m_theme';
 const LANG_KEY = 'da3m_lang';
+const UNSYNCED_CHANGES_KEY = 'da3m_has_unsynced_changes_v1';
+const LAST_LOCAL_EDIT_KEY = 'da3m_last_local_edit_time_v1';
+
+// Helper to safely merge remote snapshot with local state so that locally marked presence ('P' / 'M')
+// is NEVER erased by a stale remote snapshot when internet was cut during scans.
+function mergeAttendanceSafely(remote: CenterData, local: CenterData): CenterData {
+  if (!remote || !remote.groupData || !local || !local.groupData) return remote;
+  const merged: CenterData = { ...remote, groupData: { ...remote.groupData } };
+
+  for (const [gid, localGroup] of Object.entries(local.groupData)) {
+    const remoteGroup = merged.groupData[gid];
+    if (!remoteGroup || !remoteGroup.students || !localGroup.students) continue;
+
+    let hasDifferences = false;
+    const mergedStudents = remoteGroup.students.map((rStudent) => {
+      const lStudent = localGroup.students.find(
+        (s) => s.rowId === rStudent.rowId || (s.name && s.name.trim() === rStudent.name?.trim())
+      );
+      if (!lStudent || !lStudent.attendance) return rStudent;
+
+      const newAttendance = [...(rStudent.attendance || [])];
+      let attendanceChanged = false;
+
+      (lStudent.attendance || []).forEach((lStatus, idx) => {
+        const cleanL = (lStatus || '').trim().toUpperCase();
+        const cleanR = (newAttendance[idx] || '').trim().toUpperCase();
+        // If local has marked attendance (P or M) and remote is empty or unmarked, PRESERVE local attendance!
+        if ((cleanL === 'P' || cleanL === 'M' || cleanL === 'ح' || cleanL === 'م') && !cleanR) {
+          while (newAttendance.length <= idx) newAttendance.push('');
+          newAttendance[idx] = cleanL;
+          attendanceChanged = true;
+          hasDifferences = true;
+        }
+      });
+
+      if (attendanceChanged) {
+        return {
+          ...rStudent,
+          attendance: newAttendance
+        };
+      }
+      return rStudent;
+    });
+
+    if (hasDifferences) {
+      merged.groupData[gid] = {
+        ...remoteGroup,
+        students: mergedStudents
+      };
+    }
+  }
+
+  return merged;
+}
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
@@ -662,8 +716,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         )
       : 'server'
   );
-  const hasPendingChangesRef = useRef<boolean>(false);
-  const lastLocalEditTimeRef = useRef<number>(0);
+  const hasPendingChangesRef = useRef<boolean>(
+    typeof window !== 'undefined' && localStorage.getItem(UNSYNCED_CHANGES_KEY) === 'true'
+  );
+  const lastLocalEditTimeRef = useRef<number>(
+    typeof window !== 'undefined' ? Number(localStorage.getItem(LAST_LOCAL_EDIT_KEY)) || 0 : 0
+  );
 
   // Sync relational tables (groups, teachers, students) in background for Supabase Table Editor
   const syncRelationalTables = async (centerData: CenterData) => {
@@ -828,19 +886,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const saveToCloud = useCallback(async (dataSnapshot?: CenterData) => {
     if (isSavingRef.current) {
       hasPendingChangesRef.current = true;
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(UNSYNCED_CHANGES_KEY, 'true');
+      }
       return;
     }
 
     try {
       setCloudSyncStatus('syncing');
       isSavingRef.current = true;
-      hasPendingChangesRef.current = false;
 
       const targetData = dataSnapshot || dataRef.current;
+      const now = Date.now();
       const dataToSave = {
         ...targetData,
         _client_id: clientIdRef.current,
-        _saved_at: Date.now()
+        _saved_at: now,
+        _last_modified_at: (targetData as any)._last_modified_at || now
       };
 
       const { error } = await supabase
@@ -853,25 +915,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       if (error) {
         console.error('Supabase cloud sync error:', error);
-        setCloudSyncStatus('error');
+        setCloudSyncStatus('offline');
+        hasPendingChangesRef.current = true;
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(UNSYNCED_CHANGES_KEY, 'true');
+        }
       } else {
+        // SUCCESS! Clear pending flags
+        hasPendingChangesRef.current = false;
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem(UNSYNCED_CHANGES_KEY);
+        }
         setCloudSyncStatus('synced');
         setLastSyncedAt(new Date());
         // Sync relational tables in background so Table Editor always shows live rows
         syncRelationalTables(targetData).catch((e) => console.warn(e));
       }
     } catch (err) {
-      console.error('Failed to sync to Supabase:', err);
+      console.error('Failed to sync to Supabase (offline or network error):', err);
       setCloudSyncStatus('offline');
+      hasPendingChangesRef.current = true;
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(UNSYNCED_CHANGES_KEY, 'true');
+      }
     } finally {
       isSavingRef.current = false;
       // If user made edits while the network request was in flight, schedule save of latest data
       if (hasPendingChangesRef.current) {
-        hasPendingChangesRef.current = false;
         if (cloudSyncTimerRef.current) clearTimeout(cloudSyncTimerRef.current);
         cloudSyncTimerRef.current = setTimeout(() => {
           saveToCloud();
-        }, 300);
+        }, 1500);
       }
     }
   }, []);
@@ -911,6 +985,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // Fetch latest from Supabase cloud
     const fetchCloudData = async () => {
       try {
+        const hasLocalUnsynced =
+          typeof window !== 'undefined' && localStorage.getItem(UNSYNCED_CHANGES_KEY) === 'true';
+
         const { data: remoteRow, error } = await supabase
           .from('center_data')
           .select('data, updated_at')
@@ -926,15 +1003,34 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
 
         if (remoteRow && remoteRow.data) {
-          // If user already made local edits before cloud fetch finished, do not overwrite
-          if (hasPendingChangesRef.current || (Date.now() - lastLocalEditTimeRef.current < 2500)) {
+          const remoteData = remoteRow.data as any;
+          const remoteLastModified =
+            remoteData._last_modified_at ||
+            remoteData._saved_at ||
+            (remoteRow.updated_at ? new Date(remoteRow.updated_at).getTime() : 0);
+
+          const localLastModified =
+            (dataRef.current as any)?._last_modified_at ||
+            lastLocalEditTimeRef.current ||
+            0;
+
+          // CRITICAL: If local has unsynced changes or is newer than cloud, NEVER OVERWRITE!
+          // Instead, push local data to the cloud so offline changes are saved!
+          if (hasLocalUnsynced || hasPendingChangesRef.current || localLastModified > remoteLastModified) {
+            console.log('Preserving local offline data and syncing to Supabase cloud...');
+            setCloudSyncStatus('syncing');
+            saveToCloud(dataRef.current);
             return;
           }
-          const { cleaned } = sanitizeData(remoteRow.data as CenterData);
+
+          // Smart Attendance Merge: Even if remote seems newer, never drop local attendance marked 'P' or 'M'
+          const mergedRemote = mergeAttendanceSafely(remoteData, dataRef.current);
+          const { cleaned } = sanitizeData(mergedRemote);
           dataRef.current = cleaned;
           setData(cleaned);
           try {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(cleaned));
+            localStorage.removeItem(UNSYNCED_CHANGES_KEY);
           } catch (e) {}
           setLastSyncedAt(new Date(remoteRow.updated_at || Date.now()));
           setCloudSyncStatus('synced');
@@ -966,12 +1062,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               return;
             }
 
-            // 2. Prevent race conditions: don't overwrite if we are currently saving or have pending local edits
-            if (isSavingRef.current || hasPendingChangesRef.current || (Date.now() - lastLocalEditTimeRef.current < 2500)) {
+            // 2. Prevent race conditions: don't overwrite if we are currently saving or have pending local edits or unsynced changes
+            const hasLocalUnsynced =
+              typeof window !== 'undefined' && localStorage.getItem(UNSYNCED_CHANGES_KEY) === 'true';
+
+            if (
+              isSavingRef.current ||
+              hasPendingChangesRef.current ||
+              hasLocalUnsynced ||
+              Date.now() - lastLocalEditTimeRef.current < 5000
+            ) {
               return;
             }
 
-            const { cleaned } = sanitizeData(incoming as CenterData);
+            const merged = mergeAttendanceSafely(incoming as CenterData, dataRef.current);
+            const { cleaned } = sanitizeData(merged);
             dataRef.current = cleaned;
             setData(cleaned);
             try {
@@ -984,26 +1089,63 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       )
       .subscribe();
 
+    // 3. Online/Offline & Auto-Sync listeners
+    const handleOnline = () => {
+      console.log('Internet reconnected. Syncing pending data to Supabase...');
+      setCloudSyncStatus('syncing');
+      saveToCloud(dataRef.current);
+    };
+
+    const handleOffline = () => {
+      console.log('Internet disconnected. Operating in offline mode with local persistence.');
+      setCloudSyncStatus('offline');
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    // Heartbeat auto-sync every 8 seconds when pending changes exist
+    const heartbeatTimer = setInterval(() => {
+      const hasUnsynced =
+        (typeof window !== 'undefined' && localStorage.getItem(UNSYNCED_CHANGES_KEY) === 'true') ||
+        hasPendingChangesRef.current;
+      if (hasUnsynced && !isSavingRef.current) {
+        saveToCloud(dataRef.current);
+      }
+    }, 8000);
+
     return () => {
       isMounted = false;
       if (cloudSyncTimerRef.current) clearTimeout(cloudSyncTimerRef.current);
+      clearInterval(heartbeatTimer);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
       supabase.removeChannel(channel);
     };
   }, [saveToCloud]);
 
   // Save changes locally and debounce sync to Supabase
   const persistData = (newData: CenterData) => {
+    const now = Date.now();
+    const stampedData: CenterData = {
+      ...newData,
+      _last_modified_at: now,
+      _client_id: clientIdRef.current
+    } as any;
+
     // 1. Synchronously update dataRef so subsequent operations read latest state immediately
-    dataRef.current = newData;
+    dataRef.current = stampedData;
     hasPendingChangesRef.current = true;
-    lastLocalEditTimeRef.current = Date.now();
+    lastLocalEditTimeRef.current = now;
 
     // 2. Update React state
-    setData(newData);
+    setData(stampedData);
 
-    // 3. Save to localStorage immediately
+    // 3. Save to localStorage immediately with persistent unsynced flag
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(newData));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(stampedData));
+      localStorage.setItem(UNSYNCED_CHANGES_KEY, 'true');
+      localStorage.setItem(LAST_LOCAL_EDIT_KEY, now.toString());
     } catch (e) {
       console.error('Failed to persist data:', e);
     }
@@ -1023,7 +1165,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (cloudSyncTimerRef.current) {
       clearTimeout(cloudSyncTimerRef.current);
     }
-    await saveToCloud(data);
+    await saveToCloud(dataRef.current);
   };
 
   const toggleTheme = () => {

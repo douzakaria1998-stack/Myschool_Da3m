@@ -52,6 +52,7 @@ import {
 } from '../utils/sessionUtils';
 import Link from 'next/link';
 import { getBarcodeCandidates, normalizeArabicName, normalizeScannedBarcode } from '../utils/barcodeUtils';
+import { recordScanToLog, getScanLog } from '../utils/scanLogger';
 
 export interface PendingCoverRequest {
   id: string;
@@ -83,7 +84,10 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     clearPrintQueue,
     addStudent,
     transferStudent,
-    updateStudentFullFinances
+    updateStudentFullFinances,
+    cloudSyncStatus,
+    lastSyncedAt,
+    syncNow
   } = useApp();
 
   // Smart Session Auto-Detection Engine (Active by default)
@@ -920,6 +924,19 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
 
     const nowTimeStr = new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
+    // CRITICAL OFFLINE RESILIENCE: Log scan into persistent local audit log
+    recordScanToLog({
+      groupId,
+      sessionIndex: sessionIdx,
+      studentRowId: student.rowId,
+      studentName: student.name,
+      barcode: student.barcode || '',
+      dateStr: new Date().toISOString().split('T')[0],
+      timeStr: nowTimeStr,
+      status: isPaid ? (isCover ? 'M' : 'P') : 'DEBT',
+      isCover: !!isCover
+    });
+
     // Add to Live Recent Scans History on the Right
     setRecentScans((prev) => [
       {
@@ -1120,6 +1137,16 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     if (ok) {
       // Mark as present 'P' in new group
       updateAttendance(targetActiveGroupId, student.rowId, sessionIdx, 'P');
+      recordScanToLog({
+        groupId: targetActiveGroupId,
+        sessionIndex: sessionIdx,
+        studentRowId: student.rowId,
+        studentName: student.name,
+        barcode: student.barcode || '',
+        dateStr: new Date().toISOString().split('T')[0],
+        timeStr: new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' }),
+        status: 'P'
+      });
       playSuccessChime();
 
       setRecentScans((prev) =>
@@ -1440,6 +1467,17 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
 
     const payAmt = parseFloat(coverAmountInput) || 0;
     recordCoverAttendance(targetGid, originalGroupId, student.rowId, coverSessionIdx, payAmt);
+    recordScanToLog({
+      groupId: targetGid,
+      sessionIndex: coverSessionIdx,
+      studentRowId: student.rowId,
+      studentName: student.name,
+      barcode: student.barcode || '',
+      dateStr: new Date().toISOString().split('T')[0],
+      timeStr: new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' }),
+      status: 'M',
+      isCover: true
+    });
     playSuccessChime();
 
     setRecentScans((prev) => [
@@ -1463,6 +1501,51 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     setTimeout(() => setCoverSuccessMsg(null), 4000);
   };
 
+  // Local Scan Log Recovery: Recover any offline/uncounted scans from immutable local audit log
+  const handleRecoverFromScanLog = () => {
+    const scans = getScanLog();
+    if (!scans || scans.length === 0) {
+      alert('لا توجد أي مسوحات مسجلة في السجل المحلي.');
+      return;
+    }
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const recentScans = scans.filter(
+      (s) => s.dateStr === todayStr || Date.now() - s.timestamp < 24 * 3600 * 1000
+    );
+
+    if (recentScans.length === 0) {
+      alert('لا توجد مسوحات مسجلة خلال آخر 24 ساعة في السجل المحلي.');
+      return;
+    }
+
+    let restoredCount = 0;
+    recentScans.forEach((scan) => {
+      const group = data.groupData[scan.groupId];
+      if (!group) return;
+      const student = group.students.find(
+        (s) =>
+          !isSummaryRow(s, scan.groupId) &&
+          (s.rowId === scan.studentRowId ||
+            (scan.barcode && s.barcode && s.barcode.toUpperCase() === scan.barcode.toUpperCase()) ||
+            normalizeArabicName(s.name) === normalizeArabicName(scan.studentName))
+      );
+      if (student) {
+        const currAtt = student.attendance?.[scan.sessionIndex];
+        if (currAtt !== 'P' && currAtt !== 'M') {
+          updateAttendance(scan.groupId, student.rowId, scan.sessionIndex, scan.status === 'M' ? 'M' : 'P');
+          restoredCount++;
+        }
+      }
+    });
+
+    if (restoredCount > 0) {
+      alert(`تم بنجاح استعادة حضور ${restoredCount} تلميذ من السجل المحلي وإضافتهم للأفواج!`);
+    } else {
+      alert('جميع التلاميذ المسجلين في السجل المحلي محتسبون بالفعل في الحضور ولا يوجد نقص.');
+    }
+  };
+
   // Total pending items in the Live Queue
   const totalQueueCount = pendingCoverRequests.length + pendingDebtors.length;
 
@@ -1472,6 +1555,108 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
   // ==========================================
   const renderCodebarSection = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      {/* Cloud Sync & Offline Status Indicator Banner */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '8px',
+          padding: '6px 12px',
+          borderRadius: '8px',
+          backgroundColor:
+            cloudSyncStatus === 'synced'
+              ? '#f0fdf4'
+              : cloudSyncStatus === 'syncing'
+              ? '#eff6ff'
+              : '#fffbeb',
+          border:
+            cloudSyncStatus === 'synced'
+              ? '1px solid #bbf7d0'
+              : cloudSyncStatus === 'syncing'
+              ? '1px solid #bfdbfe'
+              : '1px solid #fde68a',
+          fontSize: '0.75rem',
+          fontWeight: 700
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          {cloudSyncStatus === 'synced' && (
+            <>
+              <CheckCircle2 size={15} color="#16a34a" />
+              <span style={{ color: '#15803d' }}>
+                متصل بالسحابة (مزامنة فورية نشطة) {lastSyncedAt ? `• آخر حفظ: ${lastSyncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}
+              </span>
+            </>
+          )}
+          {cloudSyncStatus === 'syncing' && (
+            <>
+              <RefreshCw size={15} className="animate-spin" color="#2563eb" />
+              <span style={{ color: '#1d4ed8' }}>جاري حفظ التغييرات في السحابة...</span>
+            </>
+          )}
+          {cloudSyncStatus === 'offline' && (
+            <>
+              <AlertTriangle size={15} color="#d97706" />
+              <span style={{ color: '#b45309' }}>
+                وضع أوفلاين (غير متصل) - المسح والحضور محفوظ محلياً بأمان تام وسيُرفع فور توفر الإنترنت
+              </span>
+            </>
+          )}
+          {cloudSyncStatus === 'error' && (
+            <>
+              <AlertTriangle size={15} color="#dc2626" />
+              <span style={{ color: '#b91c1c' }}>تعذر الاتصال بالسحابة - الحضور محفوظ محلياً</span>
+            </>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <button
+            type="button"
+            onClick={() => syncNow()}
+            className="m3-btn-text"
+            style={{
+              fontSize: '0.72rem',
+              fontWeight: 800,
+              padding: '2px 8px',
+              borderRadius: '4px',
+              backgroundColor: 'rgba(0,0,0,0.05)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px'
+            }}
+            title="مزامنة فورية مع السحابة"
+          >
+            <RefreshCw size={12} />
+            <span>مزامنة الآن</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleRecoverFromScanLog}
+            className="m3-btn-text"
+            style={{
+              fontSize: '0.72rem',
+              fontWeight: 800,
+              padding: '2px 8px',
+              borderRadius: '4px',
+              backgroundColor: 'rgba(0,0,0,0.05)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              color: '#334155'
+            }}
+            title="فحص السجل المحلي واستعادة أي حضور مسجل لم يُحفظ في الفوج"
+          >
+            <RotateCcw size={12} />
+            <span>استعادة من السجل المحلي</span>
+          </button>
+        </div>
+      </div>
       {/* Active Group Cards Container */}
       <div
         style={{
