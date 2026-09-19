@@ -33,6 +33,7 @@ import {
   sortGroupsActiveFirstOldToNew
 } from '../utils/sessionUtils';
 import { normalizeArabicName } from '../utils/barcodeUtils';
+import { recordPaymentTransaction } from '../utils/paymentLogger';
 
 interface AppContextType {
   data: CenterData;
@@ -1312,6 +1313,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     };
     persistData(updatedData);
+
+    if (paymentAmount !== undefined && paymentAmount > 0) {
+      const student = group.students.find((s) => s.rowId === rowId);
+      if (student) {
+        recordPaymentTransaction({
+          groupId,
+          groupSubject: group.subject,
+          teacherName: group.teacherName,
+          studentRowId: rowId,
+          studentName: student.name,
+          studentPhone: student.phone,
+          studentBarcode: student.barcode,
+          sessionIndex,
+          amount: paymentAmount,
+          source: 'scanner'
+        });
+      }
+    }
   };
 
   // Mark all students present for a session in a single batch operation
@@ -1514,6 +1533,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     };
     persistData(updatedData);
+
+    if (paymentAmount && paymentAmount > 0) {
+      recordPaymentTransaction({
+        groupId: activeGroupId,
+        groupSubject: activeGroup.subject,
+        teacherName: activeGroup.teacherName,
+        studentRowId: originalStudent.rowId,
+        studentName: originalStudent.name,
+        studentPhone: originalStudent.phone,
+        studentBarcode: originalStudent.barcode,
+        sessionIndex,
+        amount: paymentAmount,
+        source: 'scanner'
+      });
+    }
   };
 
   // Update payment installment
@@ -1544,6 +1578,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     };
     persistData(updatedData);
+
+    if (amount !== '' && Number(amount) > 0) {
+      const student = group.students.find((s) => s.rowId === rowId);
+      if (student) {
+        recordPaymentTransaction({
+          groupId,
+          groupSubject: group.subject,
+          teacherName: group.teacherName,
+          studentRowId: rowId,
+          studentName: student.name,
+          studentPhone: student.phone,
+          studentBarcode: student.barcode,
+          sessionIndex: paymentIndex,
+          amount: Number(amount),
+          source: 'payment_modal'
+        });
+      }
+    }
   };
 
   // Atomically update student payments and discount
@@ -1579,6 +1631,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     };
     persistData(updatedData);
+
+    const student = group.students.find((s) => s.rowId === rowId);
+    if (student) {
+      newPayments.forEach((p, idx) => {
+        const oldP = Number(student.payments?.[idx]) || 0;
+        const newP = Number(p) || 0;
+        if (newP > oldP) {
+          recordPaymentTransaction({
+            groupId,
+            groupSubject: group.subject,
+            teacherName: group.teacherName,
+            studentRowId: rowId,
+            studentName: student.name,
+            studentPhone: student.phone,
+            studentBarcode: student.barcode,
+            sessionIndex: idx,
+            amount: newP - oldP,
+            source: 'payment_modal'
+          });
+        }
+      });
+    }
   };
 
   // Batch update payments for multiple students for a specific session/day
@@ -1617,6 +1691,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     };
     persistData(updatedData);
+
+    studentPayments.forEach((sp) => {
+      const amt = Number(sp.amount) || 0;
+      if (amt > 0) {
+        const student = group.students.find((s) => s.rowId === sp.rowId);
+        if (student) {
+          recordPaymentTransaction({
+            groupId,
+            groupSubject: group.subject,
+            teacherName: group.teacherName,
+            studentRowId: sp.rowId,
+            studentName: student.name,
+            studentPhone: student.phone,
+            studentBarcode: student.barcode,
+            sessionIndex,
+            amount: amt,
+            source: 'batch'
+          });
+        }
+      }
+    });
   };
 
   // Update discount
@@ -1913,6 +2008,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       groupData: updatedGroupData
     };
     persistData(updatedData);
+
+    results.forEach((r) => {
+      if (r.paidNow > 0) {
+        const grp = updatedGroupData[r.groupId];
+        recordPaymentTransaction({
+          groupId: r.groupId,
+          groupSubject: grp?.subject,
+          teacherName: grp?.teacherName,
+          studentRowId: r.rowId,
+          studentName: cleanName,
+          studentPhone: resolvedPhone,
+          studentBarcode: resolvedBarcode,
+          sessionIndex: 0,
+          amount: r.paidNow,
+          source: 'multi_group'
+        });
+      }
+    });
 
     return results;
   };

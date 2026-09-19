@@ -3,7 +3,8 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { useApp } from '../context/AppContext';
-import { Sun, Moon, Download, GraduationCap, School, CloudCheck, CloudOff, RefreshCw, Scan } from 'lucide-react';
+import { Sun, Moon, Download, GraduationCap, School, CloudCheck, CloudOff, RefreshCw, Scan, Clock } from 'lucide-react';
+import HourlyPaymentFilterModal from './HourlyPaymentFilterModal';
 
 export default function TopAppBar() {
   const {
@@ -20,6 +21,7 @@ export default function TopAppBar() {
   } = useApp();
 
   const [isManualSyncing, setIsManualSyncing] = useState(false);
+  const [isHourlyFilterOpen, setIsHourlyFilterOpen] = useState(false);
 
   const handleManualSync = async () => {
     setIsManualSyncing(true);
@@ -90,6 +92,29 @@ export default function TopAppBar() {
 
       {/* Action Buttons */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        {/* Hourly Income / Payments Filter Button */}
+        <button
+          onClick={() => setIsHourlyFilterOpen(true)}
+          className="m3-btn m3-btn-sm"
+          title={lang === 'ar' ? 'تصفية المداخيل حسب الساعات واليوم' : 'Hourly Income & Payments Filter'}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '6px 12px',
+            borderRadius: 'var(--md-shape-full)',
+            border: '1px solid #6ee7b7',
+            backgroundColor: '#ecfdf5',
+            color: '#065f46',
+            cursor: 'pointer',
+            fontSize: '0.8rem',
+            fontWeight: 700
+          }}
+        >
+          <Clock size={14} />
+          <span>{lang === 'ar' ? 'مداخيل الساعات 🕒' : 'Hourly Income'}</span>
+        </button>
+
         {/* Cloud Sync Status & Manual Sync Button */}
         <button
           onClick={handleManualSync}
@@ -208,6 +233,14 @@ export default function TopAppBar() {
           {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
         </button>
       </div>
+
+      {isHourlyFilterOpen && (
+        <HourlyPaymentFilterModal
+          isOpen={isHourlyFilterOpen}
+          onClose={() => setIsHourlyFilterOpen(false)}
+          initialGroupId={selectedGroup}
+        />
+      )}
     </header>
   );
 }

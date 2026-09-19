@@ -37,6 +37,8 @@ import RenewGroupModal from '../../components/RenewGroupModal';
 import GroupSearchSelect from '../../components/GroupSearchSelect';
 import GroupBadgesModal from '../../components/GroupBadgesModal';
 import SecurityPinModal from '../../components/SecurityPinModal';
+import HourlyPaymentFilterModal from '../../components/HourlyPaymentFilterModal';
+import { collectTodayAndHourlyPayments } from '../../utils/paymentLogger';
 import { normalizeScannedBarcode } from '../../utils/barcodeUtils';
 import {
   isSessionDateToday,
@@ -82,6 +84,21 @@ export default function AttendancePage() {
   const [isEditingDates, setIsEditingDates] = useState(false);
   const [showFinancialStats, setShowFinancialStats] = useState(false);
   const [isPinModalOpen, setIsPinModalOpen] = useState(false);
+  const [isHourlyModalOpen, setIsHourlyModalOpen] = useState(false);
+  const [statsDisplayMode, setStatsDisplayMode] = useState<'cumulative' | 'hourly'>('cumulative');
+  const [inlineFromTime, setInlineFromTime] = useState('13:00');
+  const [inlineToTime, setInlineToTime] = useState('15:00');
+  const [inlinePreset, setInlinePreset] = useState('1to3pm');
+
+  // Calculate live hourly payments for today and selected hours in this group
+  const inlineHourlySummary = React.useMemo(() => {
+    return collectTodayAndHourlyPayments(data, {
+      dateStr: formatToYYYYMMDD(new Date()),
+      fromTime: inlineFromTime,
+      toTime: inlineToTime,
+      groupId: group?.groupId || selectedGroup
+    });
+  }, [data, inlineFromTime, inlineToTime, group?.groupId, selectedGroup]);
   const [editableDates, setEditableDates] = useState<string[]>(
     group?.sessionDates || ['حصة 1', 'حصة 2', 'حصة 3', 'حصة 4', 'حصة 5', 'حصة 6', 'حصة 7', 'حصة 8']
   );
@@ -570,6 +587,26 @@ export default function AttendancePage() {
             <span>تصدير CSV</span>
           </button>
 
+          {/* Hourly Income Filter Trigger Button */}
+          <button
+            type="button"
+            onClick={() => setIsHourlyModalOpen(true)}
+            className="m3-btn m3-btn-sm"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              backgroundColor: '#ecfdf5',
+              color: '#065f46',
+              border: '1px solid #6ee7b7',
+              fontWeight: 800
+            }}
+            title="تصفية المداخيل حسب الساعات واليوم لمعرفة المبالغ المحصلة وعدد التلاميذ الذين دفعوا"
+          >
+            <Clock size={16} />
+            <span>تصفية المداخيل بالساعات 🕒</span>
+          </button>
+
           {/* Optional Toggle to show/hide Financial KPIs (Hidden by default as requested) */}
           <button
             type="button"
@@ -603,47 +640,321 @@ export default function AttendancePage() {
           className="m3-card"
           style={{
             padding: '16px 20px',
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
-            gap: '12px',
-            textAlign: 'center',
             backgroundColor: 'var(--md-sys-color-surface-container-lowest)',
-            animation: 'fadeIn 0.2s ease-in-out'
+            animation: 'fadeIn 0.2s ease-in-out',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px'
           }}
         >
-          <div>
-            <span style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)' }}>عدد التلاميذ</span>
-            <div style={{ fontSize: '1.25rem', fontWeight: 800 }}>{groupStats.studentCount} تلميذ</div>
-          </div>
-          <div>
-            <span style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)' }}>المطلوب (المجموع)</span>
-            <div style={{ fontSize: '1.25rem', fontWeight: 800 }}>
-              {groupStats.totalExpected.toLocaleString()} <span style={{ fontSize: '0.75rem' }}>دج</span>
+          {/* Sub-Header: Mode Selector between Cumulative and Hourly */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '8px',
+              paddingBottom: '10px',
+              borderBottom: '1px solid var(--md-sys-color-outline-variant)'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <button
+                type="button"
+                onClick={() => setStatsDisplayMode('cumulative')}
+                className={`m3-btn m3-btn-sm ${statsDisplayMode === 'cumulative' ? 'm3-btn-filled' : 'm3-btn-outlined'}`}
+                style={{ fontSize: '0.76rem', padding: '4px 12px', borderRadius: 'var(--md-shape-full)' }}
+              >
+                📊 المجموع التراكمي للفوج (كامل الموسم)
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setStatsDisplayMode('hourly')}
+                className={`m3-btn m3-btn-sm ${statsDisplayMode === 'hourly' ? 'm3-btn-filled' : 'm3-btn-outlined'}`}
+                style={{
+                  fontSize: '0.76rem',
+                  padding: '4px 12px',
+                  borderRadius: 'var(--md-shape-full)',
+                  backgroundColor: statsDisplayMode === 'hourly' ? '#059669' : undefined,
+                  color: statsDisplayMode === 'hourly' ? '#ffffff' : undefined,
+                  borderColor: '#059669'
+                }}
+              >
+                🕒 تصفية اليوم حسب الساعات (فلتر زمني حي)
+              </button>
             </div>
+
+            {statsDisplayMode === 'hourly' && (
+              <button
+                type="button"
+                onClick={() => setIsHourlyModalOpen(true)}
+                className="m3-btn-text"
+                style={{
+                  fontSize: '0.75rem',
+                  fontWeight: 800,
+                  color: '#059669',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
+              >
+                <span>فتح كشف التفاصيل والطباعة</span>
+                <span>👈</span>
+              </button>
+            )}
           </div>
-          <div>
-            <span style={{ fontSize: '0.75rem', color: 'var(--status-present)' }}>مجموع المحصل</span>
-            <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--status-present)' }}>
-              {groupStats.totalReceived.toLocaleString()} <span style={{ fontSize: '0.75rem' }}>دج</span>
+
+          {/* Quick Hourly Controls Bar when in Hourly Mode */}
+          {statsDisplayMode === 'hourly' && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '10px',
+                padding: '8px 12px',
+                backgroundColor: '#ecfdf5',
+                borderRadius: '8px',
+                border: '1px solid #a7f3d0'
+              }}
+            >
+              {/* Presets Chips */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.74rem', fontWeight: 800, color: '#065f46' }}>
+                  فترات سريعة:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInlinePreset('1to3pm');
+                    setInlineFromTime('13:00');
+                    setInlineToTime('15:00');
+                  }}
+                  className={`m3-btn-sm ${inlinePreset === '1to3pm' ? 'm3-btn-filled' : 'm3-btn-outlined'}`}
+                  style={{
+                    fontSize: '0.72rem',
+                    padding: '2px 8px',
+                    borderRadius: 'var(--md-shape-full)',
+                    backgroundColor: inlinePreset === '1to3pm' ? '#047857' : '#fff',
+                    color: inlinePreset === '1to3pm' ? '#fff' : '#047857'
+                  }}
+                >
+                  ⭐ 13:00 - 15:00 (1 PM - 3 PM)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInlinePreset('last2h');
+                    const curH = new Date().getHours();
+                    setInlineFromTime(`${String(Math.max(0, curH - 2)).padStart(2, '0')}:00`);
+                    setInlineToTime(`${String(curH + 1).padStart(2, '0')}:00`);
+                  }}
+                  className={`m3-btn-sm ${inlinePreset === 'last2h' ? 'm3-btn-filled' : 'm3-btn-outlined'}`}
+                  style={{
+                    fontSize: '0.72rem',
+                    padding: '2px 8px',
+                    borderRadius: 'var(--md-shape-full)',
+                    backgroundColor: inlinePreset === 'last2h' ? '#047857' : '#fff',
+                    color: inlinePreset === 'last2h' ? '#fff' : '#047857'
+                  }}
+                >
+                  آخر ساعتين ⏳
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInlinePreset('allDay');
+                    setInlineFromTime('00:00');
+                    setInlineToTime('23:59');
+                  }}
+                  className={`m3-btn-sm ${inlinePreset === 'allDay' ? 'm3-btn-filled' : 'm3-btn-outlined'}`}
+                  style={{
+                    fontSize: '0.72rem',
+                    padding: '2px 8px',
+                    borderRadius: 'var(--md-shape-full)',
+                    backgroundColor: inlinePreset === 'allDay' ? '#047857' : '#fff',
+                    color: inlinePreset === 'allDay' ? '#fff' : '#047857'
+                  }}
+                >
+                  كامل اليوم
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInlinePreset('morning');
+                    setInlineFromTime('08:00');
+                    setInlineToTime('12:00');
+                  }}
+                  className={`m3-btn-sm ${inlinePreset === 'morning' ? 'm3-btn-filled' : 'm3-btn-outlined'}`}
+                  style={{
+                    fontSize: '0.72rem',
+                    padding: '2px 8px',
+                    borderRadius: 'var(--md-shape-full)',
+                    backgroundColor: inlinePreset === 'morning' ? '#047857' : '#fff',
+                    color: inlinePreset === 'morning' ? '#fff' : '#047857'
+                  }}
+                >
+                  الصباح (08-12)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInlinePreset('evening');
+                    setInlineFromTime('16:00');
+                    setInlineToTime('20:00');
+                  }}
+                  className={`m3-btn-sm ${inlinePreset === 'evening' ? 'm3-btn-filled' : 'm3-btn-outlined'}`}
+                  style={{
+                    fontSize: '0.72rem',
+                    padding: '2px 8px',
+                    borderRadius: 'var(--md-shape-full)',
+                    backgroundColor: inlinePreset === 'evening' ? '#047857' : '#fff',
+                    color: inlinePreset === 'evening' ? '#fff' : '#047857'
+                  }}
+                >
+                  المساء (16-20)
+                </button>
+              </div>
+
+              {/* Exact Time Pickers */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#065f46' }}>من:</span>
+                <input
+                  type="time"
+                  value={inlineFromTime}
+                  onChange={(e) => {
+                    setInlineFromTime(e.target.value);
+                    setInlinePreset('custom');
+                  }}
+                  className="m3-input"
+                  style={{ padding: '2px 6px', fontSize: '0.76rem', fontWeight: 700, width: '85px', height: '26px' }}
+                />
+                <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#065f46' }}>إلى:</span>
+                <input
+                  type="time"
+                  value={inlineToTime}
+                  onChange={(e) => {
+                    setInlineToTime(e.target.value);
+                    setInlinePreset('custom');
+                  }}
+                  className="m3-input"
+                  style={{ padding: '2px 6px', fontSize: '0.76rem', fontWeight: 700, width: '85px', height: '26px' }}
+                />
+              </div>
             </div>
-          </div>
-          <div>
-            <span style={{ fontSize: '0.75rem', color: 'var(--status-absent)' }}>إجمالي الديون</span>
-            <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--status-absent)' }}>
-              {groupStats.totalDebt.toLocaleString()} <span style={{ fontSize: '0.75rem' }}>دج</span>
-            </div>
-          </div>
-          <div>
-            <span style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-secondary)' }}>مستحق الأستاذ</span>
-            <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--md-sys-color-secondary)' }}>
-              {groupStats.totalTeacherPay.toLocaleString()} <span style={{ fontSize: '0.75rem' }}>دج</span>
-            </div>
-          </div>
-          <div>
-            <span style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-primary)' }}>حصة المركز الصافية</span>
-            <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--md-sys-color-primary)' }}>
-              {groupStats.totalSchoolEarn.toLocaleString()} <span style={{ fontSize: '0.75rem' }}>دج</span>
-            </div>
+          )}
+
+          {/* KPIs Grid */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+              gap: '12px',
+              textAlign: 'center'
+            }}
+          >
+            {statsDisplayMode === 'cumulative' ? (
+              <>
+                <div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)' }}>عدد التلاميذ</span>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 800 }}>{groupStats.studentCount} تلميذ</div>
+                </div>
+                <div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)' }}>المطلوب (المجموع)</span>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 800 }}>
+                    {groupStats.totalExpected.toLocaleString()} <span style={{ fontSize: '0.75rem' }}>دج</span>
+                  </div>
+                </div>
+                <div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--status-present)' }}>مجموع المحصل</span>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--status-present)' }}>
+                    {groupStats.totalReceived.toLocaleString()} <span style={{ fontSize: '0.75rem' }}>دج</span>
+                  </div>
+                </div>
+                <div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--status-absent)' }}>إجمالي الديون</span>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--status-absent)' }}>
+                    {groupStats.totalDebt.toLocaleString()} <span style={{ fontSize: '0.75rem' }}>دج</span>
+                  </div>
+                </div>
+                <div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-secondary)' }}>مستحق الأستاذ</span>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--md-sys-color-secondary)' }}>
+                    {groupStats.totalTeacherPay.toLocaleString()} <span style={{ fontSize: '0.75rem' }}>دج</span>
+                  </div>
+                </div>
+                <div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-primary)' }}>حصة المركز الصافية</span>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--md-sys-color-primary)' }}>
+                    {groupStats.totalSchoolEarn.toLocaleString()} <span style={{ fontSize: '0.75rem' }}>دج</span>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
+                    عدد التلاميذ المسددين (في هذه الساعات)
+                  </span>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#047857' }}>
+                    {inlineHourlySummary.uniqueStudentsCount} تلميذ
+                  </div>
+                </div>
+                <div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--status-present)' }}>
+                    مجموع المحصل في هذه الفترة
+                  </span>
+                  <div style={{ fontSize: '1.35rem', fontWeight: 900, color: 'var(--status-present)' }}>
+                    {inlineHourlySummary.totalAmount.toLocaleString()} <span style={{ fontSize: '0.75rem' }}>دج</span>
+                  </div>
+                </div>
+                <div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
+                    عدد عمليات الدفع
+                  </span>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 800 }}>
+                    {inlineHourlySummary.paymentsCount} عملية
+                  </div>
+                </div>
+                <div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-secondary)' }}>
+                    مستحق الأستاذ (في هذه الفترة)
+                  </span>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--md-sys-color-secondary)' }}>
+                    {inlineHourlySummary.teacherTotal.toLocaleString()} <span style={{ fontSize: '0.75rem' }}>دج</span>
+                  </div>
+                </div>
+                <div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-primary)' }}>
+                    حصة المركز الصافية (في هذه الفترة)
+                  </span>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--md-sys-color-primary)' }}>
+                    {inlineHourlySummary.schoolEarnTotal.toLocaleString()} <span style={{ fontSize: '0.75rem' }}>دج</span>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <button
+                    type="button"
+                    onClick={() => setIsHourlyModalOpen(true)}
+                    className="m3-btn m3-btn-sm"
+                    style={{
+                      fontSize: '0.75rem',
+                      fontWeight: 800,
+                      backgroundColor: '#ecfdf5',
+                      color: '#065f46',
+                      border: '1px solid #6ee7b7',
+                      padding: '8px 12px',
+                      borderRadius: '8px'
+                    }}
+                  >
+                    عرض قائمة المسددين ({inlineHourlySummary.paymentsCount}) 👈
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -1542,6 +1853,15 @@ export default function AttendancePage() {
         description="يرجى إدخال رمز الأمان (1234) لعرض المداخيل ومستحقات الفوج"
         expectedPin="1234"
       />
+
+      {/* Hourly and Daily Payments Filter Modal */}
+      {isHourlyModalOpen && (
+        <HourlyPaymentFilterModal
+          isOpen={isHourlyModalOpen}
+          onClose={() => setIsHourlyModalOpen(false)}
+          initialGroupId={group.groupId}
+        />
+      )}
     </div>
   );
 }
