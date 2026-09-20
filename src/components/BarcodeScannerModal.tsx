@@ -1199,7 +1199,14 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
   };
 
   // Debtor Quick Action: Settle Payment
+  const isSettlingDebtRef = React.useRef<Set<string>>(new Set());
   const handleSettleDebtorInQueue = (debtorItem: typeof pendingDebtors[0], amount?: number, printNow: boolean = true) => {
+    if (isSettlingDebtRef.current.has(debtorItem.id)) return;
+    isSettlingDebtRef.current.add(debtorItem.id);
+    setTimeout(() => {
+      isSettlingDebtRef.current.delete(debtorItem.id);
+    }, 2000);
+
     const { student, groupId, sessionIdx, debt } = debtorItem;
     const amountNum = amount !== undefined ? amount : debt;
     if (amountNum <= 0) return;

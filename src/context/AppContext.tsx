@@ -90,6 +90,8 @@ interface AppContextType {
     payments: { groupId: string; paymentAmount: number | string }[]
   ) => { groupId: string; rowId: number; fee: number; paidNow: number; totalReceived: number; debt: number }[];
   deleteStudent: (groupId: string, rowId: number) => void;
+  restoreStudent: (archiveId: string) => boolean;
+  clearRecycleBin: () => void;
   transferStudent: (fromGroupId: string, toGroupId: string, studentRowId: number) => boolean;
   updateStudent: (groupId: string, rowId: number, fields: Partial<StudentRecord>) => void;
   // Group & Teacher Actions
@@ -133,60 +135,6 @@ const THEME_KEY = 'da3m_theme';
 const LANG_KEY = 'da3m_lang';
 const UNSYNCED_CHANGES_KEY = 'da3m_has_unsynced_changes_v1';
 const LAST_LOCAL_EDIT_KEY = 'da3m_last_local_edit_time_v1';
-
-// Helper to safely merge remote snapshot with local state so that locally marked presence ('P' / 'M')
-// is NEVER erased by a stale remote snapshot when internet was cut during scans.
-function mergeAttendanceSafely(remote: CenterData, local: CenterData): CenterData {
-  if (!remote || !remote.groupData || !local || !local.groupData) return remote;
-  const merged: CenterData = { ...remote, groupData: { ...remote.groupData } };
-
-  for (const [gid, localGroup] of Object.entries(local.groupData)) {
-    const remoteGroup = merged.groupData[gid];
-    if (!remoteGroup || !remoteGroup.students || !localGroup.students) continue;
-
-    let hasDifferences = false;
-    const mergedStudents = remoteGroup.students.map((rStudent) => {
-      const lStudent = localGroup.students.find(
-        (s) => s.rowId === rStudent.rowId || (s.name && s.name.trim() === rStudent.name?.trim())
-      );
-      if (!lStudent || !lStudent.attendance) return rStudent;
-
-      const newAttendance = [...(rStudent.attendance || [])];
-      let attendanceChanged = false;
-
-      (lStudent.attendance || []).forEach((lStatus, idx) => {
-        const cleanL = (lStatus || '').trim().toUpperCase();
-        const cleanR = (newAttendance[idx] || '').trim().toUpperCase();
-        // If local has marked attendance (P or M) and remote is empty or unmarked, PRESERVE local attendance!
-        if ((cleanL === 'P' || cleanL === 'M' || cleanL === 'ح' || cleanL === 'م') && !cleanR) {
-          while (newAttendance.length <= idx) newAttendance.push('');
-          newAttendance[idx] = cleanL;
-          attendanceChanged = true;
-          hasDifferences = true;
-        }
-      });
-
-      if (attendanceChanged) {
-        return {
-          ...rStudent,
-          attendance: newAttendance
-        };
-      }
-      return rStudent;
-    });
-
-    if (hasDifferences) {
-      merged.groupData[gid] = {
-        ...remoteGroup,
-        students: mergedStudents
-      };
-    }
-  }
-
-  return merged;
-}
-
-const AppContext = createContext<AppContextType | undefined>(undefined);
 
 // Pure helper to recompute student finances according to pricing tier or group custom finances
 export const calcStudentFinancesPure = (
@@ -253,11 +201,6 @@ export const calcStudentFinancesPure = (
     )
   );
 
-  // RULE: If student attended only 1 session and did not pay:
-  // The session does NOT count for the school (fee = 0, schoolEarn = 0, debt = 0)
-  // and does NOT count for the teacher (teacherPay = 0),
-  // BUT ONLY when the group has ended all its sessions (groupEnded).
-  // While the group is ongoing (e.g. today was session 1), count the session normally.
   const isOneSessionUnpaid = groupEnded && totalAttendance === 1 && totalReceived === 0 && student.discount !== 'تعويض';
 
   if (isOneSessionUnpaid) {
@@ -295,8 +238,6 @@ export const calcStudentFinancesPure = (
     fee = totalReceived;
   }
 
-  // Teacher payout rule: 75% for VIP groups and 60% for normal groups of the student fee.
-  // The teacher gets this whether the student has paid or not (school waits for debt).
   const teacherRatio = isVipGroup ? 0.75 : 0.60;
   const teacherPay = student.discount === '0' ? 0 : Math.round(fee * teacherRatio);
   const schoolEarn = Math.max(0, fee - teacherPay);
@@ -312,6 +253,182 @@ export const calcStudentFinancesPure = (
     totalAttendance
   };
 };
+
+const AppContext = createContext<AppContextType | undefined>(undefined);
+
+// Non-destructive Two-Way Union Merge:
+// Guarantees newly added students, newly registered groups, payments, and attendance
+// are NEVER erased by a stale or concurrent remote snapshot!
+function mergeAttendanceSafely(remote: CenterData, local: CenterData): CenterData {
+  if (!remote || !remote.groupData) return local || remote;
+  if (!local || !local.groupData) return remote;
+
+  const merged: CenterData = {
+    ...remote,
+    groups: [...(remote.groups || [])],
+    groupData: { ...remote.groupData }
+  };
+
+  // 1. Preserve any local groups that are missing in remote
+  for (const [gid, localGroup] of Object.entries(local.groupData)) {
+    if (!merged.groupData[gid]) {
+      merged.groupData[gid] = { ...localGroup };
+    }
+  }
+  const remoteGroupIds = new Set(merged.groups.map((g) => g.id));
+  (local.groups || []).forEach((lg) => {
+    if (!remoteGroupIds.has(lg.id)) {
+      merged.groups.push(lg);
+      remoteGroupIds.add(lg.id);
+    }
+  });
+
+  // 2. Safely merge student lists and details across all groups
+  for (const [gid, localGroup] of Object.entries(local.groupData)) {
+    const remoteGroup = merged.groupData[gid];
+    if (!remoteGroup || !remoteGroup.students || !localGroup.students) continue;
+
+    const matchedLocalRowIds = new Set<number>();
+    const matchedLocalNames = new Set<string>();
+    let hasDifferences = false;
+
+    const mergedStudents = remoteGroup.students.map((rStudent) => {
+      const rNormName = normalizeArabicName(rStudent.name || '');
+      const lStudent = localGroup.students.find(
+        (s) => (s.rowId && s.rowId === rStudent.rowId) || (rNormName && normalizeArabicName(s.name || '') === rNormName)
+      );
+      if (!lStudent) return rStudent;
+
+      if (lStudent.rowId) matchedLocalRowIds.add(lStudent.rowId);
+      if (lStudent.name) matchedLocalNames.add(normalizeArabicName(lStudent.name));
+
+      let studentModified = false;
+
+      // Merge attendance: keep marked attendance ('P', 'M', 'ح', 'م')
+      const newAttendance = [...(rStudent.attendance || [])];
+      (lStudent.attendance || []).forEach((lStatus, idx) => {
+        const cleanL = (lStatus || '').trim().toUpperCase();
+        const cleanR = (newAttendance[idx] || '').trim().toUpperCase();
+        if ((cleanL === 'P' || cleanL === 'M' || cleanL === 'ح' || cleanL === 'م') && !cleanR) {
+          while (newAttendance.length <= idx) newAttendance.push('');
+          newAttendance[idx] = cleanL;
+          studentModified = true;
+        }
+      });
+
+      // Merge payments: keep highest payment recorded for each session
+      const maxSessions = Math.max(rStudent.payments?.length || 0, lStudent.payments?.length || 0, 4);
+      const newPayments: (number | string)[] = [];
+      for (let sIdx = 0; sIdx < maxSessions; sIdx++) {
+        const rPay = rStudent.payments ? rStudent.payments[sIdx] : '';
+        const lPay = lStudent.payments ? lStudent.payments[sIdx] : '';
+        const rNum = Number(rPay) || 0;
+        const lNum = Number(lPay) || 0;
+        if (lNum > rNum) {
+          newPayments.push(lNum);
+          studentModified = true;
+        } else if (rNum > 0) {
+          newPayments.push(rNum);
+        } else if (lPay !== '' && lPay !== undefined && lPay !== null) {
+          newPayments.push(lPay);
+        } else {
+          newPayments.push(rPay ?? '');
+        }
+      }
+
+      // Preserve phone, barcode, and discount
+      const phone = rStudent.phone?.trim() || lStudent.phone?.trim() || '';
+      const barcode = rStudent.barcode?.trim() || lStudent.barcode?.trim() || '';
+      const discount = (lStudent.discount !== undefined && lStudent.discount !== '1') ? lStudent.discount : (rStudent.discount || '1');
+
+      if (phone !== rStudent.phone || barcode !== rStudent.barcode || discount !== rStudent.discount) {
+        studentModified = true;
+      }
+
+      if (studentModified) {
+        hasDifferences = true;
+        const updatedStudentRaw: StudentRecord = {
+          ...rStudent,
+          phone,
+          barcode,
+          discount,
+          attendance: newAttendance,
+          payments: newPayments
+        };
+        return calcStudentFinancesPure(
+          updatedStudentRaw,
+          remoteGroup.type || '4-2500',
+          merged.pricingTiers || local.pricingTiers,
+          remoteGroup
+        );
+      }
+      return rStudent;
+    });
+
+    // CRITICAL: Append any local student that does NOT exist in remote!
+    // (This guarantees newly added/enrolled students are NEVER lost when remote arrives)
+    const localOnlyStudents: StudentRecord[] = [];
+    localGroup.students.forEach((lStudent) => {
+      if (!lStudent || !lStudent.name || isSummaryRow(lStudent, gid)) return;
+      const lNorm = normalizeArabicName(lStudent.name);
+      const isMatched = (lStudent.rowId && matchedLocalRowIds.has(lStudent.rowId)) || (lNorm && matchedLocalNames.has(lNorm));
+      if (!isMatched) {
+        localOnlyStudents.push(lStudent);
+      }
+    });
+
+    if (localOnlyStudents.length > 0) {
+      hasDifferences = true;
+      const existingMaxRowId = mergedStudents.reduce((max, s) => Math.max(max, s.rowId || 0), 0);
+      let nextRow = existingMaxRowId + 1;
+      localOnlyStudents.forEach((st) => {
+        const studentRowId = st.rowId > existingMaxRowId ? st.rowId : nextRow++;
+        const calcSt = calcStudentFinancesPure(
+          { ...st, rowId: studentRowId },
+          remoteGroup.type || localGroup.type || '4-2500',
+          merged.pricingTiers || local.pricingTiers,
+          remoteGroup
+        );
+        mergedStudents.push(calcSt);
+      });
+    }
+
+    if (hasDifferences) {
+      merged.groupData[gid] = {
+        ...remoteGroup,
+        students: mergedStudents
+      };
+    }
+  }
+
+  // 3. Union paymentTransactions
+  const existingTxIds = new Set<string>();
+  const mergedTransactions: any[] = [];
+  [...(remote.paymentTransactions || []), ...(local.paymentTransactions || [])].forEach((tx) => {
+    if (!tx) return;
+    const txId = tx.id || `${tx.groupId}_${tx.studentRowId}_${tx.sessionIndex}_${tx.amount}_${tx.timestamp}`;
+    if (!existingTxIds.has(txId)) {
+      existingTxIds.add(txId);
+      mergedTransactions.push(tx);
+    }
+  });
+  merged.paymentTransactions = mergedTransactions;
+
+  // 4. Union deletedStudents archive
+  const existingDelIds = new Set<string>();
+  const mergedDeleted: any[] = [];
+  [...(remote.deletedStudents || []), ...(local.deletedStudents || [])].forEach((item) => {
+    if (!item) return;
+    const dId = item.id || `${item.groupId}_${item.student?.name}_${item.deletedAt}`;
+    if (!existingDelIds.has(dId)) {
+      existingDelIds.add(dId);
+      mergedDeleted.push(item);
+    }
+  });
+  merged.deletedStudents = mergedDeleted;
+
+  return merged;
+}
 
 const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: boolean } => {
   let changed = false;
@@ -643,7 +760,9 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
       ...centerData,
       academicYear: finalAcademicYear,
       groups: cleanGroups,
-      groupData: newGroupData
+      groupData: newGroupData,
+      paymentTransactions: centerData.paymentTransactions || [],
+      deletedStudents: centerData.deletedStudents || []
     },
     changed
   };
@@ -941,12 +1060,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     } finally {
       isSavingRef.current = false;
-      // If user made edits while the network request was in flight, schedule save of latest data
+      // If user made edits while the network request was in flight, schedule save of latest data immediately
       if (hasPendingChangesRef.current) {
         if (cloudSyncTimerRef.current) clearTimeout(cloudSyncTimerRef.current);
         cloudSyncTimerRef.current = setTimeout(() => {
           saveToCloud();
-        }, 1500);
+        }, 200);
       }
     }
   }, []);
@@ -1130,6 +1249,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const now = Date.now();
     const stampedData: CenterData = {
       ...newData,
+      paymentTransactions: newData.paymentTransactions || dataRef.current.paymentTransactions || [],
+      deletedStudents: newData.deletedStudents || dataRef.current.deletedStudents || [],
       _last_modified_at: now,
       _client_id: clientIdRef.current
     } as any;
@@ -1556,6 +1677,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const group = currentData.groupData[groupId];
     if (!group) return;
 
+    const studentBefore = group.students.find((s) => s.rowId === rowId);
+    const oldP = Number(studentBefore?.payments?.[paymentIndex]) || 0;
+    const newP = amount === '' ? 0 : Number(amount) || 0;
+
     const sessionCount = group.sessionDates?.length || group.sessionCount || 4;
     const updatedStudents = group.students.map((student) => {
       if (student.rowId !== rowId) return student;
@@ -1578,23 +1703,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     };
     persistData(updatedData);
+    saveToCloud(updatedData);
 
-    if (amount !== '' && Number(amount) > 0) {
-      const student = group.students.find((s) => s.rowId === rowId);
-      if (student) {
-        recordPaymentTransaction({
-          groupId,
-          groupSubject: group.subject,
-          teacherName: group.teacherName,
-          studentRowId: rowId,
-          studentName: student.name,
-          studentPhone: student.phone,
-          studentBarcode: student.barcode,
-          sessionIndex: paymentIndex,
-          amount: Number(amount),
-          source: 'payment_modal'
-        });
-      }
+    // Only record transaction if payment actually increased!
+    if (newP > oldP && studentBefore) {
+      recordPaymentTransaction({
+        groupId,
+        groupSubject: group.subject,
+        teacherName: group.teacherName,
+        studentRowId: rowId,
+        studentName: studentBefore.name,
+        studentPhone: studentBefore.phone,
+        studentBarcode: studentBefore.barcode,
+        sessionIndex: paymentIndex,
+        amount: newP - oldP,
+        source: 'payment_modal'
+      });
     }
   };
 
@@ -1631,6 +1755,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     };
     persistData(updatedData);
+    saveToCloud(updatedData);
 
     const student = group.students.find((s) => s.rowId === rowId);
     if (student) {
@@ -1668,6 +1793,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const paymentMap = new Map<number, number | string>();
     studentPayments.forEach((sp) => paymentMap.set(sp.rowId, sp.amount));
 
+    // Determine actual incremental payments before applying update
+    const increments: { rowId: number; studentName: string; phone?: string; barcode?: string; amount: number }[] = [];
+    group.students.forEach((student) => {
+      if (paymentMap.has(student.rowId)) {
+        const val = paymentMap.get(student.rowId);
+        const newAmt = val === '' ? 0 : Number(val) || 0;
+        const oldAmt = Number(student.payments?.[sessionIndex]) || 0;
+        if (newAmt > oldAmt) {
+          increments.push({
+            rowId: student.rowId,
+            studentName: student.name,
+            phone: student.phone,
+            barcode: student.barcode,
+            amount: newAmt - oldAmt
+          });
+        }
+      }
+    });
+
     const sessionCount = group.sessionDates?.length || group.sessionCount || 4;
     const updatedStudents = group.students.map((student) => {
       if (!paymentMap.has(student.rowId)) return student;
@@ -1691,25 +1835,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     };
     persistData(updatedData);
+    saveToCloud(updatedData);
 
-    studentPayments.forEach((sp) => {
-      const amt = Number(sp.amount) || 0;
-      if (amt > 0) {
-        const student = group.students.find((s) => s.rowId === sp.rowId);
-        if (student) {
-          recordPaymentTransaction({
-            groupId,
-            groupSubject: group.subject,
-            teacherName: group.teacherName,
-            studentRowId: sp.rowId,
-            studentName: student.name,
-            studentPhone: student.phone,
-            studentBarcode: student.barcode,
-            sessionIndex,
-            amount: amt,
-            source: 'batch'
-          });
-        }
+    // ONLY record transactions for genuine positive payment increments
+    increments.forEach((inc) => {
+      if (inc.amount > 0) {
+        recordPaymentTransaction({
+          groupId,
+          groupSubject: group.subject,
+          teacherName: group.teacherName,
+          studentRowId: inc.rowId,
+          studentName: inc.studentName,
+          studentPhone: inc.phone,
+          studentBarcode: inc.barcode,
+          sessionIndex,
+          amount: inc.amount,
+          source: 'batch'
+        });
       }
     });
   };
@@ -1795,6 +1937,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     };
     persistData(updatedData);
+    saveToCloud(updatedData);
     return calculatedStudent;
   };
 
@@ -1863,6 +2006,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         paid: calculatedStudent.totalReceived,
         debt: calculatedStudent.debt
       });
+
+      // Record transaction immediately for audit log & receipt history
+      if (payNum > 0) {
+        recordPaymentTransaction({
+          groupId,
+          groupSubject: group.subject,
+          teacherName: group.teacherName,
+          studentRowId: rowId,
+          studentName: studentInfo.name.trim(),
+          studentPhone: studentInfo.phone ? studentInfo.phone.trim() : '',
+          studentBarcode: resolvedBarcode,
+          sessionIndex: 0,
+          amount: payNum,
+          source: 'multi_group'
+        });
+      }
     });
 
     const updatedData: CenterData = {
@@ -1870,6 +2029,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       groupData: updatedGroupData
     };
     persistData(updatedData);
+    saveToCloud(updatedData);
 
     return results;
   };
@@ -2008,6 +2168,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       groupData: updatedGroupData
     };
     persistData(updatedData);
+    saveToCloud(updatedData);
 
     results.forEach((r) => {
       if (r.paidNow > 0) {
@@ -2030,21 +2191,94 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return results;
   };
 
-  // Delete student
+  // Delete student with soft-delete archiving to recycle bin
   const deleteStudent = (groupId: string, rowId: number) => {
     const currentData = dataRef.current;
     const group = currentData.groupData[groupId];
     if (!group) return;
 
+    const studentToDelete = group.students.find((s) => s.rowId === rowId);
     const updatedStudents = group.students.filter((s) => s.rowId !== rowId);
+
+    const archiveItem = studentToDelete ? {
+      id: `del-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      deletedAt: Date.now(),
+      deletedAtStr: new Date().toLocaleString('ar-DZ'),
+      groupId,
+      groupSubject: group.subject,
+      teacherName: group.teacherName,
+      student: { ...studentToDelete },
+      reason: 'حذف يدوي من القائمة'
+    } : null;
+
+    const existingDeleted = currentData.deletedStudents || [];
+    const updatedDeleted = archiveItem ? [archiveItem, ...existingDeleted] : existingDeleted;
+
     const updatedData: CenterData = {
       ...currentData,
+      deletedStudents: updatedDeleted,
       groupData: {
         ...currentData.groupData,
         [groupId]: { ...group, students: updatedStudents }
       }
     };
     persistData(updatedData);
+    saveToCloud(updatedData);
+  };
+
+  // Restore deleted student from recycle bin
+  const restoreStudent = (archiveId: string): boolean => {
+    const currentData = dataRef.current;
+    const archive = currentData.deletedStudents || [];
+    const item = archive.find((a) => a.id === archiveId);
+    if (!item) return false;
+
+    const group = currentData.groupData[item.groupId];
+    if (!group) return false;
+
+    // Check if student already exists in group by name
+    const existing = group.students.find(
+      (s) => normalizeArabicName(s.name) === normalizeArabicName(item.student.name)
+    );
+    if (existing) {
+      const updatedDeleted = archive.filter((a) => a.id !== archiveId);
+      const updatedData: CenterData = { ...currentData, deletedStudents: updatedDeleted };
+      persistData(updatedData);
+      saveToCloud(updatedData);
+      return true;
+    }
+
+    const maxRowId = group.students.reduce((max, s) => Math.max(max, s.rowId || 0), 0);
+    const newRowId = Math.max(maxRowId + 1, item.student.rowId || 1);
+    const restoredStudent = calcStudentFinancesPure(
+      { ...item.student, rowId: newRowId },
+      group.type,
+      currentData.pricingTiers,
+      group
+    );
+
+    const updatedStudents = [...group.students, restoredStudent];
+    const updatedDeleted = archive.filter((a) => a.id !== archiveId);
+
+    const updatedData: CenterData = {
+      ...currentData,
+      deletedStudents: updatedDeleted,
+      groupData: {
+        ...currentData.groupData,
+        [item.groupId]: { ...group, students: updatedStudents }
+      }
+    };
+    persistData(updatedData);
+    saveToCloud(updatedData);
+    return true;
+  };
+
+  // Clear recycle bin
+  const clearRecycleBin = () => {
+    const currentData = dataRef.current;
+    const updatedData: CenterData = { ...currentData, deletedStudents: [] };
+    persistData(updatedData);
+    saveToCloud(updatedData);
   };
 
   // Transfer student from one group to another
@@ -2964,6 +3198,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         enrollStudentMultiGroups,
         recordMultiGroupPayment,
         deleteStudent,
+        restoreStudent,
+        clearRecycleBin,
         transferStudent,
         updateStudent,
         addGroup,

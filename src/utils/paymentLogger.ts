@@ -1,6 +1,7 @@
 import { CenterData, StudentRecord, GroupSheet } from '../types';
 import { formatToYYYYMMDD, formatGroupTime } from './sessionUtils';
 import { getScanLog } from './scanLogger';
+import { normalizeArabicName } from './barcodeUtils';
 
 /**
  * Payment Transaction Record
@@ -43,7 +44,72 @@ export const PAYMENT_LOG_KEY = 'da3m_payment_transactions_v1';
 const MAX_PAYMENT_LOG_ENTRIES = 5000;
 
 /**
- * Persistently record a payment transaction
+ * Automatically clean and eliminate duplicate payment transactions.
+ * Preserves the earliest transaction or scanner-recorded transaction
+ * and discards redundant batch-duplicated records.
+ * Automatically saves the cleaned list back to localStorage to heal existing data.
+ */
+export function sanitizePaymentTransactions(
+  transactions: PaymentRecordItem[],
+  persistToStorage: boolean = true
+): PaymentRecordItem[] {
+  if (!transactions || transactions.length === 0) return [];
+
+  // Sort chronologically ascending (oldest first) so original transactions take precedence
+  const sorted = [...transactions].sort((a, b) => a.timestamp - b.timestamp);
+  const result: PaymentRecordItem[] = [];
+
+  for (const item of sorted) {
+    // Check if an existing record is an exact duplicate of this item
+    const isDup = result.some((existing) => {
+      // Must match date, group, and session
+      if (existing.dateStr !== item.dateStr) return false;
+      if (existing.groupId !== item.groupId) return false;
+      if (existing.sessionIndex !== item.sessionIndex) return false;
+
+      // Check student match (by rowId or normalized Arabic name)
+      const sameStudent =
+        (existing.studentRowId && item.studentRowId && existing.studentRowId === item.studentRowId) ||
+        (existing.studentName &&
+          item.studentName &&
+          normalizeArabicName(existing.studentName) === normalizeArabicName(item.studentName));
+      if (!sameStudent) return false;
+
+      // If amounts match, it is an exact duplicate
+      if (existing.amount === item.amount) return true;
+
+      // If recorded within 10 minutes of each other (e.g. batch save after scanner settlement)
+      const timeDiff = Math.abs(item.timestamp - existing.timestamp);
+      if (timeDiff < 10 * 60 * 1000) {
+        if (existing.source === 'scanner' && item.source === 'batch') return true;
+        if (existing.amount === item.amount) return true;
+      }
+
+      return false;
+    });
+
+    if (!isDup) {
+      result.push(item);
+    }
+  }
+
+  // Sort back to newest first (descending timestamp)
+  result.sort((a, b) => b.timestamp - a.timestamp);
+
+  // If items were pruned, heal localStorage
+  if (persistToStorage && typeof window !== 'undefined' && result.length !== transactions.length) {
+    try {
+      localStorage.setItem(PAYMENT_LOG_KEY, JSON.stringify(result));
+    } catch (e) {
+      console.warn('Failed to update localStorage with sanitized transactions:', e);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Persistently record a payment transaction with duplicate guard
  */
 export function recordPaymentTransaction(
   entry: Omit<PaymentRecordItem, 'id' | 'timestamp' | 'dateStr' | 'timeStr' | 'hour' | 'minute'> & {
@@ -71,7 +137,30 @@ export function recordPaymentTransaction(
     }
 
     const raw = localStorage.getItem(PAYMENT_LOG_KEY);
-    const list: PaymentRecordItem[] = raw ? JSON.parse(raw) : [];
+    const rawList: PaymentRecordItem[] = raw ? JSON.parse(raw) : [];
+    const list = sanitizePaymentTransactions(rawList, false);
+
+    // Duplicate prevention guard:
+    // Check if an identical transaction for this student, group, session, and amount already exists
+    const duplicate = list.find((t) => {
+      if (t.dateStr !== dateStr) return false;
+      if (t.groupId !== entry.groupId) return false;
+      if (t.sessionIndex !== entry.sessionIndex) return false;
+      const isSameStudent =
+        (t.studentRowId && entry.studentRowId && t.studentRowId === entry.studentRowId) ||
+        (t.studentName &&
+          entry.studentName &&
+          normalizeArabicName(t.studentName) === normalizeArabicName(entry.studentName));
+      if (!isSameStudent) return false;
+      return t.amount === entry.amount;
+    });
+
+    if (duplicate) {
+      console.warn(
+        `[paymentLogger] Prevented duplicate transaction for ${entry.studentName} (${entry.amount} دج) in ${entry.groupId} session ${entry.sessionIndex}`
+      );
+      return duplicate;
+    }
 
     const newRecord: PaymentRecordItem = {
       ...entry,
@@ -97,13 +186,15 @@ export function recordPaymentTransaction(
 }
 
 /**
- * Retrieve all logged payment transactions from localStorage
+ * Retrieve all logged payment transactions from localStorage,
+ * automatically sanitizing and removing duplicates
  */
 export function getPaymentTransactions(): PaymentRecordItem[] {
   if (typeof window === 'undefined') return [];
   try {
     const raw = localStorage.getItem(PAYMENT_LOG_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const rawList: PaymentRecordItem[] = raw ? JSON.parse(raw) : [];
+    return sanitizePaymentTransactions(rawList, true);
   } catch (err) {
     console.error('Failed to retrieve payment transactions:', err);
     return [];
@@ -158,16 +249,34 @@ export function collectTodayAndHourlyPayments(
   const fromMinutes = timeToMinutes(fromTime);
   const toMinutes = timeToMinutes(toTime);
 
-  // 1. Fetch real-time logged transactions from localStorage
-  const loggedTransactions = getPaymentTransactions().filter(
+  // 1. Fetch transactions from Supabase cloud data AND localStorage
+  const cloudTransactions: PaymentRecordItem[] = Array.isArray((data as any)?.paymentTransactions)
+    ? ((data as any).paymentTransactions as PaymentRecordItem[]).filter(
+        (t) => t.dateStr === targetDate && (!targetGroupId || t.groupId === targetGroupId)
+      )
+    : [];
+
+  const localTransactions = getPaymentTransactions().filter(
     (t) => t.dateStr === targetDate && (!targetGroupId || t.groupId === targetGroupId)
   );
 
-  const combinedPayments: PaymentRecordItem[] = [...loggedTransactions];
+  // Merge transactions from cloud and local without duplicates
+  const transactionMap = new Map<string, PaymentRecordItem>();
+  [...cloudTransactions, ...localTransactions].forEach((t) => {
+    const key = `${t.groupId}_${t.studentRowId || normalizeArabicName(t.studentName)}_${t.sessionIndex}_${t.amount}_${t.timeStr || ''}`;
+    if (!transactionMap.has(key)) {
+      transactionMap.set(key, t);
+    }
+  });
+
+  const combinedPayments: PaymentRecordItem[] = Array.from(transactionMap.values());
 
   // Map to prevent duplicate entries if a payment was already logged in real-time
   const loggedKeys = new Set(
-    loggedTransactions.map((t) => `${t.groupId}_${t.studentRowId}_${t.sessionIndex}`)
+    combinedPayments.map((t) => `${t.groupId}_${t.studentRowId}_${t.sessionIndex}`)
+  );
+  const loggedNameKeys = new Set(
+    combinedPayments.map((t) => `${t.groupId}_${normalizeArabicName(t.studentName)}_${t.sessionIndex}`)
   );
 
   // 2. Fetch session payments recorded in groups that match targetDate
@@ -193,7 +302,8 @@ export function collectTodayAndHourlyPayments(
           if (paymentVal <= 0) return;
 
           const key = `${gid}_${student.rowId}_${sIdx}`;
-          if (loggedKeys.has(key)) {
+          const nameKey = `${gid}_${normalizeArabicName(student.name)}_${sIdx}`;
+          if (loggedKeys.has(key) || loggedNameKeys.has(nameKey)) {
             // Already logged via real-time transaction logger
             return;
           }
@@ -259,8 +369,43 @@ export function collectTodayAndHourlyPayments(
     });
   }
 
-  // 3. Filter by Time Window (fromTime to toTime)
-  const filteredPayments = combinedPayments.filter((p) => {
+  // 3. Defensive Deduplication:
+  // Ensure that no student has duplicate transactions for the same session
+  const chronoSorted = [...combinedPayments].sort((a, b) => a.timestamp - b.timestamp);
+  const dedupedPayments: PaymentRecordItem[] = [];
+
+  for (const item of chronoSorted) {
+    const isDup = dedupedPayments.some((existing) => {
+      if (existing.groupId !== item.groupId) return false;
+      if (existing.sessionIndex !== item.sessionIndex) return false;
+      const sameStudent =
+        (existing.studentRowId && item.studentRowId && existing.studentRowId === item.studentRowId) ||
+        normalizeArabicName(existing.studentName) === normalizeArabicName(item.studentName);
+      if (!sameStudent) return false;
+
+      // Exact amount match is definitely a duplicate
+      if (existing.amount === item.amount) return true;
+
+      // Check against student's session payment in group sheet
+      const grp = data?.groupData?.[item.groupId];
+      const stu = grp?.students?.find(
+        (s) => s.rowId === item.studentRowId || normalizeArabicName(s.name) === normalizeArabicName(item.studentName)
+      );
+      const sheetPay = Number(stu?.payments?.[item.sessionIndex]) || 0;
+      if (sheetPay > 0 && existing.amount >= sheetPay) {
+        return true; // Already covered by earlier transaction
+      }
+
+      return false;
+    });
+
+    if (!isDup) {
+      dedupedPayments.push(item);
+    }
+  }
+
+  // 4. Filter by Time Window (fromTime to toTime)
+  const filteredPayments = dedupedPayments.filter((p) => {
     const itemMinutes = p.hour * 60 + p.minute;
     return itemMinutes >= fromMinutes && itemMinutes <= toMinutes;
   });

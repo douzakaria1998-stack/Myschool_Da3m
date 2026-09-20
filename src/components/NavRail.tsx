@@ -7,10 +7,10 @@ import { useApp } from '../context/AppContext';
 import {
   LayoutDashboard,
   CalendarCheck,
-  Scan,
+  ScanBarcode,
   Users,
   GraduationCap,
-  CreditCard,
+  IdCard,
   Printer,
   Settings,
   Sparkles
@@ -30,43 +30,43 @@ export default function NavRail() {
     {
       href: '/attendance',
       icon: CalendarCheck,
-      labelAr: 'كشف الحضور والمالية',
-      labelEn: 'Attendance & Finance'
+      labelAr: 'كشف الحضور',
+      labelEn: 'Attendance'
     },
     {
       href: '/scanner',
-      icon: Scan,
-      labelAr: 'محطة مسح الباركود',
-      labelEn: 'Scanner Station'
+      icon: ScanBarcode,
+      labelAr: 'مسح الباركود',
+      labelEn: 'Barcode'
     },
     {
       href: '/groups',
       icon: Users,
-      labelAr: 'الأفواج والدروس',
+      labelAr: 'الأفواج',
       labelEn: 'Groups'
     },
     {
       href: '/teachers',
       icon: GraduationCap,
-      labelAr: 'الأساتذة والمستحقات',
+      labelAr: 'الأساتذة',
       labelEn: 'Teachers'
     },
     {
       href: '/students',
-      icon: Users,
-      labelAr: 'سجل وبيانات جميع التلاميذ',
-      labelEn: 'All Student Records'
+      icon: IdCard,
+      labelAr: 'سجل التلاميذ',
+      labelEn: 'Students'
     },
     {
       href: '/print',
       icon: Printer,
-      labelAr: 'طباعة كشوف الحضور',
-      labelEn: 'Print Rosters'
+      labelAr: 'طباعة الكشوف',
+      labelEn: 'Print'
     },
     {
       href: '/admin',
       icon: Settings,
-      labelAr: 'الإعدادات والأسعار',
+      labelAr: 'الإعدادات',
       labelEn: 'Settings'
     }
   ];
@@ -77,13 +77,14 @@ export default function NavRail() {
     <aside
       className="no-print"
       style={{
-        width: '260px',
+        width: '88px',
         backgroundColor: 'var(--md-sys-color-surface-container-low)',
         borderInlineEnd: '1px solid var(--md-sys-color-outline-variant)',
         display: 'flex',
         flexDirection: 'column',
+        alignItems: 'center',
         justifyContent: 'space-between',
-        padding: '12px 10px',
+        padding: '10px 4px',
         position: 'fixed',
         top: '64px',
         bottom: 0,
@@ -91,12 +92,14 @@ export default function NavRail() {
         left: isRtl ? 'auto' : 0,
         height: 'calc(100vh - 64px)',
         overflowY: 'auto',
+        overflowX: 'hidden',
         flexShrink: 0,
         zIndex: 40,
         boxSizing: 'border-box'
       }}
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+      {/* Navigation Items (Icon above title) */}
+      <nav style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', width: '100%' }}>
         {navItems.map((item) => {
           const isActive = pathname === item.href;
           const Icon = item.icon;
@@ -105,53 +108,99 @@ export default function NavRail() {
             <Link
               key={item.href}
               href={item.href}
+              title={lang === 'ar' ? item.labelAr : item.labelEn}
               style={{
                 display: 'flex',
+                flexDirection: 'column',
                 alignItems: 'center',
-                gap: '10px',
-                padding: '9px 12px',
-                borderRadius: 'var(--md-shape-full)',
+                justifyContent: 'center',
+                width: '78px',
+                padding: '4px 0 6px 0',
+                borderRadius: '12px',
                 textDecoration: 'none',
-                fontWeight: isActive ? 700 : 500,
-                fontSize: '0.84rem',
-                whiteSpace: 'nowrap',
-                color: isActive
-                  ? 'var(--md-sys-color-on-primary-container)'
-                  : 'var(--md-sys-color-on-surface-variant)',
-                backgroundColor: isActive
-                  ? 'var(--md-sys-color-primary-container)'
-                  : 'transparent',
-                transition: 'var(--transition-standard)'
+                transition: 'var(--transition-standard)',
+                cursor: 'pointer'
               }}
             >
-              <Icon size={18} color={isActive ? 'var(--md-sys-color-primary)' : 'currentColor'} />
-              <span>{lang === 'ar' ? item.labelAr : item.labelEn}</span>
+              {/* M3 Active Indicator Pill */}
+              <div
+                style={{
+                  width: '52px',
+                  height: '30px',
+                  borderRadius: 'var(--md-shape-full)',
+                  backgroundColor: isActive
+                    ? 'var(--md-sys-color-primary-container)'
+                    : 'transparent',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'var(--transition-standard)'
+                }}
+              >
+                <Icon
+                  size={20}
+                  color={
+                    isActive
+                      ? 'var(--md-sys-color-on-primary-container)'
+                      : 'var(--md-sys-color-on-surface-variant)'
+                  }
+                  strokeWidth={isActive ? 2.3 : 1.8}
+                />
+              </div>
+
+              {/* Title Directly Under Icon (1 or 2 words) */}
+              <span
+                style={{
+                  fontSize: '0.72rem',
+                  fontWeight: isActive ? 800 : 600,
+                  color: isActive
+                    ? 'var(--md-sys-color-primary)'
+                    : 'var(--md-sys-color-on-surface-variant)',
+                  marginTop: '3px',
+                  textAlign: 'center',
+                  lineHeight: 1.2,
+                  whiteSpace: 'nowrap',
+                  letterSpacing: '-0.2px'
+                }}
+              >
+                {lang === 'ar' ? item.labelAr : item.labelEn}
+              </span>
             </Link>
           );
         })}
-      </div>
+      </nav>
 
-      {/* Center Snapshot Card */}
+      {/* Quick Stats Mini Badge */}
       <div
         className="m3-card"
+        title={
+          lang === 'ar'
+            ? `إحصائيات سريعة:\nالأفواج: ${data.groups.length} فوج\nالأساتذة: ${data.teachers.length} أستاذ\nفئات الاشتراكات: ${data.pricingTiers.length}`
+            : `Quick Stats:\nGroups: ${data.groups.length}\nTeachers: ${data.teachers.length}\nPricing Tiers: ${data.pricingTiers.length}`
+        }
         style={{
-          padding: '10px 12px',
+          width: '76px',
+          padding: '8px 4px',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '2px',
           backgroundColor: 'var(--md-sys-color-surface-container)',
           border: '1px solid var(--md-sys-color-outline-variant)',
-          borderRadius: 'var(--md-shape-md)'
+          borderRadius: '12px',
+          textAlign: 'center',
+          cursor: 'default',
+          marginTop: '10px'
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
-          <Sparkles size={14} color="var(--md-sys-color-primary)" />
-          <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--md-sys-color-primary)' }}>
-            {lang === 'ar' ? 'إحصائيات سريعة' : 'Quick Stats'}
-          </span>
-        </div>
-        <div style={{ fontSize: '0.74rem', color: 'var(--md-sys-color-on-surface-variant)', lineHeight: 1.5 }}>
-          <div>الأفواج: <strong>{data.groups.length} فوج</strong></div>
-          <div>الأساتذة: <strong>{data.teachers.length} أستاذ</strong></div>
-          <div>الاشتراكات: <strong>{data.pricingTiers.length} فئات</strong></div>
-        </div>
+        <Sparkles size={14} color="var(--md-sys-color-primary)" />
+        <span style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--md-sys-color-primary)', whiteSpace: 'nowrap' }}>
+          {data.groups.length} فوج
+        </span>
+        <span style={{ fontSize: '0.62rem', color: 'var(--md-sys-color-on-surface-variant)', whiteSpace: 'nowrap' }}>
+          {data.teachers.length} أستاذ
+        </span>
       </div>
     </aside>
   );

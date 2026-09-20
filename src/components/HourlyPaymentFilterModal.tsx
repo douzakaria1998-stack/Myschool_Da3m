@@ -16,7 +16,10 @@ import {
   Filter,
   ArrowUpDown,
   Sparkles,
-  ChevronDown
+  ChevronDown,
+  ChevronUp,
+  Maximize2,
+  Minimize2
 } from 'lucide-react';
 import { formatToYYYYMMDD } from '../utils/sessionUtils';
 import {
@@ -52,6 +55,9 @@ export default function HourlyPaymentFilterModal({ isOpen, onClose, initialGroup
 
   // Search within payments
   const [searchFilter, setSearchFilter] = useState<string>('');
+
+  // Expand list / collapse filters toggle
+  const [isFiltersCollapsed, setIsFiltersCollapsed] = useState<boolean>(false);
 
   // Update initial group if changed
   useEffect(() => {
@@ -309,12 +315,13 @@ export default function HourlyPaymentFilterModal({ isOpen, onClose, initialGroup
         className="m3-dialog"
         onClick={(e) => e.stopPropagation()}
         style={{
-          maxWidth: '1060px',
-          width: '95%',
-          maxHeight: '92vh',
+          maxWidth: '1280px',
+          width: '96%',
+          height: '95vh',
+          maxHeight: '95vh',
           display: 'flex',
           flexDirection: 'column',
-          padding: '20px',
+          padding: '16px 20px',
           backgroundColor: 'var(--md-sys-color-surface)',
           borderRadius: 'var(--md-shape-xl)',
           boxShadow: '0 12px 36px rgba(0,0,0,0.18)',
@@ -374,6 +381,16 @@ export default function HourlyPaymentFilterModal({ isOpen, onClose, initialGroup
               </span>
             )}
             <button
+              type="button"
+              onClick={() => setIsFiltersCollapsed((prev) => !prev)}
+              className={`m3-btn m3-btn-sm ${isFiltersCollapsed ? 'm3-btn-tonal' : 'm3-btn-outlined'}`}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.78rem', padding: '5px 12px' }}
+              title={isFiltersCollapsed ? 'إظهار لوحة الفلاتر والإحصائيات' : 'تكبير حجم القائمة وإخفاء خيارات التصفية'}
+            >
+              {isFiltersCollapsed ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+              <span>{isFiltersCollapsed ? 'إظهار الفلاتر' : '📐 تكبير القائمة'}</span>
+            </button>
+            <button
               onClick={onClose}
               className="m3-btn-text"
               style={{
@@ -393,19 +410,59 @@ export default function HourlyPaymentFilterModal({ isOpen, onClose, initialGroup
           </div>
         </div>
 
-        {/* Filter Controls Panel */}
-        <div
-          style={{
-            backgroundColor: 'var(--md-sys-color-surface-container-low)',
-            padding: '14px',
-            borderRadius: '12px',
-            marginTop: '14px',
-            border: '1px solid var(--md-sys-color-outline-variant)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '12px'
-          }}
-        >
+        {/* Filter Controls & KPIs Panel */}
+        {isFiltersCollapsed ? (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              backgroundColor: 'var(--md-sys-color-surface-container-low)',
+              padding: '8px 14px',
+              borderRadius: '10px',
+              margin: '8px 0',
+              border: '1px solid var(--md-sys-color-outline-variant)',
+              fontSize: '0.82rem',
+              flexWrap: 'wrap',
+              gap: '8px'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+              <span>📅 <strong>{selectedDate}</strong></span>
+              <span>⏰ من <strong>{fromTime}</strong> إلى <strong>{toTime}</strong></span>
+              <span>🏫 <strong>{selectedGroupId === 'all' ? 'جميع الأفواج' : `فوج ${selectedGroupId}`}</strong></span>
+              <span style={{ color: 'var(--status-present)', fontWeight: 800 }}>
+                💵 المحصل: {summary.totalAmount.toLocaleString()} دج
+              </span>
+              <span style={{ color: 'var(--md-sys-color-on-surface-variant)', fontWeight: 700 }}>
+                👥 {summary.uniqueStudentsCount} تلميذ ({summary.paymentsCount} عملية)
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsFiltersCollapsed(false)}
+              className="m3-btn m3-btn-text m3-btn-sm"
+              style={{ fontSize: '0.76rem', color: 'var(--md-sys-color-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}
+            >
+              <span>تعديل الفلاتر</span>
+              <ChevronDown size={14} />
+            </button>
+          </div>
+        ) : (
+          <>
+            {/* Filter Controls Panel */}
+            <div
+              style={{
+                backgroundColor: 'var(--md-sys-color-surface-container-low)',
+                padding: '10px 14px',
+                borderRadius: '10px',
+                marginTop: '10px',
+                border: '1px solid var(--md-sys-color-outline-variant)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px'
+              }}
+            >
           {/* Row 1: Date & Group Selector */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
             {/* Date Picker */}
@@ -559,71 +616,73 @@ export default function HourlyPaymentFilterModal({ isOpen, onClose, initialGroup
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
-            gap: '10px',
-            margin: '14px 0',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+            gap: '8px',
+            margin: '8px 0',
             backgroundColor: 'var(--md-sys-color-surface-container-lowest)',
-            padding: '14px 18px',
-            borderRadius: '12px',
+            padding: '8px 12px',
+            borderRadius: '10px',
             border: '1px solid var(--md-sys-color-outline-variant)',
             textAlign: 'center'
           }}
         >
           {/* Card 1: Total Received in Window */}
-          <div style={{ borderInlineEnd: '1px solid var(--md-sys-color-outline-variant)', paddingInline: '6px' }}>
-            <span style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--status-present)' }}>
-              مجموع المحصل في هذه الفترة
+          <div style={{ borderInlineEnd: '1px solid var(--md-sys-color-outline-variant)', paddingInline: '4px' }}>
+            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--status-present)' }}>
+              المحصل في الفترة
             </span>
-            <div style={{ fontSize: '1.35rem', fontWeight: 900, color: 'var(--status-present)', marginTop: '4px' }}>
+            <div style={{ fontSize: '1.2rem', fontWeight: 900, color: 'var(--status-present)', marginTop: '2px' }}>
               {summary.totalAmount.toLocaleString()}{' '}
-              <span style={{ fontSize: '0.78rem', fontWeight: 600 }}>دج</span>
+              <span style={{ fontSize: '0.72rem', fontWeight: 600 }}>دج</span>
             </div>
           </div>
 
           {/* Card 2: Number of Students */}
-          <div style={{ borderInlineEnd: '1px solid var(--md-sys-color-outline-variant)', paddingInline: '6px' }}>
-            <span style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--md-sys-color-on-surface-variant)' }}>
-              عدد التلاميذ المسددين
+          <div style={{ borderInlineEnd: '1px solid var(--md-sys-color-outline-variant)', paddingInline: '4px' }}>
+            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--md-sys-color-on-surface-variant)' }}>
+              التلاميذ المسددون
             </span>
-            <div style={{ fontSize: '1.35rem', fontWeight: 900, color: 'var(--md-sys-color-on-surface)', marginTop: '4px' }}>
+            <div style={{ fontSize: '1.2rem', fontWeight: 900, color: 'var(--md-sys-color-on-surface)', marginTop: '2px' }}>
               {summary.uniqueStudentsCount}{' '}
-              <span style={{ fontSize: '0.78rem', fontWeight: 600 }}>تلميذ</span>
+              <span style={{ fontSize: '0.72rem', fontWeight: 600 }}>تلميذ</span>
             </div>
           </div>
 
           {/* Card 3: Payments Count */}
-          <div style={{ borderInlineEnd: '1px solid var(--md-sys-color-outline-variant)', paddingInline: '6px' }}>
-            <span style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--md-sys-color-on-surface-variant)' }}>
-              عدد عمليات الدفع
+          <div style={{ borderInlineEnd: '1px solid var(--md-sys-color-outline-variant)', paddingInline: '4px' }}>
+            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--md-sys-color-on-surface-variant)' }}>
+              العمليات
             </span>
-            <div style={{ fontSize: '1.35rem', fontWeight: 900, color: 'var(--md-sys-color-on-surface)', marginTop: '4px' }}>
+            <div style={{ fontSize: '1.2rem', fontWeight: 900, color: 'var(--md-sys-color-on-surface)', marginTop: '2px' }}>
               {summary.paymentsCount}{' '}
-              <span style={{ fontSize: '0.78rem', fontWeight: 600 }}>عملية</span>
+              <span style={{ fontSize: '0.72rem', fontWeight: 600 }}>عملية</span>
             </div>
           </div>
 
           {/* Card 4: Teacher share */}
-          <div style={{ borderInlineEnd: '1px solid var(--md-sys-color-outline-variant)', paddingInline: '6px' }}>
-            <span style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--md-sys-color-secondary)' }}>
-              مستحق الأستاذ
+          <div style={{ borderInlineEnd: '1px solid var(--md-sys-color-outline-variant)', paddingInline: '4px' }}>
+            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--md-sys-color-secondary)' }}>
+              مستحق الأساتذة
             </span>
-            <div style={{ fontSize: '1.35rem', fontWeight: 900, color: 'var(--md-sys-color-secondary)', marginTop: '4px' }}>
+            <div style={{ fontSize: '1.2rem', fontWeight: 900, color: 'var(--md-sys-color-secondary)', marginTop: '2px' }}>
               {summary.teacherTotal.toLocaleString()}{' '}
-              <span style={{ fontSize: '0.78rem', fontWeight: 600 }}>دج</span>
+              <span style={{ fontSize: '0.72rem', fontWeight: 600 }}>دج</span>
             </div>
           </div>
 
           {/* Card 5: Center net share */}
-          <div style={{ paddingInline: '6px' }}>
-            <span style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--md-sys-color-primary)' }}>
-              حصة المركز الصافية
+          <div style={{ paddingInline: '4px' }}>
+            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--md-sys-color-primary)' }}>
+              صافي المركز
             </span>
-            <div style={{ fontSize: '1.35rem', fontWeight: 900, color: 'var(--md-sys-color-primary)', marginTop: '4px' }}>
+            <div style={{ fontSize: '1.2rem', fontWeight: 900, color: 'var(--md-sys-color-primary)', marginTop: '2px' }}>
               {summary.schoolEarnTotal.toLocaleString()}{' '}
-              <span style={{ fontSize: '0.78rem', fontWeight: 600 }}>دج</span>
+              <span style={{ fontSize: '0.72rem', fontWeight: 600 }}>دج</span>
             </div>
           </div>
         </div>
+      </>
+    )}
 
         {/* Action Buttons & Search Toolbar */}
         <div
@@ -691,23 +750,24 @@ export default function HourlyPaymentFilterModal({ isOpen, onClose, initialGroup
         <div
           style={{
             flex: 1,
+            minHeight: isFiltersCollapsed ? '640px' : '440px',
             overflowY: 'auto',
             border: '1px solid var(--md-sys-color-outline-variant)',
             borderRadius: '10px',
             backgroundColor: 'var(--md-sys-color-surface)'
           }}
         >
-          <table className="m3-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+          <table className="m3-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem' }}>
             <thead>
               <tr style={{ backgroundColor: 'var(--md-sys-color-surface-container)', position: 'sticky', top: 0, zIndex: 2 }}>
-                <th style={{ padding: '8px 10px', textAlign: 'center', width: '40px' }}>#</th>
-                <th style={{ padding: '8px 10px', textAlign: 'center', width: '90px' }}>⏰ الوقت</th>
-                <th style={{ padding: '8px 10px', textAlign: 'start' }}>👤 اسم التلميذ</th>
-                <th style={{ padding: '8px 10px', textAlign: 'center' }}>🏫 الفوج والمادة</th>
-                <th style={{ padding: '8px 10px', textAlign: 'center', width: '80px' }}>الحصة</th>
-                <th style={{ padding: '8px 10px', textAlign: 'center', width: '110px' }}>💵 المبلغ المسدد</th>
-                <th style={{ padding: '8px 10px', textAlign: 'center', width: '100px' }}>المتبقي (الدين)</th>
-                <th style={{ padding: '8px 10px', textAlign: 'center', width: '90px' }}>إجراء</th>
+                <th style={{ padding: '10px 12px', textAlign: 'center', width: '45px' }}>#</th>
+                <th style={{ padding: '10px 12px', textAlign: 'center', width: '95px' }}>⏰ الوقت</th>
+                <th style={{ padding: '10px 12px', textAlign: 'start' }}>👤 اسم التلميذ</th>
+                <th style={{ padding: '10px 12px', textAlign: 'center' }}>🏫 الفوج والمادة</th>
+                <th style={{ padding: '10px 12px', textAlign: 'center', width: '85px' }}>الحصة</th>
+                <th style={{ padding: '10px 12px', textAlign: 'center', width: '120px' }}>💵 المبلغ المسدد</th>
+                <th style={{ padding: '10px 12px', textAlign: 'center', width: '110px' }}>المتبقي (الدين)</th>
+                <th style={{ padding: '10px 12px', textAlign: 'center', width: '95px' }}>إجراء</th>
               </tr>
             </thead>
             <tbody>

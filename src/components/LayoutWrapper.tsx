@@ -33,7 +33,7 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
           display: 'flex',
           flex: 1,
           paddingTop: '64px',
-          paddingInlineStart: '260px',
+          paddingInlineStart: '88px',
           minHeight: '100vh',
           boxSizing: 'border-box'
         }}

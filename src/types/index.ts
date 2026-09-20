@@ -100,6 +100,19 @@ export interface CenterData {
   groupData: Record<string, GroupSheet>;
   pricingTiers: PricingTier[];
   credentials: CenterCredentials;
+  paymentTransactions?: any[];
+  deletedStudents?: DeletedStudentArchiveItem[];
+}
+
+export interface DeletedStudentArchiveItem {
+  id: string;
+  deletedAt: number;
+  deletedAtStr: string;
+  groupId: string;
+  groupSubject?: string;
+  teacherName?: string;
+  student: StudentRecord;
+  reason?: string;
 }
 
 export interface QueuedReceipt {

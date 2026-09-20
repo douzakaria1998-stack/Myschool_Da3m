@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useApp } from '../../context/AppContext';
 import { AttendanceStatus, StudentRecord } from '../../types';
@@ -27,6 +27,7 @@ import {
   Scan,
   UserX,
   IdCard,
+  ArrowUp,
   X
 } from 'lucide-react';
 import StudentPaymentModal from '../../components/StudentPaymentModal';
@@ -103,6 +104,17 @@ export default function AttendancePage() {
     group?.sessionDates || ['حصة 1', 'حصة 2', 'حصة 3', 'حصة 4', 'حصة 5', 'حصة 6', 'حصة 7', 'حصة 8']
   );
   const [autoCascadeDates, setAutoCascadeDates] = useState(true);
+
+  // Sticky Floating Header on scroll
+  const [isScrolled, setIsScrolled] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setIsScrolled(window.scrollY > 150);
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   // Automated Absence Tracking: End Session action
   const handleEndSession = (sessionIndex: number) => {
@@ -332,6 +344,164 @@ export default function AttendancePage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      {/* Sticky Floating Bar on Scroll (Always keeps Add Student, Group Info, Attendance Count & Print Worksheet) */}
+      {isScrolled && (
+        <div
+          className="no-print"
+          style={{
+            position: 'fixed',
+            top: '64px',
+            insetInlineStart: '88px',
+            insetInlineEnd: 0,
+            zIndex: 45,
+            backgroundColor: 'var(--md-sys-color-surface-container)',
+            borderBottom: '1px solid var(--md-sys-color-outline-variant)',
+            boxShadow: '0 4px 14px rgba(0, 0, 0, 0.1)',
+            padding: '7px 20px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+            backdropFilter: 'blur(8px)',
+            animation: 'fadeIn 0.2s ease-in-out'
+          }}
+        >
+          {/* Right Section (in RTL): Essential Group Info & Session Attendance */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, overflow: 'hidden' }}>
+            {/* Group ID & Subject Pill */}
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                backgroundColor: 'var(--md-sys-color-surface-container-high)',
+                border: '1px solid var(--md-sys-color-outline-variant)',
+                padding: '3px 10px',
+                borderRadius: '8px',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              <strong style={{ fontSize: '0.85rem', color: 'var(--md-sys-color-on-surface)' }}>
+                فوج {group.groupId}
+              </strong>
+              <span style={{ fontSize: '0.78rem', color: 'var(--md-sys-color-primary)', fontWeight: 700 }}>
+                ({group.subject})
+              </span>
+            </div>
+
+            {/* Teacher, Day & Time */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '0.78rem',
+                color: 'var(--md-sys-color-on-surface-variant)',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              <span>|</span>
+              <span>الأستاذ: <strong style={{ color: 'var(--md-sys-color-on-surface)' }}>{group.teacherName}</strong></span>
+              <span>|</span>
+              <span>التوقيت: <strong>{group.day1} ({formatGroupTime(group.time1) || 'صباحاً'})</strong></span>
+            </div>
+
+            {/* Number of students who attend the session */}
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                backgroundColor: '#dcfce7',
+                color: '#15803d',
+                border: '1px solid #86efac',
+                padding: '3px 10px',
+                borderRadius: 'var(--md-shape-full)',
+                fontSize: '0.78rem',
+                fontWeight: 800,
+                whiteSpace: 'nowrap'
+              }}
+              title={`إحصائيات الحصة ${selectedSessionStatsIndex + 1}: ${sessionAttendanceStats.present} حاضر من أصل ${sessionAttendanceStats.total}`}
+            >
+              <span>الحصة {selectedSessionStatsIndex + 1}:</span>
+              <strong style={{ fontSize: '0.88rem' }}>{sessionAttendanceStats.present}</strong>
+              <span style={{ fontSize: '0.7rem', opacity: 0.85 }}>/ {sessionAttendanceStats.total} حاضر</span>
+              {sessionAttendanceStats.absent > 0 && (
+                <span style={{ marginInlineStart: '4px', color: '#b91c1c' }}>
+                  ({sessionAttendanceStats.absent} غائب)
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Left Section (in RTL): Print Worksheet, ADD STUDENT (Sticky!), and Scroll Top */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, whiteSpace: 'nowrap' }}>
+            {/* Print Worksheet Link */}
+            <Link
+              href="/print"
+              className="m3-btn m3-btn-outlined m3-btn-sm"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                height: '34px',
+                padding: '0 12px',
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                borderRadius: 'var(--md-shape-full)',
+                textDecoration: 'none',
+                whiteSpace: 'nowrap'
+              }}
+              title="طباعة كشف الحضور لهذا الفوج (Worksheet / Roster)"
+            >
+              <Printer size={15} />
+              <span>طباعة الكشف</span>
+            </Link>
+
+            {/* The primary requested ALWAYS VISIBLE Add Student button! */}
+            <button
+              onClick={() => setIsAddStudentOpen(true)}
+              className="m3-btn m3-btn-primary m3-btn-sm"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                height: '34px',
+                padding: '0 14px',
+                fontSize: '0.82rem',
+                fontWeight: 800,
+                borderRadius: 'var(--md-shape-full)',
+                cursor: 'pointer',
+                boxShadow: '0 2px 8px rgba(0, 99, 155, 0.4)',
+                whiteSpace: 'nowrap'
+              }}
+              title="إضافة تلميذ جديد لهذا الفوج"
+            >
+              <UserPlus size={16} />
+              <span>إضافة تلميذ</span>
+            </button>
+
+            {/* Smooth Scroll Back to Top */}
+            <button
+              onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+              className="m3-btn m3-btn-tonal m3-btn-sm"
+              style={{
+                width: '34px',
+                height: '34px',
+                padding: 0,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: 'var(--md-shape-full)',
+                cursor: 'pointer'
+              }}
+              title="الرجوع إلى أعلى الصفحة"
+            >
+              <ArrowUp size={16} />
+            </button>
+          </div>
+        </div>
+      )}
       {/* Top Header & Group Selector Bar */}
       <div
         className="m3-card"

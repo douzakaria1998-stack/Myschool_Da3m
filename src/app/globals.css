@@ -198,6 +198,7 @@ body {
   cursor: pointer;
   transition: var(--transition-standard);
   text-decoration: none;
+  white-space: nowrap;
 }
 
 .m3-btn-primary {
