@@ -85,7 +85,7 @@ export default function TopAppBar() {
                 whiteSpace: 'nowrap'
               }}
             >
-              {data.cycle || 'الدورة الحالية'}
+              {data.cycle || 'بكالوريا 2027'}
             </span>
           </div>
           <p style={{ fontSize: '0.7rem', color: 'var(--md-sys-color-on-surface-variant)', whiteSpace: 'nowrap', margin: 0, lineHeight: 1.2 }}>
