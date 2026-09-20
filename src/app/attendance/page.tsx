@@ -39,6 +39,7 @@ import GroupSearchSelect from '../../components/GroupSearchSelect';
 import GroupBadgesModal from '../../components/GroupBadgesModal';
 import SecurityPinModal from '../../components/SecurityPinModal';
 import HourlyPaymentFilterModal from '../../components/HourlyPaymentFilterModal';
+import GroupSessionPaymentsModal from '../../components/GroupSessionPaymentsModal';
 import { collectTodayAndHourlyPayments } from '../../utils/paymentLogger';
 import { normalizeScannedBarcode } from '../../utils/barcodeUtils';
 import {
@@ -86,6 +87,7 @@ export default function AttendancePage() {
   const [showFinancialStats, setShowFinancialStats] = useState(false);
   const [isPinModalOpen, setIsPinModalOpen] = useState(false);
   const [isHourlyModalOpen, setIsHourlyModalOpen] = useState(false);
+  const [isSessionPaymentsModalOpen, setIsSessionPaymentsModalOpen] = useState(false);
   const [statsDisplayMode, setStatsDisplayMode] = useState<'cumulative' | 'hourly'>('cumulative');
   const [inlineFromTime, setInlineFromTime] = useState('13:00');
   const [inlineToTime, setInlineToTime] = useState('15:00');
@@ -1282,6 +1284,31 @@ export default function AttendancePage() {
             <IdCard size={16} color="#ea580c" />
             <span>طباعة بطاقات الفوج ({realStudents.length})</span>
           </button>
+
+          {/* Check Who Paid & Put Amount Per Session Button (User Requested Position) */}
+          <button
+            type="button"
+            onClick={() => setIsSessionPaymentsModalOpen(true)}
+            className="m3-btn m3-btn-sm"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 14px',
+              borderRadius: 'var(--md-shape-full)',
+              backgroundColor: '#ecfdf5',
+              color: '#065f46',
+              border: '1px solid #6ee7b7',
+              fontWeight: 700,
+              fontSize: '0.8rem',
+              cursor: 'pointer',
+              boxShadow: '0 1px 3px rgba(5, 150, 105, 0.12)'
+            }}
+            title="تدقيق ومتابعة دفعات التلاميذ وتسجيل المبالغ المسددة لكل حصة"
+          >
+            <Coins size={16} color="#059669" />
+            <span>دفعات الحصص 💰</span>
+          </button>
         </div>
 
         {/* Edit Dates Toggle */}
@@ -2030,6 +2057,15 @@ export default function AttendancePage() {
           isOpen={isHourlyModalOpen}
           onClose={() => setIsHourlyModalOpen(false)}
           initialGroupId={group.groupId}
+        />
+      )}
+
+      {/* Session Payments Check & Batch Entry Modal */}
+      {isSessionPaymentsModalOpen && (
+        <GroupSessionPaymentsModal
+          group={group}
+          initialSessionIdx={selectedSessionStatsIndex}
+          onClose={() => setIsSessionPaymentsModalOpen(false)}
         />
       )}
     </div>

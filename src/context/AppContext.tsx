@@ -76,6 +76,7 @@ interface AppContextType {
   updatePayment: (groupId: string, rowId: number, paymentIndex: number, amount: number | string) => void;
   updateStudentFullFinances: (groupId: string, rowId: number, payments: (number | string)[], discount?: DiscountType) => void;
   batchUpdateSessionPayments: (groupId: string, sessionIndex: number, studentPayments: { rowId: number; amount: number | string }[]) => void;
+  batchUpdateAllSessionsPayments: (groupId: string, updates: { rowId: number; payments: (number | string)[] }[]) => void;
   updateDiscount: (groupId: string, rowId: number, discount: DiscountType) => void;
   addStudent: (
     groupId: string,
@@ -1856,6 +1857,70 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
+  // Batch update all session payments across multiple students/sessions
+  const batchUpdateAllSessionsPayments = (
+    groupId: string,
+    updates: { rowId: number; payments: (number | string)[] }[]
+  ) => {
+    const currentData = dataRef.current;
+    const group = currentData.groupData[groupId];
+    if (!group) return;
+
+    const sessionCount = group.sessionDates?.length || group.sessionCount || 4;
+    const updateMap = new Map<number, (number | string)[]>();
+    updates.forEach((u) => updateMap.set(u.rowId, u.payments));
+
+    // Record positive incremental payment transactions
+    group.students.forEach((student) => {
+      if (updateMap.has(student.rowId)) {
+        const newPayments = updateMap.get(student.rowId)!;
+        newPayments.forEach((val, sessionIdx) => {
+          const newAmt = val === '' ? 0 : Number(val) || 0;
+          const oldAmt = Number(student.payments?.[sessionIdx]) || 0;
+          if (newAmt > oldAmt) {
+            recordPaymentTransaction({
+              groupId,
+              groupSubject: group.subject,
+              teacherName: group.teacherName,
+              studentRowId: student.rowId,
+              studentName: student.name,
+              studentPhone: student.phone,
+              studentBarcode: student.barcode,
+              sessionIndex: sessionIdx,
+              amount: newAmt - oldAmt,
+              source: 'batch'
+            });
+          }
+        });
+      }
+    });
+
+    const updatedStudents = group.students.map((student) => {
+      if (!updateMap.has(student.rowId)) return student;
+      const rawPayments = updateMap.get(student.rowId)!;
+      const normalizedPayments = rawPayments.map((p) => (p === '' ? '' : Number(p) || 0));
+      while (normalizedPayments.length < sessionCount) normalizedPayments.push('');
+
+      return calculateStudentFinances(
+        { ...student, payments: normalizedPayments },
+        group.type,
+        currentData.pricingTiers,
+        group
+      );
+    });
+
+    const updatedData: CenterData = {
+      ...currentData,
+      groupData: {
+        ...currentData.groupData,
+        [groupId]: { ...group, students: updatedStudents }
+      }
+    };
+
+    persistData(updatedData);
+    saveToCloud(updatedData);
+  };
+
   // Update discount
   const updateDiscount = (groupId: string, rowId: number, discount: DiscountType) => {
     const currentData = dataRef.current;
@@ -3193,6 +3258,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         updatePayment,
         updateStudentFullFinances,
         batchUpdateSessionPayments,
+        batchUpdateAllSessionsPayments,
         updateDiscount,
         addStudent,
         enrollStudentMultiGroups,
