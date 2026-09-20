@@ -33,7 +33,7 @@ import {
   sortGroupsActiveFirstOldToNew
 } from '../utils/sessionUtils';
 import { normalizeArabicName } from '../utils/barcodeUtils';
-import { recordPaymentTransaction } from '../utils/paymentLogger';
+import { recordPaymentTransaction, removePaymentTransactionsForStudent } from '../utils/paymentLogger';
 
 interface AppContextType {
   data: CenterData;
@@ -91,6 +91,7 @@ interface AppContextType {
     payments: { groupId: string; paymentAmount: number | string }[]
   ) => { groupId: string; rowId: number; fee: number; paidNow: number; totalReceived: number; debt: number }[];
   deleteStudent: (groupId: string, rowId: number) => void;
+  deleteStudentGlobally: (params: { name: string; barcode?: string; phone?: string; groupIds?: string[] }) => void;
   restoreStudent: (archiveId: string) => boolean;
   clearRecycleBin: () => void;
   transferStudent: (fromGroupId: string, toGroupId: string, studentRowId: number) => boolean;
@@ -259,7 +260,8 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 
 // Non-destructive Two-Way Union Merge:
 // Guarantees newly added students, newly registered groups, payments, and attendance
-// are NEVER erased by a stale or concurrent remote snapshot!
+// are NEVER erased by a stale or concurrent remote snapshot, while strictly respecting
+// deletedStudents tombstones so deleted students and their payments are NEVER resurrected!
 function mergeAttendanceSafely(remote: CenterData, local: CenterData): CenterData {
   if (!remote || !remote.groupData) return local || remote;
   if (!local || !local.groupData) return remote;
@@ -270,7 +272,20 @@ function mergeAttendanceSafely(remote: CenterData, local: CenterData): CenterDat
     groupData: { ...remote.groupData }
   };
 
-  // 1. Preserve any local groups that are missing in remote
+  // 1. Union deletedStudents archive FIRST so tombstones are authoritative
+  const existingDelIds = new Set<string>();
+  const mergedDeleted: any[] = [];
+  [...(remote.deletedStudents || []), ...(local.deletedStudents || [])].forEach((item) => {
+    if (!item) return;
+    const dId = item.id || `${item.groupId}_${item.student?.name}_${item.deletedAt}`;
+    if (!existingDelIds.has(dId)) {
+      existingDelIds.add(dId);
+      mergedDeleted.push(item);
+    }
+  });
+  merged.deletedStudents = mergedDeleted;
+
+  // 2. Preserve any local groups that are missing in remote
   for (const [gid, localGroup] of Object.entries(local.groupData)) {
     if (!merged.groupData[gid]) {
       merged.groupData[gid] = { ...localGroup };
@@ -284,21 +299,50 @@ function mergeAttendanceSafely(remote: CenterData, local: CenterData): CenterDat
     }
   });
 
-  // 2. Safely merge student lists and details across all groups
+  // 3. Safely merge student lists and details across all groups
   for (const [gid, localGroup] of Object.entries(local.groupData)) {
     const remoteGroup = merged.groupData[gid];
     if (!remoteGroup || !remoteGroup.students || !localGroup.students) continue;
+
+    // Build tombstone index for this group
+    const groupDeleted = mergedDeleted.filter((d) => d.groupId === gid);
+    const delRowIds = new Set<number>(groupDeleted.map((d) => d.student?.rowId).filter(Boolean));
+    const delNames = new Set<string>(groupDeleted.map((d) => normalizeArabicName(d.student?.name || '')).filter(Boolean));
+    const delBarcodes = new Set<string>(groupDeleted.map((d) => (d.student?.barcode || '').trim()).filter(Boolean));
+
+    const isStudentTombstoned = (s: StudentRecord) => {
+      if (!s) return false;
+      if (s.rowId && delRowIds.has(s.rowId)) return true;
+      const sNorm = normalizeArabicName(s.name || '');
+      if (sNorm && delNames.has(sNorm)) return true;
+      const bc = (s.barcode || '').trim();
+      if (bc && delBarcodes.has(bc)) return true;
+      return false;
+    };
 
     const matchedLocalRowIds = new Set<number>();
     const matchedLocalNames = new Set<string>();
     let hasDifferences = false;
 
-    const mergedStudents = remoteGroup.students.map((rStudent) => {
+    const mergedStudents: StudentRecord[] = [];
+
+    remoteGroup.students.forEach((rStudent) => {
+      if (!rStudent || !rStudent.name || isSummaryRow(rStudent, gid)) return;
+      // If student was deleted/tombstoned in this group, do NOT resurrect!
+      if (isStudentTombstoned(rStudent)) {
+        hasDifferences = true;
+        return;
+      }
+
       const rNormName = normalizeArabicName(rStudent.name || '');
       const lStudent = localGroup.students.find(
         (s) => (s.rowId && s.rowId === rStudent.rowId) || (rNormName && normalizeArabicName(s.name || '') === rNormName)
       );
-      if (!lStudent) return rStudent;
+
+      if (!lStudent) {
+        mergedStudents.push(rStudent);
+        return;
+      }
 
       if (lStudent.rowId) matchedLocalRowIds.add(lStudent.rowId);
       if (lStudent.name) matchedLocalNames.add(normalizeArabicName(lStudent.name));
@@ -356,21 +400,28 @@ function mergeAttendanceSafely(remote: CenterData, local: CenterData): CenterDat
           attendance: newAttendance,
           payments: newPayments
         };
-        return calcStudentFinancesPure(
-          updatedStudentRaw,
-          remoteGroup.type || '4-2500',
-          merged.pricingTiers || local.pricingTiers,
-          remoteGroup
+        mergedStudents.push(
+          calcStudentFinancesPure(
+            updatedStudentRaw,
+            remoteGroup.type || '4-2500',
+            merged.pricingTiers || local.pricingTiers,
+            remoteGroup
+          )
         );
+      } else {
+        mergedStudents.push(rStudent);
       }
-      return rStudent;
     });
 
-    // CRITICAL: Append any local student that does NOT exist in remote!
-    // (This guarantees newly added/enrolled students are NEVER lost when remote arrives)
+    // Append any local student that does NOT exist in remote (guarantee new enrollments are preserved)
+    // BUT ignore any student that was tombstoned!
     const localOnlyStudents: StudentRecord[] = [];
     localGroup.students.forEach((lStudent) => {
       if (!lStudent || !lStudent.name || isSummaryRow(lStudent, gid)) return;
+      if (isStudentTombstoned(lStudent)) {
+        hasDifferences = true;
+        return;
+      }
       const lNorm = normalizeArabicName(lStudent.name);
       const isMatched = (lStudent.rowId && matchedLocalRowIds.has(lStudent.rowId)) || (lNorm && matchedLocalNames.has(lNorm));
       if (!isMatched) {
@@ -402,11 +453,23 @@ function mergeAttendanceSafely(remote: CenterData, local: CenterData): CenterDat
     }
   }
 
-  // 3. Union paymentTransactions
+  // 4. Union paymentTransactions, strictly excluding transactions belonging to tombstoned/deleted students
   const existingTxIds = new Set<string>();
   const mergedTransactions: any[] = [];
   [...(remote.paymentTransactions || []), ...(local.paymentTransactions || [])].forEach((tx) => {
     if (!tx) return;
+    // Check if this tx belongs to a student who was tombstoned/deleted in this group
+    const isDeleted = mergedDeleted.some((d) => {
+      if (d.groupId !== tx.groupId) return false;
+      if (d.student?.rowId && tx.studentRowId && d.student.rowId === tx.studentRowId) return true;
+      if (d.student?.barcode && tx.studentBarcode && d.student.barcode === tx.studentBarcode) return true;
+      const dNorm = normalizeArabicName(d.student?.name || '');
+      const txNorm = normalizeArabicName(tx.studentName || '');
+      if (dNorm && txNorm && dNorm === txNorm) return true;
+      return false;
+    });
+    if (isDeleted) return;
+
     const txId = tx.id || `${tx.groupId}_${tx.studentRowId}_${tx.sessionIndex}_${tx.amount}_${tx.timestamp}`;
     if (!existingTxIds.has(txId)) {
       existingTxIds.add(txId);
@@ -414,19 +477,6 @@ function mergeAttendanceSafely(remote: CenterData, local: CenterData): CenterDat
     }
   });
   merged.paymentTransactions = mergedTransactions;
-
-  // 4. Union deletedStudents archive
-  const existingDelIds = new Set<string>();
-  const mergedDeleted: any[] = [];
-  [...(remote.deletedStudents || []), ...(local.deletedStudents || [])].forEach((item) => {
-    if (!item) return;
-    const dId = item.id || `${item.groupId}_${item.student?.name}_${item.deletedAt}`;
-    if (!existingDelIds.has(dId)) {
-      existingDelIds.add(dId);
-      mergedDeleted.push(item);
-    }
-  });
-  merged.deletedStudents = mergedDeleted;
 
   return merged;
 }
@@ -2256,16 +2306,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return results;
   };
 
-  // Delete student with soft-delete archiving to recycle bin
+  // Delete student with soft-delete archiving to recycle bin and payment purge
   const deleteStudent = (groupId: string, rowId: number) => {
     const currentData = dataRef.current;
     const group = currentData.groupData[groupId];
     if (!group) return;
 
     const studentToDelete = group.students.find((s) => s.rowId === rowId);
+    if (!studentToDelete) return;
+
     const updatedStudents = group.students.filter((s) => s.rowId !== rowId);
 
-    const archiveItem = studentToDelete ? {
+    const archiveItem = {
       id: `del-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       deletedAt: Date.now(),
       deletedAtStr: new Date().toLocaleString('ar-DZ'),
@@ -2274,14 +2326,32 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       teacherName: group.teacherName,
       student: { ...studentToDelete },
       reason: 'حذف يدوي من القائمة'
-    } : null;
+    };
 
     const existingDeleted = currentData.deletedStudents || [];
-    const updatedDeleted = archiveItem ? [archiveItem, ...existingDeleted] : existingDeleted;
+    const updatedDeleted = [archiveItem, ...existingDeleted];
+
+    // Purge payment transactions for this student in this group
+    const normDelName = normalizeArabicName(studentToDelete.name || '');
+    const updatedTransactions = (currentData.paymentTransactions || []).filter((tx) => {
+      if (tx.groupId !== groupId) return true;
+      if (tx.studentRowId && tx.studentRowId === rowId) return false;
+      if (studentToDelete.barcode && tx.studentBarcode && tx.studentBarcode === studentToDelete.barcode) return false;
+      if (normDelName && tx.studentName && normalizeArabicName(tx.studentName) === normDelName) return false;
+      return true;
+    });
+
+    // Also remove from localStorage transactions
+    removePaymentTransactionsForStudent(groupId, {
+      rowId,
+      name: studentToDelete.name,
+      barcode: studentToDelete.barcode
+    });
 
     const updatedData: CenterData = {
       ...currentData,
       deletedStudents: updatedDeleted,
+      paymentTransactions: updatedTransactions,
       groupData: {
         ...currentData.groupData,
         [groupId]: { ...group, students: updatedStudents }
@@ -2289,6 +2359,81 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
     persistData(updatedData);
     saveToCloud(updatedData);
+  };
+
+  // Delete student globally across all groups or specified groups
+  const deleteStudentGlobally = (params: {
+    name: string;
+    barcode?: string;
+    phone?: string;
+    groupIds?: string[];
+  }) => {
+    const currentData = dataRef.current;
+    const normName = normalizeArabicName(params.name || '');
+    const barcode = (params.barcode || '').trim();
+
+    const targetGroupIds = params.groupIds && params.groupIds.length > 0
+      ? params.groupIds
+      : Object.keys(currentData.groupData);
+
+    let hasChanges = false;
+    const newGroupData = { ...currentData.groupData };
+    const newDeleted = [...(currentData.deletedStudents || [])];
+    let newTransactions = [...(currentData.paymentTransactions || [])];
+
+    targetGroupIds.forEach((gid) => {
+      const group = newGroupData[gid];
+      if (!group || !group.students) return;
+
+      const studentToDelete = group.students.find((s) => {
+        if (!s || !s.name) return false;
+        if (normName && normalizeArabicName(s.name) === normName) return true;
+        if (barcode && s.barcode && s.barcode.trim() === barcode) return true;
+        return false;
+      });
+
+      if (!studentToDelete) return;
+
+      hasChanges = true;
+      const updatedStudents = group.students.filter((s) => s !== studentToDelete);
+      newGroupData[gid] = { ...group, students: updatedStudents };
+
+      newDeleted.unshift({
+        id: `del-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        deletedAt: Date.now(),
+        deletedAtStr: new Date().toLocaleString('ar-DZ'),
+        groupId: gid,
+        groupSubject: group.subject,
+        teacherName: group.teacherName,
+        student: { ...studentToDelete },
+        reason: 'حذف شامل من سجل الطلبة'
+      });
+
+      newTransactions = newTransactions.filter((tx) => {
+        if (tx.groupId !== gid) return true;
+        if (studentToDelete.rowId && tx.studentRowId === studentToDelete.rowId) return false;
+        if (studentToDelete.barcode && tx.studentBarcode === studentToDelete.barcode) return false;
+        if (normName && tx.studentName && normalizeArabicName(tx.studentName) === normName) return false;
+        return true;
+      });
+
+      removePaymentTransactionsForStudent(gid, {
+        rowId: studentToDelete.rowId,
+        name: studentToDelete.name,
+        barcode: studentToDelete.barcode
+      });
+    });
+
+    if (hasChanges) {
+      const updatedData: CenterData = {
+        ...currentData,
+        deletedStudents: newDeleted,
+        paymentTransactions: newTransactions,
+        groupData: newGroupData
+      };
+      persistData(updatedData);
+      saveToCloud(updatedData);
+    }
   };
 
   // Restore deleted student from recycle bin
@@ -3264,6 +3409,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         enrollStudentMultiGroups,
         recordMultiGroupPayment,
         deleteStudent,
+        deleteStudentGlobally,
         restoreStudent,
         clearRecycleBin,
         transferStudent,

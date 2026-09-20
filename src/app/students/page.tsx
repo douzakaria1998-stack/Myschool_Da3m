@@ -21,7 +21,8 @@ import {
   DollarSign,
   IdCard,
   Printer,
-  X
+  X,
+  Trash2
 } from 'lucide-react';
 import StudentPaymentModal from '../../components/StudentPaymentModal';
 import StudentProfileModal from '../../components/StudentProfileModal';
@@ -59,7 +60,7 @@ export interface UnifiedStudent {
 }
 
 export default function StudentsPage() {
-  const { data } = useApp();
+  const { data, deleteStudent, deleteStudentGlobally } = useApp();
 
   const [search, setSearch] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -80,6 +81,49 @@ export default function StudentsPage() {
     allGroups: string[];
   } | null>(null);
   const [isAllBadgesModalOpen, setIsAllBadgesModalOpen] = useState(false);
+
+  const handleDeleteStudent = (item: UnifiedStudent) => {
+    if (selectedGroupFilter !== 'all') {
+      const enrollment = item.groups.find((g) => g.groupId === selectedGroupFilter);
+      if (enrollment && enrollment.student.rowId) {
+        if (
+          confirm(
+            `هل أنت متأكد من حذف التلميذ "${item.name}" من فوج ${selectedGroupFilter}؟\nسيتم حذف جميع سجلاته ومدفوعاته في هذا الفوج نهائياً.`
+          )
+        ) {
+          deleteStudent(selectedGroupFilter, enrollment.student.rowId);
+        }
+      }
+      return;
+    }
+
+    if (item.groups.length === 1) {
+      const singleGroup = item.groups[0];
+      if (
+        confirm(
+          `هل أنت متأكد من حذف التلميذ "${item.name}" من فوج ${singleGroup.groupId}؟\nسيتم حذف التلميذ وجميع سجلاته ومدفوعاته نهائياً.`
+        )
+      ) {
+        deleteStudent(singleGroup.groupId, singleGroup.student.rowId);
+      }
+      return;
+    }
+
+    // Multi-group enrolled student
+    const groupListStr = item.groups.map((g) => g.groupId).join(', ');
+    if (
+      confirm(
+        `التلميذ "${item.name}" مسجل في ${item.groups.length} أفواج: (${groupListStr}).\n\nهل تريد حذف التلميذ وجميع سجلاته ومدفوعاته من جميع هذه الأفواج نهائياً؟`
+      )
+    ) {
+      deleteStudentGlobally({
+        name: item.name,
+        barcode: item.barcode,
+        phone: item.phone,
+        groupIds: item.groups.map((g) => g.groupId)
+      });
+    }
+  };
 
   // Consolidate students so each student can have multiple groups and an aggregate balance
   const allStudents = useMemo(() => {
@@ -976,6 +1020,28 @@ export default function StudentsPage() {
                         >
                           <Receipt size={13} />
                           <span>دفع</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteStudent(item);
+                          }}
+                          className="m3-btn m3-btn-outlined m3-btn-sm"
+                          style={{
+                            padding: '3px 8px',
+                            fontSize: '0.75rem',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '3px',
+                            whiteSpace: 'nowrap',
+                            color: 'var(--md-sys-color-error, #b91c1c)',
+                            borderColor: '#fca5a5'
+                          }}
+                          title="حذف التلميذ ومدفوعاته نهائياً"
+                        >
+                          <Trash2 size={13} />
+                          <span>حذف</span>
                         </button>
                       </div>
                     </td>

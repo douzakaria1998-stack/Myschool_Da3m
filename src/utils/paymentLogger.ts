@@ -201,6 +201,39 @@ export function getPaymentTransactions(): PaymentRecordItem[] {
   }
 }
 
+/**
+ * Remove all logged payment transactions matching a student in a specific group
+ */
+export function removePaymentTransactionsForStudent(
+  groupId: string,
+  criteria: {
+    rowId?: number;
+    name?: string;
+    barcode?: string;
+  }
+): PaymentRecordItem[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(PAYMENT_LOG_KEY);
+    const rawList: PaymentRecordItem[] = raw ? JSON.parse(raw) : [];
+    const normTargetName = criteria.name ? normalizeArabicName(criteria.name) : '';
+
+    const filtered = rawList.filter((t) => {
+      if (t.groupId !== groupId) return true;
+      if (criteria.rowId && t.studentRowId === criteria.rowId) return false;
+      if (criteria.barcode && t.studentBarcode && t.studentBarcode === criteria.barcode) return false;
+      if (normTargetName && t.studentName && normalizeArabicName(t.studentName) === normTargetName) return false;
+      return true;
+    });
+
+    localStorage.setItem(PAYMENT_LOG_KEY, JSON.stringify(filtered));
+    return filtered;
+  } catch (err) {
+    console.error('Failed to remove payment transactions for student:', err);
+    return [];
+  }
+}
+
 function isSummaryRow(student: any, groupId?: string): boolean {
   if (!student) return false;
   const name = (student.name || '').trim();

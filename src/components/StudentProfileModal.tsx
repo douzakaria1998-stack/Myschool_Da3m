@@ -766,6 +766,21 @@ export default function StudentProfileModal({ student, groupId, onClose }: Props
               <Receipt size={15} />
               <span>تسجيل دفعة / تعديل المبالغ</span>
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (confirm(`هل أنت متأكد من حذف التلميذ "${student.name}" من فوج ${groupId}؟\nسيتم حذف جميع سجلاته ومدفوعاته في هذا الفوج نهائياً.`)) {
+                  deleteStudent(groupId, student.rowId);
+                  onClose();
+                }
+              }}
+              className="m3-btn m3-btn-outlined m3-btn-sm"
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#b91c1c', borderColor: '#fca5a5' }}
+              title="حذف التلميذ ومدفوعاته من هذا الفوج"
+            >
+              <Trash2 size={15} />
+              <span>حذف التلميذ</span>
+            </button>
           </div>
 
           <button
