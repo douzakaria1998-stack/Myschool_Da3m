@@ -110,7 +110,7 @@ interface AppContextType {
   updateGroupFinances: (groupId: string, finances: { studentFee: number; teacherPayPerStudent: number; schoolSharePerStudent: number }) => void;
   addTeacher: (teacher: Teacher) => void;
   updateTeacher: (id: string, fields: Partial<Teacher>) => void;
-  payTeacher: (teacherId: string, amount: number, paymentMethod?: string, notes?: string) => TeacherPaymentRecord | null;
+  payTeacher: (teacherId: string, amount: number, paymentMethod?: string, notes?: string, groupId?: string) => TeacherPaymentRecord | null;
   deleteTeacherPayment: (teacherId: string, paymentId: string) => void;
   updatePricingTier: (id: string, fields: Partial<PricingTier>) => void;
   // Center Actions
@@ -2943,9 +2943,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     teacherId: string,
     amount: number,
     paymentMethod: string = 'نقداً',
-    notes: string = ''
+    notes: string = '',
+    groupId?: string
   ): TeacherPaymentRecord | null => {
-    const teacher = data.teachers.find((t) => t.id === teacherId);
+    let teacher = data.teachers.find((t) => t.id === teacherId);
+    if (!teacher && groupId) {
+      const g = data.groupData[groupId];
+      if (g && g.teacherName) {
+        const norm = normalizeArabicName(g.teacherName);
+        teacher = data.teachers.find((t) => normalizeArabicName(t.name) === norm);
+      }
+    }
+    if (!teacher && groupId) {
+      const g = data.groupData[groupId];
+      teacher = {
+        id: teacherId,
+        name: g?.teacherName || teacherId,
+        subject: g?.subject || '',
+        paidAmount: 0,
+        paymentHistory: []
+      };
+      data.teachers.push(teacher);
+    }
     if (!teacher || Number(amount) <= 0) return null;
 
     const receiptNo = `TP-${teacher.id}-${Date.now().toString().slice(-4)}`;
@@ -2956,18 +2975,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       amount: Number(amount),
       paymentMethod,
       receiptNo,
-      notes: notes.trim()
+      notes: notes.trim(),
+      groupId
     };
 
     const currentHistory = teacher.paymentHistory || [];
     const updatedHistory = [newPayment, ...currentHistory];
     const newPaidAmount = (teacher.paidAmount || 0) + Number(amount);
 
-    const updatedTeachers = data.teachers.map((t) =>
-      t.id === teacherId ? { ...t, paidAmount: newPaidAmount, paymentHistory: updatedHistory } : t
-    );
+    const updatedTeachers = data.teachers.some((t) => t.id === teacher!.id)
+      ? data.teachers.map((t) =>
+          t.id === teacher!.id ? { ...t, paidAmount: newPaidAmount, paymentHistory: updatedHistory } : t
+        )
+      : [...data.teachers, { ...teacher, paidAmount: newPaidAmount, paymentHistory: updatedHistory }];
 
-    persistData({ ...data, teachers: updatedTeachers });
+    const updatedData = { ...data, teachers: updatedTeachers };
+    persistData(updatedData);
+    saveToCloud(updatedData);
     return newPayment;
   };
 
@@ -2986,7 +3010,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       t.id === teacherId ? { ...t, paidAmount: newPaidAmount, paymentHistory: updatedHistory } : t
     );
 
-    persistData({ ...data, teachers: updatedTeachers });
+    const updatedData = { ...data, teachers: updatedTeachers };
+    persistData(updatedData);
+    saveToCloud(updatedData);
   };
 
   // Update pricing tier

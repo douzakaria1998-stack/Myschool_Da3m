@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useApp } from '../../context/AppContext';
-import { AttendanceStatus, StudentRecord } from '../../types';
+import { AttendanceStatus, StudentRecord, Teacher } from '../../types';
 import {
   CalendarCheck,
   Search,
@@ -28,7 +28,8 @@ import {
   UserX,
   IdCard,
   ArrowUp,
-  X
+  X,
+  Banknote
 } from 'lucide-react';
 import StudentPaymentModal from '../../components/StudentPaymentModal';
 import AddStudentModal from '../../components/AddStudentModal';
@@ -40,8 +41,9 @@ import GroupBadgesModal from '../../components/GroupBadgesModal';
 import SecurityPinModal from '../../components/SecurityPinModal';
 import HourlyPaymentFilterModal from '../../components/HourlyPaymentFilterModal';
 import GroupSessionPaymentsModal from '../../components/GroupSessionPaymentsModal';
+import TeacherPaymentModal from '../../components/TeacherPaymentModal';
 import { collectTodayAndHourlyPayments } from '../../utils/paymentLogger';
-import { normalizeScannedBarcode } from '../../utils/barcodeUtils';
+import { normalizeScannedBarcode, normalizeArabicName } from '../../utils/barcodeUtils';
 import {
   isSessionDateToday,
   isGroupToday,
@@ -88,10 +90,57 @@ export default function AttendancePage() {
   const [isPinModalOpen, setIsPinModalOpen] = useState(false);
   const [isHourlyModalOpen, setIsHourlyModalOpen] = useState(false);
   const [isSessionPaymentsModalOpen, setIsSessionPaymentsModalOpen] = useState(false);
+  const [isGroupTeacherPayModalOpen, setIsGroupTeacherPayModalOpen] = useState(false);
   const [statsDisplayMode, setStatsDisplayMode] = useState<'cumulative' | 'hourly'>('cumulative');
   const [inlineFromTime, setInlineFromTime] = useState('13:00');
   const [inlineToTime, setInlineToTime] = useState('15:00');
   const [inlinePreset, setInlinePreset] = useState('1to3pm');
+
+  // Find assigned teacher for this group
+  const currentGroupTeacher = useMemo(() => {
+    if (!group) return null;
+    const tNorm = normalizeArabicName(group.teacherName || '');
+    let found = data.teachers.find((t) => normalizeArabicName(t.name) === tNorm);
+    if (!found && (group as any).teacherId) {
+      found = data.teachers.find((t) => t.id === (group as any).teacherId);
+    }
+    if (!found) {
+      return {
+        id: `T-${group.groupId}`,
+        name: group.teacherName || 'أستاذ الفوج',
+        subject: group.subject || '',
+        paidAmount: 0,
+        paymentHistory: []
+      } as Teacher;
+    }
+    return found;
+  }, [data.teachers, group]);
+
+  // Calculate teacher financial dues specifically for this group
+  const groupTeacherStats = useMemo(() => {
+    if (!group) {
+      return {
+        totalStudents: 0,
+        totalTeacherPay: 0,
+        totalCollectedInGroups: 0,
+        groups: []
+      };
+    }
+    const realStudents = (group.students || []).filter((s) => !isSummaryRow(s, group.groupId));
+    let totalTeacherPay = 0;
+    let totalCollected = 0;
+    realStudents.forEach((s) => {
+      totalTeacherPay += s.teacherPay || 0;
+      totalCollected += s.totalReceived || 0;
+    });
+
+    return {
+      totalStudents: realStudents.length,
+      totalTeacherPay,
+      totalCollectedInGroups: totalCollected,
+      groups: [group]
+    };
+  }, [group]);
 
   // Calculate live hourly payments for today and selected hours in this group
   const inlineHourlySummary = React.useMemo(() => {
@@ -777,6 +826,27 @@ export default function AttendancePage() {
           >
             <Clock size={16} />
             <span>تصفية المداخيل بالساعات 🕒</span>
+          </button>
+
+          {/* Pay Teacher For This Group Only Button */}
+          <button
+            type="button"
+            onClick={() => setIsGroupTeacherPayModalOpen(true)}
+            className="m3-btn m3-btn-sm"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              backgroundColor: '#fef3c7',
+              color: '#92400e',
+              border: '1px solid #fcd34d',
+              fontWeight: 800,
+              cursor: 'pointer'
+            }}
+            title={`تسديد مستحقات وأتعاب الأستاذ (${group.teacherName}) لهذا الفوج (${group.groupId}) فقط - المستحق المحسوب: ${groupTeacherStats.totalTeacherPay.toLocaleString()} دج`}
+          >
+            <Banknote size={16} color="#b45309" />
+            <span>تسديد أتعاب الأستاذ 💰</span>
           </button>
 
           {/* Optional Toggle to show/hide Financial KPIs (Hidden by default as requested) */}
@@ -2066,6 +2136,16 @@ export default function AttendancePage() {
           group={group}
           initialSessionIdx={selectedSessionStatsIndex}
           onClose={() => setIsSessionPaymentsModalOpen(false)}
+        />
+      )}
+
+      {/* Teacher Payment Modal for this group only */}
+      {isGroupTeacherPayModalOpen && currentGroupTeacher && (
+        <TeacherPaymentModal
+          teacher={currentGroupTeacher}
+          stats={groupTeacherStats}
+          specificGroupId={group.groupId}
+          onClose={() => setIsGroupTeacherPayModalOpen(false)}
         />
       )}
     </div>

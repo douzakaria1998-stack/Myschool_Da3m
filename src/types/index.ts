@@ -45,6 +45,7 @@ export interface TeacherPaymentRecord {
   paymentMethod: string; // 'نقداً' | 'صك بريدي' | 'تحويل بنكي' | 'أخرى'
   receiptNo: string;
   notes?: string;
+  groupId?: string; // Optional: linked to a specific group
 }
 
 export interface Teacher {

@@ -26,12 +26,19 @@ interface Props {
     groups: GroupSheet[];
   };
   onClose: () => void;
+  specificGroupId?: string;
 }
 
-export default function TeacherPaymentModal({ teacher, stats, onClose }: Props) {
+export default function TeacherPaymentModal({ teacher, stats, onClose, specificGroupId }: Props) {
   const { data, payTeacher, deleteTeacherPayment } = useApp();
 
-  const paidAmount = teacher.paidAmount || 0;
+  const isGroupOnly = Boolean(specificGroupId);
+  const paidAmount = isGroupOnly
+    ? (teacher.paymentHistory || [])
+        .filter((p) => p.groupId === specificGroupId || (!p.groupId && p.notes?.includes(specificGroupId!)))
+        .reduce((sum, p) => sum + (p.amount || 0), 0)
+    : (teacher.paidAmount || 0);
+
   const remainingDue = Math.max(0, stats.totalTeacherPay - paidAmount);
 
   // Form states
@@ -39,14 +46,17 @@ export default function TeacherPaymentModal({ teacher, stats, onClose }: Props) 
   const [paymentMethod, setPaymentMethod] = useState<'نقداً' | 'صك بريدي' | 'تحويل بنكي' | 'أخرى'>('نقداً');
   const [notes, setNotes] = useState('');
   const [activeTab, setActiveTab] = useState<'pay' | 'history'>('pay');
+  const [filterGroupOnly, setFilterGroupOnly] = useState(isGroupOnly);
   const [successMessage, setSuccessMessage] = useState('');
 
   // Print voucher function
   const handlePrintVoucher = (payment: TeacherPaymentRecord, currentRemaining: number) => {
     const monthStr = getArabicMonthYear(payment.date);
-    const voucherTitle =
-      sanitizePrintTitle(`${teacher.name} - ${teacher.id} - ${monthStr}`) ||
-      `وصل تسديد أتعاب الأستاذ - ${teacher.name}`;
+    const voucherTitle = isGroupOnly
+      ? sanitizePrintTitle(`أتعاب الأستاذ - ${teacher.name} - فوج ${specificGroupId} - ${monthStr}`) ||
+        `وصل تسديد أتعاب الأستاذ - فوج ${specificGroupId}`
+      : sanitizePrintTitle(`${teacher.name} - ${teacher.id} - ${monthStr}`) ||
+        `وصل تسديد أتعاب الأستاذ - ${teacher.name}`;
 
     const originalParentTitle = typeof document !== 'undefined' ? document.title : '';
     if (typeof document !== 'undefined') {
@@ -244,22 +254,22 @@ export default function TeacherPaymentModal({ teacher, stats, onClose }: Props) 
 
           <!-- Title -->
           <div class="title-box">
-            <h2>وصل تسديد أتعاب ومستحقات الأستاذ (Teacher Payout Voucher)</h2>
-            <div style="font-size: 12px; color: #334155;">إثبات صرف مستحقات التدريس بالمركز</div>
+            <h2>${isGroupOnly ? `وصل تسديد أتعاب الأستاذ • فوج ${specificGroupId}` : 'وصل تسديد أتعاب ومستحقات الأستاذ (Teacher Payout Voucher)'}</h2>
+            <div style="font-size: 12px; color: #334155;">${isGroupOnly ? `إثبات صرف مستحقات التدريس الخاصة بفوج ${specificGroupId} فقط` : 'إثبات صرف مستحقات التدريس بالمركز'}</div>
           </div>
 
           <!-- Teacher Info -->
           <div class="info-grid">
             <div class="info-item"><span class="info-label">اسم الأستاذ:</span> <strong>${teacher.name}</strong></div>
-            <div class="info-item"><span class="info-label">المعرف:</span> <strong>${teacher.id}</strong></div>
-            <div class="info-item"><span class="info-label">المادة المدرسة:</span> <strong>${teacher.subject}</strong></div>
+            <div class="info-item"><span class="info-label">${isGroupOnly ? 'الفوج الدراسي:' : 'المعرف:'}</span> <strong>${isGroupOnly ? `فوج ${specificGroupId}` : teacher.id}</strong></div>
+            <div class="info-item"><span class="info-label">المادة المدرسة:</span> <strong>${teacher.subject || (stats.groups[0]?.subject ?? '')}</strong></div>
             <div class="info-item"><span class="info-label">رقم الهاتف:</span> <span>${teacher.phone || 'غير مسجل'}</span></div>
-            <div class="info-item"><span class="info-label">الأفواج المشرف عليها:</span> <strong>${stats.groups.length} فوج</strong></div>
-            <div class="info-item"><span class="info-label">إجمالي التلاميذ:</span> <strong>${stats.totalStudents} تلميذ</strong></div>
+            <div class="info-item"><span class="info-label">${isGroupOnly ? 'توقيت الفوج:' : 'الأفواج المشرف عليها:'}</span> <strong>${isGroupOnly ? `${stats.groups[0]?.day1 || ''} ${stats.groups[0]?.time1 || ''}` : `${stats.groups.length} فوج`}</strong></div>
+            <div class="info-item"><span class="info-label">${isGroupOnly ? 'تلاميذ الفوج:' : 'إجمالي التلاميذ:'}</span> <strong>${stats.totalStudents} تلميذ</strong></div>
           </div>
 
           <!-- Groups Breakdown Table -->
-          <div style="font-weight: bold; margin-bottom: 6px;">بيان الأفواج وحصص الأستاذ المحسوبة:</div>
+          <div style="font-weight: bold; margin-bottom: 6px;">${isGroupOnly ? `بيان مستحقات فوج ${specificGroupId}:` : 'بيان الأفواج وحصص الأستاذ المحسوبة:'}</div>
           <table>
             <thead>
               <tr>
@@ -278,19 +288,19 @@ export default function TeacherPaymentModal({ teacher, stats, onClose }: Props) 
           <!-- Totals Calculation Block -->
           <div class="totals-box">
             <div class="totals-row">
-              <span>إجمالي مستحقات الأستاذ المحسوبة عن الأفواج:</span>
+              <span>${isGroupOnly ? `إجمالي مستحقات الأستاذ عن فوج (${specificGroupId}):` : 'إجمالي مستحقات الأستاذ المحسوبة عن الأفواج:'}</span>
               <strong>${stats.totalTeacherPay.toLocaleString()} دج</strong>
             </div>
             <div class="totals-row">
-              <span>المبالغ المسددة سابقاً:</span>
-              <span>${(paidAmount - payment.amount).toLocaleString()} دج</span>
+              <span>${isGroupOnly ? `المبالغ المسددة سابقاً عن فوج (${specificGroupId}):` : 'المبالغ المسددة سابقاً:'}</span>
+              <span>${paidAmount.toLocaleString()} دج</span>
             </div>
             <div class="totals-row paid-highlight">
               <span>المبلغ المسدد بموجب هذا الوصل (${payment.paymentMethod || 'نقداً'}):</span>
               <span>${payment.amount.toLocaleString()} دج</span>
             </div>
             <div class="totals-row" style="color: ${currentRemaining > 0 ? '#b91c1c' : '#15803d'}; font-weight: bold;">
-              <span>الرصيد المتبقي بذمة المؤسسة للأستاذ:</span>
+              <span>${isGroupOnly ? `الرصيد المتبقي للأستاذ في فوج (${specificGroupId}):` : 'الرصيد المتبقي بذمة المؤسسة للأستاذ:'}</span>
               <span>${currentRemaining.toLocaleString()} دج ${currentRemaining === 0 ? '(تمت التسوية بالكامل ✓)' : ''}</span>
             </div>
             ${payment.notes ? `<div style="margin-top: 8px; font-size: 11px; color: #475569; border-top: 1px dashed #cbd5e1; padding-top: 4px;">ملاحظات: ${payment.notes}</div>` : ''}
@@ -332,10 +342,14 @@ export default function TeacherPaymentModal({ teacher, stats, onClose }: Props) 
       return;
     }
 
-    const newRecord = payTeacher(teacher.id, numAmount, paymentMethod, notes);
+    const resolvedNotes = notes
+      ? (isGroupOnly && !notes.includes(specificGroupId!) ? `${notes} [فوج ${specificGroupId}]` : notes)
+      : (isGroupOnly ? `تسديد أتعاب فوج ${specificGroupId}` : '');
+
+    const newRecord = payTeacher(teacher.id, numAmount, paymentMethod, resolvedNotes, specificGroupId);
     if (newRecord) {
       const nextRemaining = Math.max(0, stats.totalTeacherPay - (paidAmount + numAmount));
-      setSuccessMessage(`تم تسجيل تسديد ${numAmount.toLocaleString()} دج بنجاح للأستاذ.`);
+      setSuccessMessage(`تم تسجيل تسديد ${numAmount.toLocaleString()} دج بنجاح للأستاذ${isGroupOnly ? ` عن فوج ${specificGroupId}` : ''}.`);
       if (shouldPrint) {
         handlePrintVoucher(newRecord, nextRemaining);
       }
@@ -380,25 +394,26 @@ export default function TeacherPaymentModal({ teacher, stats, onClose }: Props) 
               style={{ height: '36px', width: 'auto', objectFit: 'contain' }}
             />
             <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                 <h3 style={{ fontSize: '1.2rem', fontWeight: 800, margin: 0, color: 'var(--md-sys-color-on-surface)' }}>
-                  تسديد مستحقات الأستاذ
+                  {isGroupOnly ? `تسديد مستحقات الأستاذ (فوج ${specificGroupId})` : 'تسديد مستحقات الأستاذ'}
                 </h3>
                 <span
                   style={{
-                    backgroundColor: 'var(--md-sys-color-primary-container)',
-                    color: 'var(--md-sys-color-on-primary-container)',
+                    backgroundColor: isGroupOnly ? '#fef3c7' : 'var(--md-sys-color-primary-container)',
+                    color: isGroupOnly ? '#92400e' : 'var(--md-sys-color-on-primary-container)',
+                    border: isGroupOnly ? '1px solid #fde68a' : undefined,
                     padding: '2px 8px',
                     borderRadius: 'var(--md-shape-sm)',
                     fontSize: '0.75rem',
                     fontWeight: 700
                   }}
                 >
-                  {teacher.id}
+                  {isGroupOnly ? `فوج ${specificGroupId} فقط` : teacher.id}
                 </span>
               </div>
               <p style={{ margin: '2px 0 0 0', fontSize: '0.85rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
-                {teacher.name} • {teacher.subject} {teacher.phone ? `(${teacher.phone})` : ''}
+                {teacher.name} • {teacher.subject} {isGroupOnly ? `• فوج ${specificGroupId}` : ''} {teacher.phone ? `(${teacher.phone})` : ''}
               </p>
             </div>
           </div>
@@ -435,7 +450,7 @@ export default function TeacherPaymentModal({ teacher, stats, onClose }: Props) 
             }}
           >
             <div style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-on-surface-variant)', marginBottom: '4px' }}>
-              إجمالي الأتعاب المحسوبة
+              {isGroupOnly ? `أتعاب الأستاذ لفوج ${specificGroupId}` : 'إجمالي الأتعاب المحسوبة'}
             </div>
             <div style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--md-sys-color-primary)' }}>
               {stats.totalTeacherPay.toLocaleString()} <span style={{ fontSize: '0.75rem' }}>دج</span>
@@ -450,7 +465,7 @@ export default function TeacherPaymentModal({ teacher, stats, onClose }: Props) 
             }}
           >
             <div style={{ fontSize: '0.75rem', color: 'var(--status-present)', marginBottom: '4px' }}>
-              المبالغ المسددة سابقاً
+              {isGroupOnly ? `المسدد لفوج ${specificGroupId}` : 'المبالغ المسددة سابقاً'}
             </div>
             <div style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--status-present)' }}>
               {paidAmount.toLocaleString()} <span style={{ fontSize: '0.75rem' }}>دج</span>
@@ -473,7 +488,7 @@ export default function TeacherPaymentModal({ teacher, stats, onClose }: Props) 
                 fontWeight: 700
               }}
             >
-              المتبقي للأستاذ
+              {isGroupOnly ? `المتبقي لفوج ${specificGroupId}` : 'المتبقي للأستاذ'}
             </div>
             <div
               style={{
@@ -707,72 +722,111 @@ export default function TeacherPaymentModal({ teacher, stats, onClose }: Props) 
           ) : (
             /* Payment History Tab */
             <div>
-              {paymentHistory.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '36px 0', color: 'var(--md-sys-color-outline)' }}>
-                  <History size={36} style={{ margin: '0 auto 8px', opacity: 0.5 }} />
-                  <p>لا توجد دفعات مسجلة لهذا الأستاذ حتى الآن.</p>
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  {paymentHistory.map((item) => (
-                    <div
-                      key={item.id}
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        padding: '12px 16px',
-                        backgroundColor: 'var(--md-sys-color-surface-container-lowest)',
-                        border: '1px solid var(--md-sys-color-outline-variant)',
-                        borderRadius: 'var(--md-shape-sm)'
-                      }}
-                    >
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--md-sys-color-primary)' }}>
-                            {item.amount.toLocaleString()} دج
-                          </span>
-                          <span className="m3-chip" style={{ fontSize: '0.75rem' }}>
-                            {item.paymentMethod}
-                          </span>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-outline)' }}>
-                            #{item.receiptNo}
-                          </span>
-                        </div>
-                        <div style={{ fontSize: '0.8rem', color: 'var(--md-sys-color-on-surface-variant)', marginTop: '3px' }}>
-                          {item.date} {item.time ? `• ${item.time}` : ''} {item.notes ? `• ${item.notes}` : ''}
-                        </div>
-                      </div>
-
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <button
-                          type="button"
-                          onClick={() => handlePrintVoucher(item, remainingDue)}
-                          className="m3-btn m3-btn-outlined m3-btn-sm"
-                          style={{ padding: '4px 10px', fontSize: '0.75rem' }}
-                          title="إعادة طباعة الوصل"
-                        >
-                          <Printer size={14} />
-                          <span>طباعة</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (confirm(`هل أنت متأكد من إلغاء دفعة ${item.amount.toLocaleString()} دج؟`)) {
-                              deleteTeacherPayment(teacher.id, item.id);
-                            }
-                          }}
-                          className="m3-btn m3-btn-text m3-btn-sm"
-                          style={{ padding: '4px 8px', color: 'var(--md-sys-color-error)' }}
-                          title="حذف الدفعة"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+              {isGroupOnly && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', padding: '8px 12px', backgroundColor: 'var(--md-sys-color-surface-container-low)', borderRadius: 'var(--md-shape-sm)', border: '1px solid var(--md-sys-color-outline-variant)' }}>
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontSize: '0.82rem', fontWeight: 700, cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={filterGroupOnly}
+                      onChange={(e) => setFilterGroupOnly(e.target.checked)}
+                    />
+                    <span>عرض تسديدات فوج {specificGroupId} فقط</span>
+                  </label>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-outline)' }}>
+                    ({(filterGroupOnly ? paymentHistory.filter(p => p.groupId === specificGroupId || (!p.groupId && p.notes?.includes(specificGroupId!))) : paymentHistory).length} وصل)
+                  </span>
                 </div>
               )}
+              {(() => {
+                const historyList = (isGroupOnly && filterGroupOnly)
+                  ? paymentHistory.filter((p) => p.groupId === specificGroupId || (!p.groupId && p.notes?.includes(specificGroupId!)))
+                  : paymentHistory;
+
+                if (historyList.length === 0) {
+                  return (
+                    <div style={{ textAlign: 'center', padding: '36px 0', color: 'var(--md-sys-color-outline)' }}>
+                      <History size={36} style={{ margin: '0 auto 8px', opacity: 0.5 }} />
+                      <p>{isGroupOnly && filterGroupOnly ? `لا توجد دفعات مسجلة لهذا الأستاذ في فوج ${specificGroupId} حتى الآن.` : 'لا توجد دفعات مسجلة لهذا الأستاذ حتى الآن.'}</p>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {historyList.map((item) => (
+                      <div
+                        key={item.id}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '12px 16px',
+                          backgroundColor: 'var(--md-sys-color-surface-container-lowest)',
+                          border: '1px solid var(--md-sys-color-outline-variant)',
+                          borderRadius: 'var(--md-shape-sm)'
+                        }}
+                      >
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--md-sys-color-primary)' }}>
+                              {item.amount.toLocaleString()} دج
+                            </span>
+                            <span className="m3-chip" style={{ fontSize: '0.75rem' }}>
+                              {item.paymentMethod}
+                            </span>
+                            {item.groupId && (
+                              <span
+                                className="m3-chip"
+                                style={{
+                                  fontSize: '0.72rem',
+                                  backgroundColor: item.groupId === specificGroupId ? '#fef3c7' : '#e0e7ff',
+                                  color: item.groupId === specificGroupId ? '#92400e' : '#3730a3',
+                                  border: item.groupId === specificGroupId ? '1px solid #fde68a' : '1px solid #c7d2fe',
+                                  fontWeight: 800
+                                }}
+                              >
+                                فوج {item.groupId}
+                              </span>
+                            )}
+                            <span style={{ fontSize: '0.75rem', color: 'var(--md-sys-color-outline)' }}>
+                              #{item.receiptNo}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '0.8rem', color: 'var(--md-sys-color-on-surface-variant)', marginTop: '3px' }}>
+                            {item.date} {item.time ? `• ${item.time}` : ''} {item.notes ? `• ${item.notes}` : ''}
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button
+                            type="button"
+                            onClick={() => handlePrintVoucher(item, remainingDue)}
+                            className="m3-btn m3-btn-outlined m3-btn-sm"
+                            style={{ padding: '4px 10px', fontSize: '0.75rem' }}
+                            title="إعادة طباعة الوصل"
+                          >
+                            <Printer size={14} />
+                            <span>طباعة</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (confirm(`هل أنت متأكد من إلغاء دفعة ${item.amount.toLocaleString()} دج؟`)) {
+                                deleteTeacherPayment(teacher.id, item.id);
+                              }
+                            }}
+                            className="m3-btn m3-btn-text m3-btn-sm"
+                            style={{ padding: '4px 8px', color: 'var(--md-sys-color-error)' }}
+                            title="حذف الدفعة"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
           )}
         </div>
