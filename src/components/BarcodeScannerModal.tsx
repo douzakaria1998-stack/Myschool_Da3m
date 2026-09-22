@@ -70,6 +70,29 @@ interface Props {
   isScreen?: boolean;
 }
 
+const getDismissedStorageKey = () => {
+  return `da3m_scanner_dismissed_${formatToYYYYMMDD(new Date())}`;
+};
+
+const loadDismissedGroupIds = (): string[] => {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(getDismissedStorageKey());
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveDismissedGroupIds = (ids: string[]) => {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(getDismissedStorageKey(), JSON.stringify(ids));
+  } catch (err) {
+    console.error('Failed to save dismissed group ids', err);
+  }
+};
+
 export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen = false }: Props) {
   const {
     data,
@@ -96,19 +119,34 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     detectCurrentActiveGroupAndSession(data.groupData, data.groups, new Date())
   );
 
+  // Groups dismissed for today to avoid re-appearing on schedule auto-detect
+  const [dismissedGroupIds, setDismissedGroupIds] = useState<string[]>(() => loadDismissedGroupIds());
+
+  // Group pending removal confirmation
+  const [groupToRemove, setGroupToRemove] = useState<{
+    index: number;
+    groupId: string;
+    subject?: string;
+    teacherName?: string;
+    sessionIndex: number;
+  } | null>(null);
+
   // Fast continuous scan mode
   const [fastScanMode, setFastScanMode] = useState<boolean>(false);
 
   // Active Groups configuration
   const [activeGroups, setActiveGroups] = useState<{ groupId: string; sessionIndex: number }[]>(() => {
+    const initialDismissed = loadDismissedGroupIds();
     const initialDetect = detectCurrentActiveGroupAndSession(data.groupData, data.groups, new Date());
     if (initialDetect.matchingGroups.length > 0) {
-      return initialDetect.matchingGroups.map((m) => ({
-        groupId: m.group.groupId,
-        sessionIndex: m.sessionIndex
-      }));
+      return initialDetect.matchingGroups
+        .filter((m) => !initialDismissed.includes(m.group.groupId))
+        .map((m) => ({
+          groupId: m.group.groupId,
+          sessionIndex: m.sessionIndex
+        }));
     }
-    if (initialDetect.activeGroup) {
+    if (initialDetect.activeGroup && !initialDismissed.includes(initialDetect.activeGroup.groupId)) {
       return [{ groupId: initialDetect.activeGroup.groupId, sessionIndex: initialDetect.activeSessionIndex }];
     }
     return [];
@@ -163,28 +201,86 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
   // Handlers to manage active groups
   const handleAddActiveGroup = (defaultGid?: string) => {
     const existingIds = new Set(activeGroups.map((g) => g.groupId));
-    const candidate = data.groups.find((g) => !existingIds.has(g.id)) || data.groups[0];
+    const candidate =
+      data.groups.find((g) => !existingIds.has(g.id) && !dismissedGroupIds.includes(g.id)) ||
+      data.groups.find((g) => !existingIds.has(g.id)) ||
+      data.groups[0];
     if (!candidate) return;
 
     const gid = defaultGid || candidate.id;
+    if (dismissedGroupIds.includes(gid)) {
+      const nextDismissed = dismissedGroupIds.filter((id) => id !== gid);
+      setDismissedGroupIds(nextDismissed);
+      saveDismissedGroupIds(nextDismissed);
+    }
+
     const groupSheet = data.groupData[gid];
     const sIdx = groupSheet ? getDefaultSessionIndex(groupSheet, new Date()) : 0;
     setActiveGroups((prev) => [...prev, { groupId: gid, sessionIndex: sIdx }]);
   };
 
-  const handleRemoveActiveGroup = (index: number) => {
-    const targetGroup = activeGroups[index];
-    if (targetGroup && coveringGroupIds.includes(targetGroup.groupId)) {
-      setCoveringGroupIds((prev) => prev.filter((id) => id !== targetGroup.groupId));
+  const handleRequestRemoveActiveGroup = (index: number) => {
+    const target = activeGroups[index];
+    if (!target) return;
+    const gSheet = data.groupData[target.groupId];
+    setGroupToRemove({
+      index,
+      groupId: target.groupId,
+      subject: gSheet?.subject || '',
+      teacherName: gSheet?.teacherName || '',
+      sessionIndex: target.sessionIndex
+    });
+  };
+
+  const handleConfirmRemoveActiveGroup = () => {
+    if (!groupToRemove) return;
+    const { index, groupId } = groupToRemove;
+
+    // 1. Add to dismissedGroupIds so it will NOT auto-appear again today
+    const nextDismissed = Array.from(new Set([...dismissedGroupIds, groupId]));
+    setDismissedGroupIds(nextDismissed);
+    saveDismissedGroupIds(nextDismissed);
+
+    // 2. Remove from covering groups if present
+    if (coveringGroupIds.includes(groupId)) {
+      setCoveringGroupIds((prev) => prev.filter((id) => id !== groupId));
     }
-    if (activeGroups.length <= 1) {
-      alert('يجب أن يبقى فوج نشط واحد على الأقل في محطة المسح');
-      return;
-    }
+
+    // 3. Remove from active groups list
     setActiveGroups((prev) => prev.filter((_, i) => i !== index));
+
+    // 4. Close confirmation popup
+    setGroupToRemove(null);
+  };
+
+  const handleRestoreDismissedGroups = () => {
+    setDismissedGroupIds([]);
+    saveDismissedGroupIds([]);
+    const res = detectCurrentActiveGroupAndSession(data.groupData, data.groups, new Date());
+    if (res.matchingGroups.length > 0) {
+      const detected = res.matchingGroups.map((m) => ({
+        groupId: m.group.groupId,
+        sessionIndex: m.sessionIndex
+      }));
+      setActiveGroups((prev) => {
+        const coverings = prev.filter((g) => coveringGroupIds.includes(g.groupId));
+        const combined = [...detected];
+        coverings.forEach((cg) => {
+          if (!combined.some((g) => g.groupId === cg.groupId)) {
+            combined.push(cg);
+          }
+        });
+        return combined;
+      });
+    }
   };
 
   const handleUpdateActiveGroup = (index: number, newGroupId: string) => {
+    if (dismissedGroupIds.includes(newGroupId)) {
+      const nextDismissed = dismissedGroupIds.filter((id) => id !== newGroupId);
+      setDismissedGroupIds(nextDismissed);
+      saveDismissedGroupIds(nextDismissed);
+    }
     const groupSheet = data.groupData[newGroupId];
     const sIdx = groupSheet ? getDefaultSessionIndex(groupSheet, new Date()) : 0;
     setActiveGroups((prev) =>
@@ -202,6 +298,11 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
   const handleConfirmAddCoverGroup = () => {
     const gid = newCoverGroupId || data.groups[0]?.id;
     if (!gid) return;
+    if (dismissedGroupIds.includes(gid)) {
+      const nextDismissed = dismissedGroupIds.filter((id) => id !== gid);
+      setDismissedGroupIds(nextDismissed);
+      saveDismissedGroupIds(nextDismissed);
+    }
     setCoveringGroupIds((prev) => Array.from(new Set([...prev, gid])));
     setActiveGroups((prev) => {
       if (prev.some((g) => g.groupId === gid)) {
@@ -219,12 +320,16 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       setCurrentDetection(res);
       if (autoDetectSchedule) {
         if (res.matchingGroups.length > 0) {
-          const detected = res.matchingGroups.map((m) => ({
-            groupId: m.group.groupId,
-            sessionIndex: m.sessionIndex
-          }));
+          const detected = res.matchingGroups
+            .filter((m) => !dismissedGroupIds.includes(m.group.groupId))
+            .map((m) => ({
+              groupId: m.group.groupId,
+              sessionIndex: m.sessionIndex
+            }));
           setActiveGroups((prev) => {
-            const currentCoverings = prev.filter((g) => coveringGroupIds.includes(g.groupId));
+            const currentCoverings = prev.filter(
+              (g) => coveringGroupIds.includes(g.groupId) && !dismissedGroupIds.includes(g.groupId)
+            );
             const combined = [...detected];
             currentCoverings.forEach((cg) => {
               if (!currentActiveGroupsHas(combined, cg.groupId)) {
@@ -237,7 +342,9 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
           });
         } else {
           setActiveGroups((prev) => {
-            const currentCoverings = prev.filter((g) => coveringGroupIds.includes(g.groupId));
+            const currentCoverings = prev.filter(
+              (g) => coveringGroupIds.includes(g.groupId) && !dismissedGroupIds.includes(g.groupId)
+            );
             return currentCoverings.length > 0 ? currentCoverings : [];
           });
         }
@@ -249,7 +356,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     checkSchedule();
     const timer = setInterval(checkSchedule, 20000);
     return () => clearInterval(timer);
-  }, [data.groupData, data.groups, autoDetectSchedule, coveringGroupIds]);
+  }, [data.groupData, data.groups, autoDetectSchedule, coveringGroupIds, dismissedGroupIds]);
 
   // Scanner Barcode Input State
   const [barcodeInput, setBarcodeInput] = useState('');
@@ -345,6 +452,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
         !showEndSessionConfirm &&
         !showQueueModal &&
         !showAddCoverGroupModal &&
+        !groupToRemove &&
         !multiActiveCandidate &&
         document.activeElement !== scannerInputRef.current
       ) {
@@ -352,7 +460,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       }
     }, 500);
     return () => clearInterval(timer);
-  }, [showEndSessionConfirm, showQueueModal, showAddCoverGroupModal, multiActiveCandidate]);
+  }, [showEndSessionConfirm, showQueueModal, showAddCoverGroupModal, groupToRemove, multiActiveCandidate]);
 
   // Clean up scan timer on unmount
   useEffect(() => {
@@ -501,7 +609,10 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      if (showEndSessionConfirm || showQueueModal || showAddCoverGroupModal) {
+      if (showEndSessionConfirm || showQueueModal || showAddCoverGroupModal || groupToRemove) {
+        if (e.key === 'Escape' && groupToRemove) {
+          setGroupToRemove(null);
+        }
         return;
       }
 
@@ -684,11 +795,15 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     if (autoDetectSchedule) {
       const liveDetect = detectCurrentActiveGroupAndSession(data.groupData, data.groups, new Date());
       if (liveDetect.matchingGroups.length > 0) {
-        const detected = liveDetect.matchingGroups.map((m) => ({
-          groupId: m.group.groupId,
-          sessionIndex: m.sessionIndex
-        }));
-        const coverings = currentActiveGroups.filter((g) => coveringGroupIds.includes(g.groupId));
+        const detected = liveDetect.matchingGroups
+          .filter((m) => !dismissedGroupIds.includes(m.group.groupId))
+          .map((m) => ({
+            groupId: m.group.groupId,
+            sessionIndex: m.sessionIndex
+          }));
+        const coverings = currentActiveGroups.filter(
+          (g) => coveringGroupIds.includes(g.groupId) && !dismissedGroupIds.includes(g.groupId)
+        );
         currentActiveGroups = [...detected];
         coverings.forEach((cg) => {
           if (!currentActiveGroups.some((g) => g.groupId === cg.groupId)) {
@@ -1662,6 +1777,31 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
             <RotateCcw size={12} />
             <span>استعادة من السجل المحلي</span>
           </button>
+
+          {dismissedGroupIds.length > 0 && (
+            <button
+              type="button"
+              onClick={handleRestoreDismissedGroups}
+              className="m3-btn-text"
+              style={{
+                fontSize: '0.72rem',
+                fontWeight: 800,
+                padding: '2px 8px',
+                borderRadius: '4px',
+                backgroundColor: '#eff6ff',
+                border: '1px dashed #93c5fd',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                color: '#1d4ed8'
+              }}
+              title="إعادة إظهار جميع الأفواج التي تم حذفها اليوم في المحطة"
+            >
+              <RotateCcw size={12} />
+              <span>إعادة إظهار الأفواج المحذوفة ({dismissedGroupIds.length})</span>
+            </button>
+          )}
         </div>
       </div>
       {/* Active Group Cards Container */}
@@ -1787,7 +1927,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
 
                     <button
                       type="button"
-                      onClick={() => handleRemoveActiveGroup(idx)}
+                      onClick={() => handleRequestRemoveActiveGroup(idx)}
                       className="m3-btn-text"
                       style={{
                         color: '#dc2626',
@@ -3723,6 +3863,126 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: CONFIRM REMOVE ACTIVE GROUP FROM SCANNER STATION                   */}
+      {/* ========================================================================= */}
+      {groupToRemove && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0,0,0,0.55)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 300,
+            backdropFilter: 'blur(3px)'
+          }}
+          onClick={() => setGroupToRemove(null)}
+        >
+          <div
+            style={{
+              backgroundColor: '#fff',
+              padding: '24px',
+              borderRadius: 'var(--md-shape-xl)',
+              maxWidth: '460px',
+              width: '92%',
+              boxShadow: 'var(--md-elevation-5)',
+              direction: 'rtl'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#dc2626', marginBottom: '14px' }}>
+              <div
+                style={{
+                  width: '38px',
+                  height: '38px',
+                  borderRadius: '50%',
+                  backgroundColor: '#fee2e2',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0
+                }}
+              >
+                <Trash2 size={20} color="#dc2626" />
+              </div>
+              <div>
+                <h3 style={{ fontSize: '1.15rem', fontWeight: 800, margin: 0 }}>
+                  تأكيد إزالة الفوج من المحطة
+                </h3>
+                <span style={{ fontSize: '0.78rem', color: '#64748b' }}>
+                  إيقاف عرض ومتابعة هذا الفوج في محطة المسح
+                </span>
+              </div>
+            </div>
+
+            <p style={{ fontSize: '0.92rem', color: '#334155', lineHeight: 1.6, marginBottom: '14px' }}>
+              هل أنت متأكد من رغبتك في إزالة{' '}
+              <strong style={{ color: '#0f172a' }}>
+                فوج {groupToRemove.groupId}
+                {groupToRemove.subject ? ` (${groupToRemove.subject})` : ''}
+              </strong>
+              {groupToRemove.teacherName ? (
+                <>
+                  {' '}— الأستاذ: <strong>{groupToRemove.teacherName}</strong>
+                </>
+              ) : null}{' '}
+              من محطة المسح الحالية؟
+            </p>
+
+            <div
+              style={{
+                backgroundColor: '#fef2f2',
+                border: '1px solid #fecaca',
+                borderRadius: '8px',
+                padding: '10px 12px',
+                fontSize: '0.8rem',
+                color: '#991b1b',
+                lineHeight: 1.5,
+                marginBottom: '20px',
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '8px'
+              }}
+            >
+              <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
+              <div>
+                لن يظهر هذا الفوج مجدداً بشكل تلقائي اليوم في محطة المسح، ولكن يمكنك إعادة تفعيله يدوياً في أي وقت.
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button
+                type="button"
+                onClick={() => setGroupToRemove(null)}
+                className="m3-btn m3-btn-text"
+                style={{ fontWeight: 700, fontSize: '0.88rem' }}
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmRemoveActiveGroup}
+                className="m3-btn m3-btn-primary"
+                style={{
+                  backgroundColor: '#dc2626',
+                  borderColor: '#dc2626',
+                  fontWeight: 800,
+                  fontSize: '0.88rem',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <Trash2 size={16} />
+                <span>تأكيد الإزالة</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
