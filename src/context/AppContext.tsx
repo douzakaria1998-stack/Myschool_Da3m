@@ -75,6 +75,7 @@ interface AppContextType {
   markAllPresent: (groupId: string, sessionIndex: number, studentRowIds?: number[]) => void;
   updatePayment: (groupId: string, rowId: number, paymentIndex: number, amount: number | string) => void;
   updateStudentFullFinances: (groupId: string, rowId: number, payments: (number | string)[], discount?: DiscountType) => void;
+  resetStudentPayment: (groupId: string, rowId: number) => void;
   batchUpdateSessionPayments: (groupId: string, sessionIndex: number, studentPayments: { rowId: number; amount: number | string }[]) => void;
   batchUpdateAllSessionsPayments: (groupId: string, updates: { rowId: number; payments: (number | string)[] }[]) => void;
   updateDiscount: (groupId: string, rowId: number, discount: DiscountType) => void;
@@ -1810,25 +1811,90 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const student = group.students.find((s) => s.rowId === rowId);
     if (student) {
-      newPayments.forEach((p, idx) => {
-        const oldP = Number(student.payments?.[idx]) || 0;
-        const newP = Number(p) || 0;
-        if (newP > oldP) {
-          recordPaymentTransaction({
-            groupId,
-            groupSubject: group.subject,
-            teacherName: group.teacherName,
-            studentRowId: rowId,
-            studentName: student.name,
-            studentPhone: student.phone,
-            studentBarcode: student.barcode,
-            sessionIndex: idx,
-            amount: newP - oldP,
-            source: 'payment_modal'
-          });
-        }
-      });
+      const oldTotal = (student.payments || []).reduce<number>((acc, p) => acc + (Number(p) || 0), 0);
+      const newTotal = newPayments.reduce<number>((acc, p) => acc + (Number(p) || 0), 0);
+      if (newTotal < oldTotal) {
+        removePaymentTransactionsForStudent(groupId, {
+          rowId: student.rowId,
+          name: student.name,
+          barcode: student.barcode
+        });
+        newPayments.forEach((p, idx) => {
+          const amt = Number(p) || 0;
+          if (amt > 0) {
+            recordPaymentTransaction({
+              groupId,
+              groupSubject: group.subject,
+              teacherName: group.teacherName,
+              studentRowId: rowId,
+              studentName: student.name,
+              studentPhone: student.phone,
+              studentBarcode: student.barcode,
+              sessionIndex: idx,
+              amount: amt,
+              source: 'payment_modal'
+            });
+          }
+        });
+      } else {
+        newPayments.forEach((p, idx) => {
+          const oldP = Number(student.payments?.[idx]) || 0;
+          const newP = Number(p) || 0;
+          if (newP > oldP) {
+            recordPaymentTransaction({
+              groupId,
+              groupSubject: group.subject,
+              teacherName: group.teacherName,
+              studentRowId: rowId,
+              studentName: student.name,
+              studentPhone: student.phone,
+              studentBarcode: student.barcode,
+              sessionIndex: idx,
+              amount: newP - oldP,
+              source: 'payment_modal'
+            });
+          }
+        });
+      }
     }
+  };
+
+  // Reset student payment completely to 0 and recalculate debt
+  const resetStudentPayment = (groupId: string, rowId: number) => {
+    const currentData = dataRef.current;
+    const group = currentData.groupData[groupId];
+    if (!group) return;
+
+    const student = group.students.find((s) => s.rowId === rowId);
+    if (!student) return;
+
+    const sessionCount = group.sessionDates?.length || group.sessionCount || 4;
+    const emptyPayments = Array(sessionCount).fill('');
+
+    removePaymentTransactionsForStudent(groupId, {
+      rowId: student.rowId,
+      name: student.name,
+      barcode: student.barcode
+    });
+
+    const updatedStudents = group.students.map((s) => {
+      if (s.rowId !== rowId) return s;
+      const updated = {
+        ...s,
+        payments: emptyPayments
+      };
+      return calculateStudentFinances(updated, group.type, currentData.pricingTiers, group);
+    });
+
+    const updatedData: CenterData = {
+      ...currentData,
+      groupData: {
+        ...currentData.groupData,
+        [groupId]: { ...group, students: updatedStudents }
+      }
+    };
+    persistData(updatedData);
+    saveToCloud(updatedData);
   };
 
   // Batch update payments for multiple students for a specific session/day
@@ -3428,6 +3494,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         markAllPresent,
         updatePayment,
         updateStudentFullFinances,
+        resetStudentPayment,
         batchUpdateSessionPayments,
         batchUpdateAllSessionsPayments,
         updateDiscount,

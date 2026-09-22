@@ -3,7 +3,7 @@
 import React, { useState, useMemo } from 'react';
 import { StudentRecord, DiscountType } from '../types';
 import { useApp, calcStudentFinancesPure } from '../context/AppContext';
-import { X, Check, Printer, AlertCircle, Receipt } from 'lucide-react';
+import { X, Check, Printer, AlertCircle, Receipt, Trash2, RotateCcw, AlertTriangle } from 'lucide-react';
 import { formatToYYYYMMDD } from '../utils/sessionUtils';
 import { sanitizePrintTitle } from '../utils/printTitleUtils';
 
@@ -22,6 +22,16 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
     (student.payments || []).map((p) => (p !== undefined && p !== null ? p : ''))
   );
   const [successMsg, setSuccessMsg] = useState('');
+
+  const initialTotalPaid = useMemo(() => {
+    return (student.payments || []).reduce<number>((acc, p) => acc + (Number(p) || 0), 0);
+  }, [student.payments]);
+
+  const [confirmRemovePaymentTarget, setConfirmRemovePaymentTarget] = useState<{
+    type: 'ALL' | 'SESSION' | 'SAVE';
+    sessionIdx?: number;
+    amount: number;
+  } | null>(null);
 
   // Live pure recalculation of finances on every keystroke and discount change
   const livePreview = useMemo(() => {
@@ -43,7 +53,35 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
     setPayments(next);
   };
 
+  const handleExecuteRemovePayment = () => {
+    if (!confirmRemovePaymentTarget) return;
+
+    if (confirmRemovePaymentTarget.type === 'ALL') {
+      const nextPayments = payments.map(() => '');
+      updateStudentFullFinances(groupId, student.rowId, nextPayments, discount);
+      onClose();
+    } else if (confirmRemovePaymentTarget.type === 'SESSION' && confirmRemovePaymentTarget.sessionIdx !== undefined) {
+      const nextPayments = [...payments];
+      nextPayments[confirmRemovePaymentTarget.sessionIdx] = '';
+      setPayments(nextPayments);
+      updateStudentFullFinances(groupId, student.rowId, nextPayments, discount);
+      setConfirmRemovePaymentTarget(null);
+    } else if (confirmRemovePaymentTarget.type === 'SAVE') {
+      updateStudentFullFinances(groupId, student.rowId, payments, discount);
+      onClose();
+    }
+  };
+
   const handleSave = () => {
+    // If the student previously had paid money, and the new total is less than what was paid before
+    if (initialTotalPaid > 0 && livePreview.totalReceived < initialTotalPaid) {
+      setConfirmRemovePaymentTarget({
+        type: 'SAVE',
+        amount: initialTotalPaid - livePreview.totalReceived
+      });
+      return;
+    }
+
     // Save payments and discount atomically
     updateStudentFullFinances(groupId, student.rowId, payments, discount);
     onClose();
@@ -474,16 +512,45 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
                           textAlign: 'center'
                         }}
                       >
-                        <span
-                          style={{
-                            fontWeight: 700,
-                            fontSize: '0.82rem',
-                            color: hasPaid ? 'var(--status-present)' : 'var(--md-sys-color-on-surface)',
-                            whiteSpace: 'nowrap'
-                          }}
-                        >
-                          دفعة {i + 1}
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', width: '100%' }}>
+                          <span
+                            style={{
+                              fontWeight: 700,
+                              fontSize: '0.82rem',
+                              color: hasPaid ? 'var(--status-present)' : 'var(--md-sys-color-on-surface)',
+                              whiteSpace: 'nowrap'
+                            }}
+                          >
+                            دفعة {i + 1}
+                          </span>
+                          {hasPaid && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setConfirmRemovePaymentTarget({
+                                  type: 'SESSION',
+                                  sessionIdx: i,
+                                  amount: Number(payments[i]) || 0
+                                });
+                              }}
+                              className="m3-btn-text"
+                              style={{
+                                color: '#dc2626',
+                                padding: '1px 3px',
+                                height: '18px',
+                                minWidth: '18px',
+                                borderRadius: '4px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center'
+                              }}
+                              title="حذف هذه الدفعة وإعادتها كغير مسدد"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          )}
+                        </div>
                         {dateStr ? (
                           <span
                             style={{
@@ -575,7 +642,27 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
             </button>
           </div>
 
-          <div style={{ display: 'flex', gap: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            {initialTotalPaid > 0 && (
+              <button
+                type="button"
+                onClick={() => setConfirmRemovePaymentTarget({ type: 'ALL', amount: initialTotalPaid })}
+                className="m3-btn m3-btn-outlined m3-btn-sm"
+                style={{
+                  color: '#dc2626',
+                  borderColor: '#fca5a5',
+                  backgroundColor: '#fef2f2',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontWeight: 700
+                }}
+                title="حذف جميع المبالغ المسددة وإعادة التلميذ كغير مسدد"
+              >
+                <Trash2 size={15} />
+                <span>حذف المبلغ المسدد ({initialTotalPaid.toLocaleString()} دج)</span>
+              </button>
+            )}
             <button type="button" onClick={onClose} className="m3-btn m3-btn-text">
               إلغاء
             </button>
@@ -584,6 +671,118 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
             </button>
           </div>
         </div>
+
+        {/* Confirmation Modal when Removing / Reducing Payment */}
+        {confirmRemovePaymentTarget && (
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              backgroundColor: 'rgba(0,0,0,0.6)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 350,
+              backdropFilter: 'blur(3px)'
+            }}
+            onClick={() => setConfirmRemovePaymentTarget(null)}
+          >
+            <div
+              style={{
+                backgroundColor: '#fff',
+                padding: '24px',
+                borderRadius: 'var(--md-shape-xl)',
+                maxWidth: '460px',
+                width: '92%',
+                boxShadow: 'var(--md-elevation-5)',
+                direction: 'rtl'
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#dc2626', marginBottom: '14px' }}>
+                <div
+                  style={{
+                    width: '38px',
+                    height: '38px',
+                    borderRadius: '50%',
+                    backgroundColor: '#fee2e2',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0
+                  }}
+                >
+                  <Trash2 size={20} color="#dc2626" />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '1.15rem', fontWeight: 800, margin: 0 }}>
+                    تأكيد حذف المبلغ المسدد
+                  </h3>
+                  <span style={{ fontSize: '0.78rem', color: '#64748b' }}>
+                    إعادة التلميذ إلى وضعية غير مسدد
+                  </span>
+                </div>
+              </div>
+
+              <p style={{ fontSize: '0.92rem', color: '#334155', lineHeight: 1.6, marginBottom: '14px' }}>
+                هل أنت متأكد من رغبتك في حذف المبلغ المسدد{' '}
+                <strong style={{ color: '#dc2626' }}>
+                  ({confirmRemovePaymentTarget.amount.toLocaleString()} دج)
+                </strong>{' '}
+                للتلميذ <strong style={{ color: '#0f172a' }}>{student.name}</strong>؟
+              </p>
+
+              <div
+                style={{
+                  backgroundColor: '#fef2f2',
+                  border: '1px solid #fecaca',
+                  borderRadius: '8px',
+                  padding: '10px 12px',
+                  fontSize: '0.82rem',
+                  color: '#991b1b',
+                  lineHeight: 1.5,
+                  marginBottom: '20px',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '8px'
+                }}
+              >
+                <AlertCircle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
+                <div>
+                  عند التأكيد، سيتم حذف هذا المبلغ من مدفوعات التلميذ وإعادته كـ{' '}
+                  <strong>غير مسدد</strong> (دين: {livePreview.fee.toLocaleString()} دج)، مع الحفاظ التام على وجوده وسجل حضوره في الفوج.
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button
+                  type="button"
+                  onClick={() => setConfirmRemovePaymentTarget(null)}
+                  className="m3-btn m3-btn-text"
+                  style={{ fontWeight: 700 }}
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExecuteRemovePayment}
+                  className="m3-btn m3-btn-primary"
+                  style={{
+                    backgroundColor: '#dc2626',
+                    borderColor: '#dc2626',
+                    fontWeight: 800,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  <Trash2 size={16} />
+                  <span>نعم، احذف المبلغ وأعد التلميذ كغير مسدد</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

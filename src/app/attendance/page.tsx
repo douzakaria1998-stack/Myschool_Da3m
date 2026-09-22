@@ -29,7 +29,9 @@ import {
   IdCard,
   ArrowUp,
   X,
-  Banknote
+  Banknote,
+  AlertTriangle,
+  RotateCcw
 } from 'lucide-react';
 import StudentPaymentModal from '../../components/StudentPaymentModal';
 import AddStudentModal from '../../components/AddStudentModal';
@@ -68,6 +70,7 @@ export default function AttendancePage() {
     cycleAttendance,
     markAllPresent,
     deleteStudent,
+    resetStudentPayment,
     getGroupStats,
     updateSessionDates,
     endSessionAndMarkAbsent
@@ -80,6 +83,7 @@ export default function AttendancePage() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [filterDebt, setFilterDebt] = useState<'all' | 'debt' | 'paid' | 'exempt'>('all');
   const [activeStudentForPayment, setActiveStudentForPayment] = useState<StudentRecord | null>(null);
+  const [actionStudentTarget, setActionStudentTarget] = useState<StudentRecord | null>(null);
   const [isAddStudentOpen, setIsAddStudentOpen] = useState(false);
   const [isThermalModalOpen, setIsThermalModalOpen] = useState(false);
   const [isEditFinancesOpen, setIsEditFinancesOpen] = useState(false);
@@ -2049,13 +2053,9 @@ export default function AttendancePage() {
                           <CreditCard size={17} />
                         </button>
                         <button
-                          onClick={() => {
-                            if (confirm(`هل أنت متأكد من حذف التلميذ "${student.name}" من هذا الفوج؟`)) {
-                              deleteStudent(group.groupId, student.rowId);
-                            }
-                          }}
+                          onClick={() => setActionStudentTarget(student)}
                           className="m3-btn-text"
-                          title="حذف التلميذ"
+                          title={student.totalReceived > 0 ? 'حذف المبلغ المسدد أو حذف التلميذ' : 'حذف التلميذ'}
                           style={{ padding: '6px', color: 'var(--md-sys-color-error)' }}
                         >
                           <Trash2 size={17} />
@@ -2077,6 +2077,194 @@ export default function AttendancePage() {
           student={activeStudentForPayment}
           onClose={() => setActiveStudentForPayment(null)}
         />
+      )}
+
+      {/* Confirmation Modal for Student Removal / Payment Removal */}
+      {actionStudentTarget && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0,0,0,0.55)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 260,
+            backdropFilter: 'blur(3px)'
+          }}
+          onClick={() => setActionStudentTarget(null)}
+        >
+          <div
+            style={{
+              backgroundColor: '#fff',
+              padding: '24px',
+              borderRadius: 'var(--md-shape-xl)',
+              maxWidth: '480px',
+              width: '92%',
+              boxShadow: 'var(--md-elevation-5)',
+              direction: 'rtl'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {actionStudentTarget.totalReceived > 0 ? (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#b45309', marginBottom: '14px' }}>
+                  <div
+                    style={{
+                      width: '38px',
+                      height: '38px',
+                      borderRadius: '50%',
+                      backgroundColor: '#fef3c7',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0
+                    }}
+                  >
+                    <AlertTriangle size={20} color="#d97706" />
+                  </div>
+                  <div>
+                    <h3 style={{ fontSize: '1.15rem', fontWeight: 800, margin: 0 }}>
+                      تأكيد إجراءات التلميذ
+                    </h3>
+                    <span style={{ fontSize: '0.78rem', color: '#64748b' }}>
+                      {actionStudentTarget.name} | فوج {group.groupId}
+                    </span>
+                  </div>
+                </div>
+
+                <p style={{ fontSize: '0.92rem', color: '#334155', lineHeight: 1.6, marginBottom: '14px' }}>
+                  التلميذ مسدد حالياً مبلغ <strong style={{ color: '#166534' }}>{actionStudentTarget.totalReceived.toLocaleString()} دج</strong> (مسدد ✓). ما الإجراء الذي ترغب في تطبيقه؟
+                </p>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '18px' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      resetStudentPayment(group.groupId, actionStudentTarget.rowId);
+                      setActionStudentTarget(null);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      padding: '12px 14px',
+                      backgroundColor: '#fef2f2',
+                      border: '1.5px solid #fca5a5',
+                      borderRadius: '10px',
+                      cursor: 'pointer',
+                      textAlign: 'right',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <RotateCcw size={20} color="#dc2626" style={{ flexShrink: 0 }} />
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#991b1b' }}>
+                        حذف المبلغ المسدد وإعادة التلميذ كـ "غير مسدد"
+                      </div>
+                      <div style={{ fontSize: '0.76rem', color: '#7f1d1d', marginTop: '2px' }}>
+                        تصفير المبلغ المسدد (0 دج) وإبقاء التلميذ في الفوج مع تسجيل دين قدره {actionStudentTarget.fee.toLocaleString()} دج.
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      deleteStudent(group.groupId, actionStudentTarget.rowId);
+                      setActionStudentTarget(null);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      padding: '10px 14px',
+                      backgroundColor: '#f8fafc',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: '10px',
+                      cursor: 'pointer',
+                      textAlign: 'right'
+                    }}
+                  >
+                    <Trash2 size={18} color="#64748b" style={{ flexShrink: 0 }} />
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#334155' }}>
+                        حذف التلميذ نهائياً من هذا الفوج
+                      </div>
+                      <div style={{ fontSize: '0.74rem', color: '#64748b' }}>
+                        إزالة التلميذ وسجل حضوره بالكامل من الفوج.
+                      </div>
+                    </div>
+                  </button>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <button
+                    type="button"
+                    onClick={() => setActionStudentTarget(null)}
+                    className="m3-btn m3-btn-text"
+                    style={{ fontWeight: 700 }}
+                  >
+                    إلغاء
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#dc2626', marginBottom: '14px' }}>
+                  <div
+                    style={{
+                      width: '38px',
+                      height: '38px',
+                      borderRadius: '50%',
+                      backgroundColor: '#fee2e2',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0
+                    }}
+                  >
+                    <Trash2 size={20} color="#dc2626" />
+                  </div>
+                  <div>
+                    <h3 style={{ fontSize: '1.15rem', fontWeight: 800, margin: 0 }}>
+                      تأكيد حذف التلميذ
+                    </h3>
+                    <span style={{ fontSize: '0.78rem', color: '#64748b' }}>
+                      إزالة التلميذ من الفوج
+                    </span>
+                  </div>
+                </div>
+
+                <p style={{ fontSize: '0.92rem', color: '#334155', lineHeight: 1.6, marginBottom: '20px' }}>
+                  هل أنت متأكد من رغبتك في حذف التلميذ <strong style={{ color: '#0f172a' }}>"{actionStudentTarget.name}"</strong> نهائياً من هذا الفوج؟
+                </p>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setActionStudentTarget(null)}
+                    className="m3-btn m3-btn-text"
+                    style={{ fontWeight: 700 }}
+                  >
+                    إلغاء
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      deleteStudent(group.groupId, actionStudentTarget.rowId);
+                      setActionStudentTarget(null);
+                    }}
+                    className="m3-btn m3-btn-primary"
+                    style={{ backgroundColor: '#dc2626', borderColor: '#dc2626', fontWeight: 800 }}
+                  >
+                    تأكيد الحذف
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       )}
 
       {/* Add Student Modal */}
