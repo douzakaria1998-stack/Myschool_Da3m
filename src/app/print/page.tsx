@@ -19,6 +19,28 @@ export default function PrintPage() {
   // Cycle offset in case group has 8 sessions (e.g. VIP groups): 0 = sessions 1-4, 4 = sessions 5-8
   const [sessionCycleOffset, setSessionCycleOffset] = useState<number>(0);
 
+  // Synchronize URL search params and selectedGroup so browser refresh preserves the exact group sheet
+  React.useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const qGroup = params.get('group') || params.get('groupId');
+      if (qGroup && qGroup.trim()) {
+        const cleanQ = qGroup.trim().toUpperCase();
+        if (cleanQ !== selectedGroup && data.groupData[cleanQ]) {
+          setSelectedGroup(cleanQ);
+          return;
+        }
+      }
+      if (selectedGroup) {
+        const url = new URL(window.location.href);
+        if (url.searchParams.get('group') !== selectedGroup) {
+          url.searchParams.set('group', selectedGroup);
+          window.history.replaceState({}, '', url.toString());
+        }
+      }
+    }
+  }, [selectedGroup, setSelectedGroup, data.groupData]);
+
   const realStudents = React.useMemo(() => {
     return (group?.students || []).filter((s) => !isSummaryRow(s, group?.groupId));
   }, [group?.students, group?.groupId]);

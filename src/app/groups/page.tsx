@@ -805,7 +805,7 @@ export default function GroupsPage() {
               {/* Action Buttons */}
               <div style={{ display: 'flex', gap: '8px' }}>
                 <Link
-                  href="/attendance"
+                  href={`/attendance?group=${group.id}`}
                   onClick={() => setSelectedGroup(group.id)}
                   className="m3-btn m3-btn-primary m3-btn-sm"
                   style={{ flex: 1, textDecoration: 'none' }}
@@ -814,7 +814,7 @@ export default function GroupsPage() {
                   <ArrowUpRight size={16} />
                 </Link>
                 <Link
-                  href="/print"
+                  href={`/print?group=${group.id}`}
                   onClick={() => setSelectedGroup(group.id)}
                   className="m3-btn m3-btn-outlined m3-btn-sm"
                   style={{ textDecoration: 'none' }}

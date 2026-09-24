@@ -103,6 +103,28 @@ export default function AttendancePage() {
   const [inlineToTime, setInlineToTime] = useState('15:00');
   const [inlinePreset, setInlinePreset] = useState('1to3pm');
 
+  // Synchronize URL search params and selectedGroup so browser refresh preserves the exact group sheet
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const qGroup = params.get('group') || params.get('groupId');
+      if (qGroup && qGroup.trim()) {
+        const cleanQ = qGroup.trim().toUpperCase();
+        if (cleanQ !== selectedGroup && data.groupData[cleanQ]) {
+          setSelectedGroup(cleanQ);
+          return;
+        }
+      }
+      if (selectedGroup) {
+        const url = new URL(window.location.href);
+        if (url.searchParams.get('group') !== selectedGroup) {
+          url.searchParams.set('group', selectedGroup);
+          window.history.replaceState({}, '', url.toString());
+        }
+      }
+    }
+  }, [selectedGroup, setSelectedGroup, data.groupData]);
+
   // Find assigned teacher for this group
   const currentGroupTeacher = useMemo(() => {
     if (!group) return null;

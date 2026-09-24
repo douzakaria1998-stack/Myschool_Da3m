@@ -18,52 +18,60 @@ import {
 
 export default function NavRail() {
   const pathname = usePathname();
-  const { lang, data } = useApp();
+  const { lang, data, selectedGroup } = useApp();
 
   const navItems = [
     {
+      basePath: '/',
       href: '/',
       icon: LayoutDashboard,
       labelAr: 'لوحة التحكم',
       labelEn: 'Dashboard'
     },
     {
-      href: '/attendance',
+      basePath: '/attendance',
+      href: selectedGroup ? `/attendance?group=${selectedGroup}` : '/attendance',
       icon: CalendarCheck,
       labelAr: 'كشف الحضور',
       labelEn: 'Attendance'
     },
     {
+      basePath: '/scanner',
       href: '/scanner',
       icon: ScanBarcode,
       labelAr: 'مسح الباركود',
       labelEn: 'Barcode'
     },
     {
+      basePath: '/groups',
       href: '/groups',
       icon: Users,
       labelAr: 'الأفواج',
       labelEn: 'Groups'
     },
     {
+      basePath: '/teachers',
       href: '/teachers',
       icon: GraduationCap,
       labelAr: 'الأساتذة',
       labelEn: 'Teachers'
     },
     {
+      basePath: '/students',
       href: '/students',
       icon: IdCard,
       labelAr: 'سجل التلاميذ',
       labelEn: 'Students'
     },
     {
-      href: '/print',
+      basePath: '/print',
+      href: selectedGroup ? `/print?group=${selectedGroup}` : '/print',
       icon: Printer,
       labelAr: 'طباعة الكشوف',
       labelEn: 'Print'
     },
     {
+      basePath: '/admin',
       href: '/admin',
       icon: Settings,
       labelAr: 'الإعدادات',
@@ -101,7 +109,7 @@ export default function NavRail() {
       {/* Navigation Items (Icon above title) */}
       <nav style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', width: '100%' }}>
         {navItems.map((item) => {
-          const isActive = pathname === item.href;
+          const isActive = pathname === item.basePath;
           const Icon = item.icon;
 
           return (

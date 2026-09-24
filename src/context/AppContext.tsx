@@ -147,6 +147,7 @@ const THEME_KEY = 'da3m_theme';
 const LANG_KEY = 'da3m_lang';
 const UNSYNCED_CHANGES_KEY = 'da3m_has_unsynced_changes_v1';
 const LAST_LOCAL_EDIT_KEY = 'da3m_last_local_edit_time_v1';
+export const SELECTED_GROUP_KEY = 'da3m_selected_group_v1';
 
 // Pure helper to recompute student finances according to pricing tier or group custom finances
 export const calcStudentFinancesPure = (
@@ -358,6 +359,8 @@ function mergeAttendanceSafely(remote: CenterData, local: CenterData): CenterDat
     let hasDifferences = false;
 
     const mergedStudents: StudentRecord[] = [];
+    const seenMergedNames = new Set<string>();
+    const seenMergedBarcodes = new Set<string>();
 
     remoteGroup.students.forEach((rStudent) => {
       if (!rStudent || !rStudent.name || isSummaryRow(rStudent, gid)) return;
@@ -370,21 +373,31 @@ function mergeAttendanceSafely(remote: CenterData, local: CenterData): CenterDat
       const rBarcode = (rStudent.barcode || '').trim().toUpperCase();
       const rNormName = normalizeArabicName(rStudent.name || '');
 
-      // Match students by unique barcode or exact normalized name (NEVER by rowId!)
+      // Prevent duplicate entries if remote group already contains duplicates
+      if (rNormName && seenMergedNames.has(rNormName)) return;
+      if (rBarcode && seenMergedBarcodes.has(rBarcode)) return;
+
+      // Match students by unique barcode OR exact normalized Arabic name (NEVER by rowId!)
       const lStudent = localGroup.students.find((s) => {
+        if (!s || !s.name) return false;
         const lBarcode = (s.barcode || '').trim().toUpperCase();
+        const lNormName = normalizeArabicName(s.name || '');
         if (rBarcode && lBarcode && rBarcode === lBarcode) return true;
-        if (!rBarcode && !lBarcode && rNormName && normalizeArabicName(s.name || '') === rNormName) return true;
+        if (rNormName && lNormName && rNormName === lNormName) return true;
         return false;
       });
 
       if (!lStudent) {
+        if (rNormName) seenMergedNames.add(rNormName);
+        if (rBarcode) seenMergedBarcodes.add(rBarcode);
         mergedStudents.push(rStudent);
         return;
       }
 
       if (lStudent.barcode) matchedLocalBarcodes.add(lStudent.barcode.trim().toUpperCase());
       if (lStudent.name) matchedLocalNames.add(normalizeArabicName(lStudent.name));
+      if (rBarcode) matchedLocalBarcodes.add(rBarcode);
+      if (rNormName) matchedLocalNames.add(rNormName);
 
       let studentModified = false;
 
@@ -457,10 +470,12 @@ function mergeAttendanceSafely(remote: CenterData, local: CenterData): CenterDat
       } else {
         mergedStudents.push(rStudent);
       }
+      if (rNormName) seenMergedNames.add(rNormName);
+      if (barcode) seenMergedBarcodes.add(barcode.toUpperCase());
     });
 
     // Append any local student that does NOT exist in remote (guarantee new enrollments are preserved)
-    // BUT ignore any student that was tombstoned!
+    // BUT ignore any student that was tombstoned or already merged!
     const localOnlyStudents: StudentRecord[] = [];
     localGroup.students.forEach((lStudent) => {
       if (!lStudent || !lStudent.name || isSummaryRow(lStudent, gid)) return;
@@ -472,9 +487,15 @@ function mergeAttendanceSafely(remote: CenterData, local: CenterData): CenterDat
       const lNorm = normalizeArabicName(lStudent.name);
       const isMatched =
         (lBarcode && matchedLocalBarcodes.has(lBarcode)) ||
-        (lNorm && matchedLocalNames.has(lNorm));
+        (lNorm && matchedLocalNames.has(lNorm)) ||
+        (lNorm && seenMergedNames.has(lNorm)) ||
+        (lBarcode && seenMergedBarcodes.has(lBarcode));
       if (!isMatched) {
-        localOnlyStudents.push(lStudent);
+        if (lNorm && !seenMergedNames.has(lNorm)) {
+          seenMergedNames.add(lNorm);
+          if (lBarcode) seenMergedBarcodes.add(lBarcode);
+          localOnlyStudents.push(lStudent);
+        }
       }
     });
 
@@ -591,6 +612,93 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
       changed = true;
     }
 
+    // In-group student deduplication: guarantee no student name or barcode appears more than once in the group
+    const deduplicatedStudents: StudentRecord[] = [];
+    const seenIndicesByName = new Map<string, number>();
+    const seenIndicesByBarcode = new Map<string, number>();
+
+    cleanStudents.forEach((st) => {
+      if (!st || !st.name || !st.name.trim()) return;
+      const normName = normalizeArabicName(st.name);
+      const cleanBarcode = (st.barcode || '').trim().toUpperCase();
+
+      let targetIdx = -1;
+      if (cleanBarcode && seenIndicesByBarcode.has(cleanBarcode)) {
+        targetIdx = seenIndicesByBarcode.get(cleanBarcode)!;
+      } else if (normName && seenIndicesByName.has(normName)) {
+        targetIdx = seenIndicesByName.get(normName)!;
+      }
+
+      if (targetIdx >= 0) {
+        changed = true;
+        const target = deduplicatedStudents[targetIdx];
+
+        // 1. Merge attendance
+        const curAtt = target.attendance || [];
+        const newAtt = st.attendance || [];
+        const maxAttLen = Math.max(curAtt.length, newAtt.length, 4);
+        const mergedAtt: AttendanceStatus[] = [];
+        for (let i = 0; i < maxAttLen; i++) {
+          const a1 = (curAtt[i] || '').trim().toUpperCase();
+          const a2 = (newAtt[i] || '').trim().toUpperCase();
+          if (a1 && a1 !== '') {
+            mergedAtt.push(a1 as AttendanceStatus);
+          } else if (a2 && a2 !== '') {
+            mergedAtt.push(a2 as AttendanceStatus);
+          } else {
+            mergedAtt.push('' as AttendanceStatus);
+          }
+        }
+        target.attendance = mergedAtt;
+
+        // 2. Merge payments: keep highest payment per session
+        const curPay = target.payments || [];
+        const newPay = st.payments || [];
+        const maxPayLen = Math.max(curPay.length, newPay.length, 4);
+        const mergedPay: (number | string)[] = [];
+        for (let i = 0; i < maxPayLen; i++) {
+          const p1 = Number(curPay[i]) || 0;
+          const p2 = Number(newPay[i]) || 0;
+          if (p2 > p1) {
+            mergedPay.push(p2);
+          } else if (p1 > 0) {
+            mergedPay.push(p1);
+          } else if (curPay[i] !== '' && curPay[i] !== undefined && curPay[i] !== null) {
+            mergedPay.push(curPay[i]);
+          } else {
+            mergedPay.push(newPay[i] ?? '');
+          }
+        }
+        target.payments = mergedPay;
+
+        // 3. Keep barcode if target didn't have one
+        if ((!target.barcode || !target.barcode.trim()) && cleanBarcode) {
+          target.barcode = cleanBarcode;
+          seenIndicesByBarcode.set(cleanBarcode, targetIdx);
+        }
+
+        // 4. Keep phone if target didn't have one
+        if ((!target.phone || !target.phone.trim()) && st.phone?.trim()) {
+          target.phone = st.phone.trim();
+        }
+
+        // 5. Keep custom discount
+        if ((!target.discount || target.discount === '1') && st.discount && st.discount !== '1') {
+          target.discount = st.discount;
+        }
+      } else {
+        const newIdx = deduplicatedStudents.length;
+        const copy = { ...st };
+        deduplicatedStudents.push(copy);
+        if (normName) seenIndicesByName.set(normName, newIdx);
+        if (cleanBarcode) seenIndicesByBarcode.set(cleanBarcode, newIdx);
+      }
+    });
+
+    if (deduplicatedStudents.length !== cleanStudents.length) {
+      changed = true;
+    }
+
     // Ensure group ID follows strict BAC{XX} / BACV{XX} format without hyphens or suffixes like BAC01-2
     let finalGid = gid.trim().toUpperCase();
     if (finalGid.includes('-') || finalGid.includes('_') || !isValidGroupId(finalGid).isValid) {
@@ -667,7 +775,7 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
     }
 
     // Enforce 4 sessions for all students, ensure barcode exists, and recalculate finances
-    let finalStudents: StudentRecord[] = cleanStudents.map((s) => {
+    let finalStudents: StudentRecord[] = deduplicatedStudents.map((s) => {
       let att = (s.attendance || []).slice(0, 4);
       while (att.length < 4) att.push('');
       let payments = (s.payments || []).slice(0, 4);
@@ -714,7 +822,7 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
           groupId: finalGid,
           isVip: isVipGroup,
           sessionCount: gSheet.sessionCount || 4,
-          students: cleanStudents
+          students: deduplicatedStudents
         }
       );
 
@@ -873,15 +981,59 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [data, setData] = useState<CenterData>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const savedData = localStorage.getItem(STORAGE_KEY);
+        if (savedData) {
+          const parsed = JSON.parse(savedData);
+          if (parsed && parsed.groupData) {
+            const { cleaned } = sanitizeData(parsed);
+            return cleaned;
+          }
+        }
+      } catch (e) {}
+    }
     const { cleaned } = sanitizeData(initialSeedData as unknown as CenterData);
     return cleaned;
   });
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedGroup, setSelectedGroup] = useState<string>(() => {
+  const [selectedGroup, setSelectedGroupState] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const qGroup = params.get('group') || params.get('groupId');
+        if (qGroup && qGroup.trim()) {
+          return qGroup.trim().toUpperCase();
+        }
+        const saved = localStorage.getItem(SELECTED_GROUP_KEY);
+        if (saved && saved.trim()) {
+          return saved.trim().toUpperCase();
+        }
+      } catch (e) {}
+    }
     const { cleaned } = sanitizeData(initialSeedData as unknown as CenterData);
     const sorted = sortGroupsActiveFirstOldToNew(cleaned.groups, cleaned.groupData, cleaned.pricingTiers);
     return sorted[0]?.id || 'BAC01';
   });
+
+  const setSelectedGroup = useCallback((id: string) => {
+    if (!id) return;
+    const cleanId = id.trim().toUpperCase();
+    setSelectedGroupState(cleanId);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(SELECTED_GROUP_KEY, cleanId);
+        if (window.location.pathname === '/attendance' || window.location.pathname === '/print') {
+          const url = new URL(window.location.href);
+          if (url.searchParams.get('group') !== cleanId) {
+            url.searchParams.set('group', cleanId);
+            window.history.replaceState({}, '', url.toString());
+          }
+        }
+      } catch (e) {}
+    }
+  }, []);
+
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [lang, setLang] = useState<'ar' | 'en'>('ar');
 
@@ -1199,6 +1351,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       const savedLang = localStorage.getItem(LANG_KEY) as 'ar' | 'en';
       if (savedLang) setLang(savedLang);
+
+      const savedGroup = localStorage.getItem(SELECTED_GROUP_KEY);
+      if (savedGroup && savedGroup.trim()) {
+        setSelectedGroupState(savedGroup.trim().toUpperCase());
+      }
     } catch (e) {
       console.error('Failed to load stored data:', e);
     } finally {

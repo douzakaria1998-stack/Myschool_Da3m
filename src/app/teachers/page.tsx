@@ -438,7 +438,7 @@ export default function TeachersPage() {
                           {item.groups.map((g) => (
                             <Link
                               key={g.id}
-                              href="/attendance"
+                              href={`/attendance?group=${g.id}`}
                               onClick={() => setSelectedGroup(g.id)}
                               className="m3-chip"
                               style={{
@@ -604,7 +604,7 @@ export default function TeachersPage() {
                         {/* View Attendance or Voucher link */}
                         {item.groups.length > 0 && (
                           <Link
-                            href="/attendance"
+                            href={`/attendance?group=${item.groups[0].id}`}
                             onClick={() => setSelectedGroup(item.groups[0].id)}
                             className="m3-btn m3-btn-outlined m3-btn-sm"
                             style={{ padding: '6px 8px' }}

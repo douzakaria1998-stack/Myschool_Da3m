@@ -43,7 +43,7 @@ interface Props {
 }
 
 export default function StudentProfileModal({ student, groupId, onClose }: Props) {
-  const { data, updateStudent, deleteStudent, applyStudentCredit } = useApp();
+  const { data, updateStudent, deleteStudent, applyStudentCredit, setSelectedGroup } = useApp();
   const group = data.groupData[groupId] as GroupSheet | undefined;
   const groupMeta = data.groups.find((g) => g.id === groupId);
 
@@ -606,7 +606,11 @@ export default function StudentProfileModal({ student, groupId, onClose }: Props
                   </span>
 
                   <Link
-                    href="/attendance"
+                    href={`/attendance?group=${groupId}`}
+                    onClick={() => {
+                      setSelectedGroup(groupId);
+                      onClose();
+                    }}
                     className="m3-btn-text"
                     style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--md-sys-color-primary)' }}
                   >

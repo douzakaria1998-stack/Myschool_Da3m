@@ -53,7 +53,7 @@ import {
 } from '../utils/sessionUtils';
 
 export default function DashboardPage() {
-  const { data, getCenterStats, getGroupStats, setSelectedGroup, lang } = useApp();
+  const { data, getCenterStats, getGroupStats, selectedGroup, setSelectedGroup, lang } = useApp();
 
   // Dynamic Period & Scope Filter state for Stats
   const [statsPeriodType, setStatsPeriodType] = useState<'all' | 'today' | 'this_week' | 'this_month' | 'prev_month' | 'custom'>('all');
@@ -305,7 +305,7 @@ export default function DashboardPage() {
             <span>إنشاء فوج جديد</span>
           </button>
           <Link
-            href="/attendance"
+            href={selectedGroup ? `/attendance?group=${selectedGroup}` : '/attendance'}
             className="m3-btn m3-btn-tonal"
             style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
           >
@@ -1211,7 +1211,7 @@ export default function DashboardPage() {
                 {/* Card Actions */}
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <Link
-                    href="/attendance"
+                    href={`/attendance?group=${group.id}`}
                     onClick={() => setSelectedGroup(group.id)}
                     className="m3-btn m3-btn-primary m3-btn-sm"
                     style={{ flex: 1, textDecoration: 'none' }}
@@ -1220,7 +1220,7 @@ export default function DashboardPage() {
                     <ArrowUpRight size={16} />
                   </Link>
                   <Link
-                    href="/print"
+                    href={`/print?group=${group.id}`}
                     onClick={() => setSelectedGroup(group.id)}
                     className="m3-btn m3-btn-outlined m3-btn-sm"
                     style={{ textDecoration: 'none' }}
