@@ -1,4 +1,15 @@
-export type AttendanceStatus = 'P' | 'A' | 'M' | 'S' | 'C' | 'ح' | 'غ' | 'م' | '';
+export type AttendanceStatus = 'P' | 'A' | 'M' | 'S' | 'C' | 'CH' | 'N' | 'ح' | 'غ' | 'م' | '';
+
+export interface CoveringMatchResult {
+  canCover: boolean;
+  reason?: 'ALREADY_ATTENDED' | 'ALREADY_COVERED' | 'SESSION_NOT_FOUND' | 'NO_MATCHING_MISSED_SESSION';
+  type?: 'ACTIVE_GROUP_MATCH' | 'LAST_GROUP_MATCH' | 'NEW_STUDENT';
+  matchedGroup?: GroupSheet;
+  matchedStudent?: StudentRecord;
+  matchedSessionIdx?: number;
+  message: string;
+  isNewStudent?: boolean;
+}
 
 export type DiscountType = '1' | '0.8' | '0' | 'تعويض' | string;
 
@@ -15,7 +26,60 @@ export interface StudentRecord {
   teacherPay: number; // Teacher payout share (مجموع الأستاذ)
   schoolEarn: number; // Center share (المدرسة)
   debt: number; // Outstanding balance (الدين)
+  credit?: number; // Available surplus credit/balance for student (رصيد فائض متبقي للتلميذ)
   totalAttendance: number; // Count of attended sessions
+}
+
+export type PaymentTransactionType =
+  | 'PAYMENT'
+  | 'SESSION_ALLOCATION'
+  | 'CREDIT'
+  | 'RECOVERY'
+  | 'TRANSFER'
+  | 'REFUND'
+  | 'ADJUSTMENT';
+
+export interface StudentRecoverySession {
+  groupId: string;
+  sessionIndex: number;
+  subject: string;
+  teacherName?: string;
+  dateStr?: string;
+  sessionNumber: number;
+  status: 'A' | 'غ';
+  isRecovered?: boolean;
+  recoveredInGroupId?: string;
+  recoveredInSessionIdx?: number;
+}
+
+export interface StudentAccountTransaction {
+  id: string;
+  timestamp: number;
+  dateStr: string;
+  timeStr: string;
+  type: PaymentTransactionType;
+  amount: number;
+  description: string;
+  groupId?: string;
+  sessionIndex?: number;
+  balanceAfter: number;
+}
+
+export interface StudentPaymentAccount {
+  studentKey: string; // Barcode or normalized Arabic name
+  studentName: string;
+  phone?: string;
+  barcode?: string;
+  totalPaid: number;
+  amountUsed: number;
+  availableBalance: number; // Remaining credit
+  countablePSessions: number;
+  nonCountableSessions: number;
+  recoverySessions: number;
+  recoveryDetails: StudentRecoverySession[];
+  currentGroups: string[];
+  previousGroups: string[];
+  transactions: StudentAccountTransaction[];
 }
 
 export interface GroupSheet {

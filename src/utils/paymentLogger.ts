@@ -29,6 +29,7 @@ export interface PaymentRecordItem {
   paymentMethod?: string;     // 'نقداً' | 'صك بريدي' | 'تحويل بنكي'
   source?: 'scanner' | 'payment_modal' | 'multi_group' | 'batch' | 'sheet' | 'session_record';
   receiptNo?: string;
+  notes?: string;
 }
 
 export interface PaymentHourlySummary {

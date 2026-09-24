@@ -30,7 +30,8 @@ import {
   isGroupEnded,
   getNextSessionDateAfter,
   getUpcomingSessionDate,
-  sortGroupsActiveFirstOldToNew
+  sortGroupsActiveFirstOldToNew,
+  getDefaultSessionIndex
 } from '../utils/sessionUtils';
 import { normalizeArabicName } from '../utils/barcodeUtils';
 import { recordPaymentTransaction, removePaymentTransactionsForStudent } from '../utils/paymentLogger';
@@ -60,7 +61,8 @@ interface AppContextType {
     studentRowId: number,
     sessionIndex: number,
     paymentAmount?: number,
-    targetOriginalSessionIdx?: number
+    targetOriginalSessionIdx?: number,
+    studentIdentifier?: { name?: string; barcode?: string }
   ) => void;
   // Student Actions
   cycleAttendance: (groupId: string, rowId: number, sessionIndex: number) => AttendanceStatus;
@@ -95,7 +97,14 @@ interface AppContextType {
   deleteStudentGlobally: (params: { name: string; barcode?: string; phone?: string; groupIds?: string[] }) => void;
   restoreStudent: (archiveId: string) => boolean;
   clearRecycleBin: () => void;
-  transferStudent: (fromGroupId: string, toGroupId: string, studentRowId: number) => boolean;
+  transferStudent: (
+    fromGroupId: string,
+    toGroupId: string,
+    studentRowId: number,
+    targetStartSessionIdx?: number,
+    studentIdentifier?: { name?: string; barcode?: string }
+  ) => boolean;
+  applyStudentCredit: (studentName: string, barcode: string | undefined, targetGroupId: string, amountToApply: number) => boolean;
   updateStudent: (groupId: string, rowId: number, fields: Partial<StudentRecord>) => void;
   // Group & Teacher Actions
   addGroup: (group: GroupMeta) => void;
@@ -188,11 +197,13 @@ export const calcStudentFinancesPure = (
     return sum + (isNaN(val) ? 0 : val);
   }, 0);
 
-  // Attendance counts
+  // Attendance counts - ONLY 'P', 'C', 'ح', 'M', 'م' count as completed attendance!
+  // 'A' (absent), 'N' (new entry), 'CH' (group change) DO NOT count!
   const cycleAttendance = (student.attendance || []).slice(0, cycleSessions);
   const attendedCount = cycleAttendance.filter((a) => a === 'P' || a === 'C' || a === 'ح').length;
   const makeupCount = cycleAttendance.filter((a) => a === 'M' || a === 'م').length;
-  const totalAttendance = attendedCount + makeupCount;
+  const countablePSessions = attendedCount + makeupCount;
+  const totalAttendance = countablePSessions;
 
   // Check if group has ended all sessions in its cycle
   const groupEnded = Boolean(
@@ -200,7 +211,7 @@ export const calcStudentFinancesPure = (
     (
       Array.isArray(student.attendance) &&
       student.attendance.length >= cycleSessions &&
-      ['P', 'A', 'M', 'S', 'ح', 'غ', 'م'].includes(String(student.attendance[cycleSessions - 1] || '').trim().toUpperCase())
+      ['P', 'A', 'M', 'S', 'C', 'CH', 'N', 'ح', 'غ', 'م'].includes(String(student.attendance[cycleSessions - 1] || '').trim().toUpperCase())
     )
   );
 
@@ -214,6 +225,7 @@ export const calcStudentFinancesPure = (
       teacherPay: 0,
       schoolEarn: 0,
       debt: 0,
+      credit: 0,
       totalAttendance
     };
   }
@@ -224,6 +236,7 @@ export const calcStudentFinancesPure = (
 
   // Fee calculation based on discount and counted sessions
   let fee = 0;
+  const discountFactor = student.discount === '0' ? 0 : student.discount === '0.8' ? 0.8 : 1;
 
   if (student.discount === '0') {
     fee = 0;
@@ -236,15 +249,23 @@ export const calcStudentFinancesPure = (
     fee = countedSessions * perSessionPrice;
   }
 
-  // If student has paid more than calculated fee, fee cannot be less than total received
-  if (totalReceived > fee && student.discount !== '0') {
-    fee = totalReceived;
-  }
-
-  const teacherRatio = isVipGroup ? 0.75 : 0.60;
-  const teacherPay = student.discount === '0' ? 0 : Math.round(fee * teacherRatio);
-  const schoolEarn = Math.max(0, fee - teacherPay);
+  // Student Money Account:
+  // Excess payment does NOT inflate fee! Any unused amount remains as credit/balance for the student.
+  const credit = Math.max(0, totalReceived - fee);
   const debt = Math.max(0, fee - totalReceived);
+
+  // Teacher Payment Rule:
+  // Teacher payment is strictly based on eligible delivered countable sessions ('P', 'C', 'M').
+  // An absent session ('A'), new entry ('N'), or transferred session ('CH') NEVER generates teacher payout!
+  const teacherPay =
+    student.discount === '0'
+      ? 0
+      : Math.round(countablePSessions * perSessionTeacherRate * (student.discount === '0.8' ? 0.8 : 1));
+
+  // School Revenue Rule:
+  // School revenue is strictly based on eligible delivered countable sessions.
+  const completedSessionRevenue = Math.round(countablePSessions * perSessionPrice * discountFactor);
+  const schoolEarn = Math.max(0, completedSessionRevenue - teacherPay);
 
   return {
     ...student,
@@ -253,6 +274,7 @@ export const calcStudentFinancesPure = (
     teacherPay,
     schoolEarn,
     debt,
+    credit,
     totalAttendance
   };
 };
@@ -535,7 +557,7 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
 
   for (const [gid, gSheet] of Object.entries(centerData.groupData || {})) {
     const originalStudents = gSheet.students || [];
-    const cleanStudents = originalStudents.filter((s) => !isSummaryRow(s, gid));
+    const cleanStudents = originalStudents.filter((s) => !isSummaryRow(s, gid) && s.discount !== 'تعويض');
     if (cleanStudents.length !== originalStudents.length) {
       changed = true;
     }
@@ -1384,8 +1406,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     let next: AttendanceStatus = 'P';
     if (currentVal === 'P' || currentVal === 'ح') next = 'A';
     else if (currentVal === 'A' || currentVal === 'غ') next = 'M';
-    else if (currentVal === 'M' || currentVal === 'م') next = '';
+    else if (currentVal === 'M' || currentVal === 'م') next = 'C';
+    else if (currentVal === 'C') next = 'N';
+    else if (currentVal === 'N') next = 'CH';
+    else if (currentVal === 'CH') next = '';
     else if (currentVal === '') next = 'P';
+    else next = 'P';
 
     const sessionCount = group.sessionDates?.length || group.sessionCount || 4;
     const updatedStudents = group.students.map((s) => {
@@ -1604,35 +1630,71 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     studentRowId: number,
     sessionIndex: number,
     paymentAmount?: number,
-    targetOriginalSessionIdx?: number
+    targetOriginalSessionIdx?: number,
+    studentIdentifier?: { name?: string; barcode?: string }
   ) => {
     const currentData = dataRef.current;
     const activeGroup = currentData.groupData[activeGroupId];
     if (!activeGroup) return;
 
     const originalGroup = currentData.groupData[originalGroupId];
-    const originalStudent = originalGroup?.students.find((s) => s.rowId === studentRowId);
-    if (!originalStudent) return;
+    if (!originalGroup) return;
+
+    // Resolve original student strictly:
+    // 1. By clean barcode
+    // 2. By normalized Arabic name
+    // 3. Fallback to rowId (verified against studentIdentifier if name provided)
+    const normTargetName = normalizeArabicName(studentIdentifier?.name || '');
+    const cleanTargetBarcode = (studentIdentifier?.barcode || '').trim().toUpperCase();
+
+    let originalStudent: StudentRecord | undefined;
+
+    if (cleanTargetBarcode) {
+      originalStudent = originalGroup.students.find(
+        (s) => !isSummaryRow(s, originalGroupId) && s.barcode && s.barcode.trim().toUpperCase() === cleanTargetBarcode
+      );
+    }
+
+    if (!originalStudent && normTargetName) {
+      originalStudent = originalGroup.students.find(
+        (s) => !isSummaryRow(s, originalGroupId) && normalizeArabicName(s.name) === normTargetName
+      );
+    }
+
+    if (!originalStudent) {
+      const candidateByRow = originalGroup.students.find((s) => s.rowId === studentRowId);
+      if (candidateByRow && (!normTargetName || normalizeArabicName(candidateByRow.name) === normTargetName)) {
+        originalStudent = candidateByRow;
+      }
+    }
+
+    if (!originalStudent) {
+      console.warn(`[recordCoverAttendance] Student not found in group ${originalGroupId}`, {
+        studentRowId,
+        studentIdentifier
+      });
+      return;
+    }
 
     // 1. In ORIGINAL group (e.g. BAC05): mark the session as 'C' (Covered)
     const origSessionCount = originalGroup.sessionDates?.length || originalGroup.sessionCount || 4;
     let origIdx = targetOriginalSessionIdx !== undefined ? targetOriginalSessionIdx : sessionIndex;
     if (origIdx >= origSessionCount) origIdx = origSessionCount - 1;
 
-    // If that session was already attended ('P' or 'C'), find the first open/unattended session
-    if (originalStudent.attendance?.[origIdx] === 'P' || originalStudent.attendance?.[origIdx] === 'C') {
-      const firstOpen = (originalStudent.attendance || []).findIndex(
-        (att, i) => i < origSessionCount && att !== 'P' && att !== 'C'
-      );
-      if (firstOpen !== -1) origIdx = firstOpen;
-    }
-
     const newOrigAttendance: AttendanceStatus[] = [...(originalStudent.attendance || [])];
     while (newOrigAttendance.length < origSessionCount) newOrigAttendance.push('');
     newOrigAttendance[origIdx] = 'C';
 
+    // Handle payment if provided during cover
+    let newOrigPayments = [...(originalStudent.payments || [])];
+    while (newOrigPayments.length < origSessionCount) newOrigPayments.push('');
+    if (paymentAmount && paymentAmount > 0) {
+      const currentP = Number(newOrigPayments[origIdx]) || 0;
+      newOrigPayments[origIdx] = currentP + paymentAmount;
+    }
+
     const updatedOriginalStudent = calculateStudentFinances(
-      { ...originalStudent, attendance: newOrigAttendance },
+      { ...originalStudent, attendance: newOrigAttendance, payments: newOrigPayments },
       originalGroup.type,
       currentData.pricingTiers,
       originalGroup
@@ -1640,62 +1702,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const updatedOriginalGroup: GroupSheet = {
       ...originalGroup,
-      students: originalGroup.students.map((s) => (s.rowId === studentRowId ? updatedOriginalStudent : s))
+      students: originalGroup.students.map((s) => (s.rowId === originalStudent!.rowId ? updatedOriginalStudent : s))
     };
 
-    // 2. In ACTIVE group (e.g. BAC01): record student attendance as 'M' (Make-up/Cover)
-    let updatedActiveGroup: GroupSheet = { ...activeGroup };
-    const existingInActive = activeGroup.students.find(
-      (s) => s.name.trim().toLowerCase() === originalStudent.name.trim().toLowerCase()
+    // 2. In ACTIVE group (e.g. BAC06): DO NOT add student name to the covering group!
+    // As per user specification: "When the student cover the session don't write his name on the group that he covers in"
+    // Also purge any legacy/dummy placeholder covering records from the active group if present.
+    const normName = normalizeArabicName(originalStudent.name);
+    const updatedActiveStudents = (activeGroup.students || []).filter(
+      (s) => !(s.discount === 'تعويض' && normalizeArabicName(s.name) === normName)
     );
-
-    if (existingInActive) {
-      const newAttendance = [...(existingInActive.attendance || [])];
-      newAttendance[sessionIndex] = 'M';
-      let newPayments = [...(existingInActive.payments || [])];
-      if (paymentAmount && paymentAmount > 0) {
-        const currentP = Number(newPayments[sessionIndex]) || 0;
-        newPayments[sessionIndex] = currentP + paymentAmount;
-      }
-      const updatedStudent = calculateStudentFinances(
-        { ...existingInActive, attendance: newAttendance, payments: newPayments },
-        activeGroup.type,
-        currentData.pricingTiers,
-        activeGroup
-      );
-      updatedActiveGroup.students = activeGroup.students.map((s) =>
-        s.rowId === existingInActive.rowId ? updatedStudent : s
-      );
-    } else {
-      const newRowId = (activeGroup.students || []).reduce((max, s) => Math.max(max, s.rowId || 0), 0) + 1;
-      const initialAttendance: AttendanceStatus[] = Array(activeGroup.sessionCount || 4).fill('');
-      initialAttendance[sessionIndex] = 'M';
-      const initialPayments: (number | string)[] = Array(activeGroup.sessionCount || 4).fill('');
-      if (paymentAmount && paymentAmount > 0) {
-        initialPayments[sessionIndex] = paymentAmount;
-      }
-      const newCoverStudent = calculateStudentFinances(
-        {
-          rowId: newRowId,
-          name: originalStudent.name,
-          phone: originalStudent.phone,
-          barcode: originalStudent.barcode || `${originalGroupId}-${originalStudent.rowId}`,
-          discount: 'تعويض',
-          attendance: initialAttendance,
-          payments: initialPayments,
-          fee: 0,
-          totalReceived: paymentAmount || 0,
-          teacherPay: 0,
-          schoolEarn: 0,
-          debt: 0,
-          totalAttendance: 1
-        },
-        activeGroup.type,
-        currentData.pricingTiers,
-        activeGroup
-      );
-      updatedActiveGroup.students = [...activeGroup.students, newCoverStudent];
-    }
+    const updatedActiveGroup: GroupSheet = {
+      ...activeGroup,
+      students: updatedActiveStudents
+    };
 
     const updatedData: CenterData = {
       ...currentData,
@@ -1709,16 +1729,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     if (paymentAmount && paymentAmount > 0) {
       recordPaymentTransaction({
-        groupId: activeGroupId,
-        groupSubject: activeGroup.subject,
-        teacherName: activeGroup.teacherName,
+        groupId: originalGroupId,
+        groupSubject: originalGroup.subject,
+        teacherName: originalGroup.teacherName,
         studentRowId: originalStudent.rowId,
         studentName: originalStudent.name,
         studentPhone: originalStudent.phone,
         studentBarcode: originalStudent.barcode,
-        sessionIndex,
+        sessionIndex: origIdx,
         amount: paymentAmount,
-        source: 'scanner'
+        totalFee: updatedOriginalStudent.fee,
+        totalReceived: updatedOriginalStudent.totalReceived,
+        remainingDebt: updatedOriginalStudent.debt,
+        paymentMethod: 'نقداً',
+        source: 'multi_group',
+        notes: `تسديد عند تعويض حصة ${origIdx + 1} بحضور في فوج ${activeGroupId}`
       });
     }
   };
@@ -2557,26 +2582,308 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     saveToCloud(updatedData);
   };
 
-  // Transfer student from one group to another
-  const transferStudent = (fromGroupId: string, toGroupId: string, studentRowId: number): boolean => {
+  // Transfer student from one group to another permanently
+  // Golden Rule: Preserves historical group and payment data, marks remaining uncompleted sessions as 'CH',
+  // and marks the first applicable session in the new group as 'N', transferring surplus payment.
+  const transferStudent = (
+    fromGroupId: string,
+    toGroupId: string,
+    studentRowId: number,
+    targetStartSessionIdx?: number,
+    studentIdentifier?: { name?: string; barcode?: string }
+  ): boolean => {
     const currentData = dataRef.current;
     const fromGroup = currentData.groupData[fromGroupId];
     const toGroup = currentData.groupData[toGroupId];
     if (!fromGroup || !toGroup) return false;
 
-    const originalStudent = fromGroup.students.find((s) => s.rowId === studentRowId);
+    // Resolve original student strictly:
+    // 1. By clean barcode
+    // 2. By normalized Arabic name
+    // 3. Fallback to rowId (verified against studentIdentifier if name provided)
+    const normTargetName = normalizeArabicName(studentIdentifier?.name || '');
+    const cleanTargetBarcode = (studentIdentifier?.barcode || '').trim().toUpperCase();
+
+    let originalStudent: StudentRecord | undefined;
+
+    if (cleanTargetBarcode) {
+      originalStudent = fromGroup.students.find(
+        (s) => !isSummaryRow(s, fromGroupId) && s.barcode && s.barcode.trim().toUpperCase() === cleanTargetBarcode
+      );
+    }
+
+    if (!originalStudent && normTargetName) {
+      originalStudent = fromGroup.students.find(
+        (s) => !isSummaryRow(s, fromGroupId) && normalizeArabicName(s.name) === normTargetName
+      );
+    }
+
+    if (!originalStudent) {
+      const candidateByRow = fromGroup.students.find((s) => s.rowId === studentRowId);
+      if (candidateByRow && (!normTargetName || normalizeArabicName(candidateByRow.name) === normTargetName)) {
+        originalStudent = candidateByRow;
+      }
+    }
+
     if (!originalStudent) return false;
 
-    const newStudent = addStudent(toGroupId, {
-      name: originalStudent.name,
-      phone: originalStudent.phone,
-      discount: originalStudent.discount,
-      barcode: originalStudent.barcode
+    // 1. Process OLD GROUP (fromGroupId)
+    const fromSessionCount = fromGroup.sessionDates?.length || fromGroup.sessionCount || 4;
+    const fromIsVip = Boolean(fromGroup.isVip) || fromGroupId.toUpperCase().startsWith('BACV');
+    const fromEffectiveType = fromGroup.type || (fromIsVip ? '4-10000' : '4-2500');
+    const fromTier = currentData.pricingTiers?.find((t) => t.id === fromEffectiveType) || {
+      price: fromIsVip ? 10000 : 2500,
+      teacherRate: fromIsVip ? 7500 : 1500,
+      schoolRate: fromIsVip ? 2500 : 1000,
+      sessions: 4
+    };
+    const fromBasePrice =
+      typeof fromGroup.studentFee === 'number' && fromGroup.studentFee > 0
+        ? fromGroup.studentFee
+        : fromTier.price;
+    const fromPerSessionPrice = Math.round(fromBasePrice / fromSessionCount);
+
+    // Identify completed sessions prior to transfer
+    const oldAttendance: AttendanceStatus[] = [...(originalStudent.attendance || [])];
+    while (oldAttendance.length < fromSessionCount) oldAttendance.push('');
+
+    // Mark remaining uncompleted sessions as 'CH' (Change)
+    const newOldAttendance: AttendanceStatus[] = oldAttendance.map((st) => {
+      const clean = (st || '').trim().toUpperCase();
+      if (['P', 'A', 'M', 'C', 'ح', 'غ', 'م'].includes(clean)) {
+        return st;
+      }
+      return 'CH';
     });
 
-    if (!newStudent) return false;
+    // Count actual completed sessions in old group
+    const completedCountInOld = newOldAttendance.filter((st) =>
+      ['P', 'A', 'M', 'C', 'ح', 'غ', 'م'].includes(st)
+    ).length;
 
-    deleteStudent(fromGroupId, studentRowId);
+    // Calculate fee for completed sessions in old group
+    let feeForOld = completedCountInOld * fromPerSessionPrice;
+    if (originalStudent.discount === '0') {
+      feeForOld = 0;
+    } else if (originalStudent.discount === '0.8') {
+      feeForOld = Math.round(completedCountInOld * fromPerSessionPrice * 0.8);
+    }
+
+    // Original student total received
+    const oldTotalReceived = (originalStudent.payments || []).reduce<number>((sum, p) => {
+      const val = typeof p === 'number' ? p : parseFloat(String(p));
+      return sum + (isNaN(val) ? 0 : val);
+    }, 0) || originalStudent.totalReceived || 0;
+
+    // Calculate surplus payment credit to transfer to new group
+    const creditToTransfer = Math.max(0, oldTotalReceived - feeForOld);
+    const keptPaymentInOld = oldTotalReceived - creditToTransfer;
+
+    // Adjust old group student's payments array to reflect kept payment
+    const newOldPayments: (number | string)[] = Array(fromSessionCount).fill('');
+    if (keptPaymentInOld > 0) {
+      newOldPayments[0] = keptPaymentInOld;
+    }
+
+    const updatedOldStudent = calculateStudentFinances(
+      {
+        ...originalStudent,
+        attendance: newOldAttendance,
+        payments: newOldPayments
+      },
+      fromGroup.type,
+      currentData.pricingTiers,
+      fromGroup
+    );
+
+    const updatedFromGroup: GroupSheet = {
+      ...fromGroup,
+      students: fromGroup.students.map((s) => (s.rowId === originalStudent!.rowId ? updatedOldStudent : s))
+    };
+
+    // 2. Process NEW GROUP (toGroupId)
+    const toSessionCount = toGroup.sessionDates?.length || toGroup.sessionCount || 4;
+    const startSessionIdx =
+      typeof targetStartSessionIdx === 'number' && targetStartSessionIdx >= 0 && targetStartSessionIdx < toSessionCount
+        ? targetStartSessionIdx
+        : Math.min(toSessionCount - 1, Math.max(0, getDefaultSessionIndex(toGroup, new Date())));
+
+    // Check if student already exists in toGroup
+    const studentBarcode = (originalStudent.barcode || '').trim().toUpperCase();
+    const studentNormName = normalizeArabicName(originalStudent.name);
+    const existingInTo = toGroup.students.find(
+      (s) =>
+        !isSummaryRow(s, toGroupId) &&
+        ((studentBarcode && s.barcode && s.barcode.trim().toUpperCase() === studentBarcode) ||
+          normalizeArabicName(s.name) === studentNormName)
+    );
+
+    let updatedToGroup: GroupSheet = { ...toGroup };
+
+    if (existingInTo) {
+      const newAttendance = [...(existingInTo.attendance || [])];
+      while (newAttendance.length < toSessionCount) newAttendance.push('');
+      newAttendance[startSessionIdx] = 'N';
+
+      const newPayments = [...(existingInTo.payments || [])];
+      while (newPayments.length < toSessionCount) newPayments.push('');
+      if (creditToTransfer > 0) {
+        const curP = Number(newPayments[startSessionIdx]) || 0;
+        newPayments[startSessionIdx] = curP + creditToTransfer;
+      }
+
+      const updatedStudent = calculateStudentFinances(
+        { ...existingInTo, attendance: newAttendance, payments: newPayments },
+        toGroup.type,
+        currentData.pricingTiers,
+        toGroup
+      );
+
+      updatedToGroup.students = toGroup.students.map((s) =>
+        s.rowId === existingInTo.rowId ? updatedStudent : s
+      );
+    } else {
+      const maxRowId = toGroup.students.reduce((max, s) => Math.max(max, s.rowId || 0), 0);
+      const newRowId = maxRowId + 1;
+
+      const initialAttendance: AttendanceStatus[] = Array(toSessionCount).fill('');
+      initialAttendance[startSessionIdx] = 'N';
+
+      const initialPayments: (number | string)[] = Array(toSessionCount).fill('');
+      if (creditToTransfer > 0) {
+        initialPayments[startSessionIdx] = creditToTransfer;
+      }
+
+      const newStudent = calculateStudentFinances(
+        {
+          rowId: newRowId,
+          name: originalStudent.name,
+          phone: originalStudent.phone,
+          barcode: originalStudent.barcode,
+          discount: originalStudent.discount,
+          attendance: initialAttendance,
+          payments: initialPayments,
+          fee: 0,
+          totalReceived: creditToTransfer,
+          teacherPay: 0,
+          schoolEarn: 0,
+          debt: 0,
+          totalAttendance: 1
+        },
+        toGroup.type,
+        currentData.pricingTiers,
+        toGroup
+      );
+
+      updatedToGroup.students = [...toGroup.students, newStudent];
+    }
+
+    const updatedData: CenterData = {
+      ...currentData,
+      groupData: {
+        ...currentData.groupData,
+        [fromGroupId]: updatedFromGroup,
+        [toGroupId]: updatedToGroup
+      }
+    };
+
+    persistData(updatedData);
+    saveToCloud(updatedData);
+
+    if (creditToTransfer > 0) {
+      recordPaymentTransaction({
+        groupId: toGroupId,
+        groupSubject: toGroup.subject,
+        teacherName: toGroup.teacherName,
+        studentRowId: existingInTo?.rowId || 0,
+        studentName: originalStudent.name,
+        studentPhone: originalStudent.phone,
+        studentBarcode: originalStudent.barcode,
+        sessionIndex: startSessionIdx,
+        amount: creditToTransfer,
+        source: 'scanner',
+        notes: `تحويل رصيد متبقي (${creditToTransfer} دج) من فوج ${fromGroupId}`
+      });
+    }
+
+    return true;
+  };
+
+  // Apply available student credit/balance to reduce debt or pay for a group
+  const applyStudentCredit = (
+    studentName: string,
+    barcode: string | undefined,
+    targetGroupId: string,
+    amountToApply: number
+  ): boolean => {
+    if (amountToApply <= 0) return false;
+    const currentData = dataRef.current;
+    const targetGroup = currentData.groupData[targetGroupId];
+    if (!targetGroup) return false;
+
+    const normName = normalizeArabicName(studentName);
+    const barcodeUpper = (barcode || '').trim().toUpperCase();
+
+    const student = targetGroup.students.find(
+      (s) =>
+        (barcodeUpper && s.barcode && s.barcode.trim().toUpperCase() === barcodeUpper) ||
+        (s.name && normalizeArabicName(s.name) === normName)
+    );
+    if (!student) return false;
+
+    const sessionCount = targetGroup.sessionDates?.length || targetGroup.sessionCount || 4;
+    const newPayments = [...(student.payments || [])];
+    while (newPayments.length < sessionCount) newPayments.push('');
+
+    let applied = false;
+    for (let i = 0; i < sessionCount; i++) {
+      const curVal = Number(newPayments[i]) || 0;
+      if (curVal === 0) {
+        newPayments[i] = amountToApply;
+        applied = true;
+        break;
+      }
+    }
+    if (!applied) {
+      const cur0 = Number(newPayments[0]) || 0;
+      newPayments[0] = cur0 + amountToApply;
+    }
+
+    const updatedStudents = targetGroup.students.map((s) => {
+      if (s.rowId !== student.rowId) return s;
+      return calculateStudentFinances(
+        { ...s, payments: newPayments },
+        targetGroup.type,
+        currentData.pricingTiers,
+        targetGroup
+      );
+    });
+
+    const updatedData: CenterData = {
+      ...currentData,
+      groupData: {
+        ...currentData.groupData,
+        [targetGroupId]: { ...targetGroup, students: updatedStudents }
+      }
+    };
+
+    persistData(updatedData);
+    saveToCloud(updatedData);
+
+    recordPaymentTransaction({
+      groupId: targetGroupId,
+      groupSubject: targetGroup.subject,
+      teacherName: targetGroup.teacherName,
+      studentRowId: student.rowId,
+      studentName: student.name,
+      studentPhone: student.phone,
+      studentBarcode: student.barcode,
+      sessionIndex: 0,
+      amount: amountToApply,
+      source: 'multi_group',
+      notes: `[استخدام رصيد التلميذ] تم تطبيق رصيد بقيمة ${amountToApply} دج لصالح الفوج ${targetGroupId}`
+    });
+
     return true;
   };
 
@@ -3506,6 +3813,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         restoreStudent,
         clearRecycleBin,
         transferStudent,
+        applyStudentCredit,
         updateStudent,
         addGroup,
         renewGroupWithStudents,

@@ -1,8 +1,24 @@
 'use client';
 
 import React, { Suspense } from 'react';
+import dynamic from 'next/dynamic';
 import { useSearchParams } from 'next/navigation';
-import BarcodeScannerModal from '../../components/BarcodeScannerModal';
+
+const BarcodeScannerModal = dynamic(() => import('../../components/BarcodeScannerModal'), {
+  ssr: false,
+  loading: () => (
+    <div
+      style={{
+        padding: '48px',
+        textAlign: 'center',
+        fontWeight: 800,
+        color: 'var(--md-sys-color-on-surface-variant)'
+      }}
+    >
+      جاري تحميل محطة مسح الباركود...
+    </div>
+  )
+});
 
 function ScannerScreenContent() {
   const searchParams = useSearchParams();

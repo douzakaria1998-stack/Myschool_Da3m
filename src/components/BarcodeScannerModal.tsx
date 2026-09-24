@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
-import { StudentRecord, GroupSheet, QueuedReceipt, DiscountType, AttendanceStatus } from '../types';
+import { StudentRecord, GroupSheet, QueuedReceipt, DiscountType, AttendanceStatus, CoveringMatchResult } from '../types';
 import {
   Scan,
   X,
@@ -21,6 +21,7 @@ import {
   Sparkles,
   Layers,
   ChevronDown,
+  FolderPlus,
   Plus,
   Trash2,
   UserPlus,
@@ -48,11 +49,14 @@ import {
   ActiveGroupDetectionResult,
   formatGroupTime,
   getTodayArabicDayName,
-  getDefaultSessionIndex
+  getDefaultSessionIndex,
+  findCoveringMatch,
+  normalizeSubjectName
 } from '../utils/sessionUtils';
 import Link from 'next/link';
 import { getBarcodeCandidates, normalizeArabicName, normalizeScannedBarcode } from '../utils/barcodeUtils';
 import { recordScanToLog, getScanLog } from '../utils/scanLogger';
+import AddGroupModal from './AddGroupModal';
 
 export interface PendingCoverRequest {
   id: string;
@@ -62,6 +66,7 @@ export interface PendingCoverRequest {
   targetActiveGroupId: string;
   sessionIdx: number;
   time: string;
+  coveringMatch?: CoveringMatchResult;
 }
 
 interface Props {
@@ -120,7 +125,17 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
   );
 
   // Groups dismissed for today to avoid re-appearing on schedule auto-detect
-  const [dismissedGroupIds, setDismissedGroupIds] = useState<string[]>(() => loadDismissedGroupIds());
+  const [dismissedGroupIds, setDismissedGroupIds] = useState<string[]>([]);
+  const [isMounted, setIsMounted] = useState<boolean>(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+    const initialDismissed = loadDismissedGroupIds();
+    if (initialDismissed.length > 0) {
+      setDismissedGroupIds(initialDismissed);
+      setActiveGroups((prev) => prev.filter((g) => !initialDismissed.includes(g.groupId)));
+    }
+  }, []);
 
   // Group pending removal confirmation
   const [groupToRemove, setGroupToRemove] = useState<{
@@ -136,17 +151,14 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
 
   // Active Groups configuration
   const [activeGroups, setActiveGroups] = useState<{ groupId: string; sessionIndex: number }[]>(() => {
-    const initialDismissed = loadDismissedGroupIds();
     const initialDetect = detectCurrentActiveGroupAndSession(data.groupData, data.groups, new Date());
     if (initialDetect.matchingGroups.length > 0) {
-      return initialDetect.matchingGroups
-        .filter((m) => !initialDismissed.includes(m.group.groupId))
-        .map((m) => ({
-          groupId: m.group.groupId,
-          sessionIndex: m.sessionIndex
-        }));
+      return initialDetect.matchingGroups.map((m) => ({
+        groupId: m.group.groupId,
+        sessionIndex: m.sessionIndex
+      }));
     }
-    if (initialDetect.activeGroup && !initialDismissed.includes(initialDetect.activeGroup.groupId)) {
+    if (initialDetect.activeGroup) {
       return [{ groupId: initialDetect.activeGroup.groupId, sessionIndex: initialDetect.activeSessionIndex }];
     }
     return [];
@@ -158,6 +170,13 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
   const [newCoverGroupId, setNewCoverGroupId] = useState<string>('');
   const [newCoverGroupSessionIdx, setNewCoverGroupSessionIdx] = useState<number>(0);
 
+  // Station Group Add Modal & Create New Group Modal
+  const [showAddStationGroupModal, setShowAddStationGroupModal] = useState(false);
+  const [stationSelectedGid, setStationSelectedGid] = useState<string>('');
+  const [stationSelectedSessionIdx, setStationSelectedSessionIdx] = useState<number>(0);
+  const [stationIsCovering, setStationIsCovering] = useState<boolean>(false);
+  const [isAddGroupModalOpen, setIsAddGroupModalOpen] = useState<boolean>(false);
+
   // Recent scans live history list (on the Right side)
   const [recentScans, setRecentScans] = useState<
     Array<{
@@ -165,7 +184,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       studentName: string;
       groupId: string;
       sessionIndex: number;
-      status: 'P' | 'M' | 'DEBT' | 'COVER_REQ';
+      status: 'P' | 'M' | 'C' | 'DEBT' | 'COVER_REQ';
       debt?: number;
       time: string;
     }>
@@ -191,6 +210,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       time: string;
     }>
   >([]);
+  const [debtorCustomAmounts, setDebtorCustomAmounts] = useState<Record<string, string>>({});
 
   // Primary active group helper
   const primaryActive = activeGroups[0] || null;
@@ -313,6 +333,27 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     setShowAddCoverGroupModal(false);
   };
 
+  // Add or activate group in the scanner station handler
+  const handleConfirmAddStationGroup = () => {
+    const gid = stationSelectedGid || data.groups[0]?.id;
+    if (!gid) return;
+    if (dismissedGroupIds.includes(gid)) {
+      const nextDismissed = dismissedGroupIds.filter((id) => id !== gid);
+      setDismissedGroupIds(nextDismissed);
+      saveDismissedGroupIds(nextDismissed);
+    }
+    if (stationIsCovering) {
+      setCoveringGroupIds((prev) => Array.from(new Set([...prev, gid])));
+    }
+    setActiveGroups((prev) => {
+      if (prev.some((g) => g.groupId === gid)) {
+        return prev.map((g) => (g.groupId === gid ? { ...g, sessionIndex: stationSelectedSessionIdx } : g));
+      }
+      return [...prev, { groupId: gid, sessionIndex: stationSelectedSessionIdx }];
+    });
+    setShowAddStationGroupModal(false);
+  };
+
   // Periodic re-check of active schedule every 20 seconds
   useEffect(() => {
     const checkSchedule = () => {
@@ -420,6 +461,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
   const [changeSearchQuery, setChangeSearchQuery] = useState<string>('');
   const [changeSelectedStudent, setChangeSelectedStudent] = useState<{ student: StudentRecord; fromGroupId: string } | null>(null);
   const [changeTargetGroupId, setChangeTargetGroupId] = useState<string>('');
+  const [changeTargetSessionIdx, setChangeTargetSessionIdx] = useState<number>(0);
   const [changeSuccessMsg, setChangeSuccessMsg] = useState<string | null>(null);
 
   // Tab: Covering Student Attendance State
@@ -855,14 +897,43 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       const targetGid = currentActiveGroups[0]?.groupId || primaryGid;
       const targetSession = currentActiveGroups[0]?.sessionIndex ?? activeSessionIdx;
 
+      // Execute Covering & Group Selection Priority:
+      // Priority 1: Subject -> Active Group -> Session Number
+      // Priority 2: Subject -> Last Group -> Missed Session -> Session Number
+      // Priority 3: New Student (N)
+      const coveringMatch = findCoveringMatch(
+        result.student,
+        targetGid,
+        targetSession,
+        data.groups,
+        data.groupData
+      );
+
+      const targetGroupObj = data.groupData[targetGid];
+      const targetSubject = targetGroupObj?.subject || '';
+      const matchedSourceGid = coveringMatch.matchedGroup?.groupId || result.studentEnrolledGroups[0] || result.homeGroupId;
+
+      // Ensure student record is the one from the source group (matchedSourceGid), NOT an arbitrary group!
+      const sourceGroupSheet = data.groupData[matchedSourceGid];
+      const sourceStudentRec =
+        coveringMatch.matchedStudent ||
+        sourceGroupSheet?.students.find(
+          (s) =>
+            !isSummaryRow(s, matchedSourceGid) &&
+            ((result.student.barcode && s.barcode && s.barcode.trim().toUpperCase() === result.student.barcode.trim().toUpperCase()) ||
+              normalizeArabicName(s.name) === normalizeArabicName(result.student.name))
+        ) ||
+        result.student;
+
       const newCoverReq: PendingCoverRequest = {
         id: `${Date.now()}-${Math.random()}`,
-        student: result.student,
-        homeGroupId: result.studentEnrolledGroups[0] || result.homeGroupId,
+        student: sourceStudentRec,
+        homeGroupId: matchedSourceGid,
         studentEnrolledGroups: result.studentEnrolledGroups,
         targetActiveGroupId: targetGid,
         sessionIdx: targetSession,
-        time: nowStr
+        time: nowStr,
+        coveringMatch
       };
 
       setPendingCoverRequests((prev) => {
@@ -877,11 +948,17 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       playWarningAlert();
 
       // Short flash notice on right
+      const statusNotice = coveringMatch.isNewStudent
+        ? `تلميذ مسجل بالمركز (مادة جديدة: ${targetSubject})`
+        : coveringMatch.canCover
+        ? `طلب تعويض (${targetSubject}) من فوج ${matchedSourceGid}`
+        : `تنبيه تعويض: ${coveringMatch.message}`;
+
       setFlashSuccess({
         name: result.student.name,
-        statusText: `تلميذ من فوج آخر (${result.studentEnrolledGroups[0] || result.homeGroupId})`,
-        details: `طلب التعويض / النقل معروض في اللوحة اليسرى 👈`,
-        isWarning: true
+        statusText: statusNotice,
+        details: `التفاصيل والإجراءات معروضة في اللوحة اليسرى 👈`,
+        isWarning: !coveringMatch.canCover
       });
 
       // Add to recent scans log on right
@@ -1032,7 +1109,10 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
 
     // CRITICAL: Always record attendance immediately upon scan so student walks into class!
     if (isCover && originalGid) {
-      recordCoverAttendance(groupId, originalGid, student.rowId, sessionIdx);
+      recordCoverAttendance(groupId, originalGid, student.rowId, sessionIdx, undefined, undefined, {
+        name: student.name,
+        barcode: student.barcode
+      });
     } else {
       updateAttendance(groupId, student.rowId, sessionIdx, 'P');
     }
@@ -1220,42 +1300,80 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
 
   // Choice 1: Temporary Covering (stays in original group, credited with 'C')
   const handleAcceptTemporaryCover = (req: PendingCoverRequest) => {
-    const { student, homeGroupId, targetActiveGroupId, sessionIdx } = req;
+    const { student, targetActiveGroupId, sessionIdx } = req;
+    const sourceGid = req.coveringMatch?.matchedGroup?.groupId || req.homeGroupId;
+    const sourceSessionIdx = req.coveringMatch?.matchedSessionIdx ?? sessionIdx;
 
-    recordCoverAttendance(targetActiveGroupId, homeGroupId, student.rowId, sessionIdx);
+    // Resolve student record directly in sourceGid to be 100% certain of the correct rowId and identity
+    const sourceGroup = data.groupData[sourceGid];
+    const targetStudentInSourceGroup =
+      req.coveringMatch?.matchedStudent ||
+      sourceGroup?.students.find(
+        (s) =>
+          !isSummaryRow(s, sourceGid) &&
+          ((student.barcode && s.barcode && s.barcode.trim().toUpperCase() === student.barcode.trim().toUpperCase()) ||
+            normalizeArabicName(s.name) === normalizeArabicName(student.name))
+      ) ||
+      student;
+
+    recordCoverAttendance(
+      targetActiveGroupId,
+      sourceGid,
+      targetStudentInSourceGroup.rowId,
+      sessionIdx,
+      undefined,
+      sourceSessionIdx,
+      { name: student.name, barcode: student.barcode }
+    );
     playSuccessChime();
 
     // Update status in recent scans
     setRecentScans((prev) =>
       prev.map((s) =>
         s.studentName === student.name && s.groupId === targetActiveGroupId
-          ? { ...s, status: 'M' }
+          ? { ...s, status: 'C' }
           : s
       )
     );
 
     setFlashSuccess({
       name: student.name,
-      statusText: `تم تسجيل حضور التعويض في فوجه الأصلي (${homeGroupId}) ✓`,
-      details: `يحضر الآن كتعويض في فوج ${targetActiveGroupId} (الحصة ${sessionIdx + 1})`
+      statusText: `تم تسجيل حضور التعويض في فوجه الأصلي (${sourceGid} - الحصة ${sourceSessionIdx + 1}) ✓`,
+      details: `حضر اليوم كتعويض مع فوج ${targetActiveGroupId} (دون كتابة اسمه في الفوج)`
     });
 
     setPendingCoverRequests((prev) => prev.filter((r) => r.id !== req.id));
     setTimeout(() => setFlashSuccess(null), 2500);
   };
 
-  // Choice 2: Permanent Transfer (transfers student to active group permanently)
+  // Choice 2: Permanent Transfer (transfers student to active group, preserves old as CH, new as N)
   const handleAcceptPermanentTransfer = (req: PendingCoverRequest) => {
     const { student, homeGroupId, targetActiveGroupId, sessionIdx } = req;
 
-    const ok = transferStudent(homeGroupId, targetActiveGroupId, student.rowId);
+    // Resolve student record directly in homeGroupId
+    const homeGroup = data.groupData[homeGroupId];
+    const targetStudentInHomeGroup =
+      req.coveringMatch?.matchedStudent ||
+      homeGroup?.students.find(
+        (s) =>
+          !isSummaryRow(s, homeGroupId) &&
+          ((student.barcode && s.barcode && s.barcode.trim().toUpperCase() === student.barcode.trim().toUpperCase()) ||
+            normalizeArabicName(s.name) === normalizeArabicName(student.name))
+      ) ||
+      student;
+
+    const ok = transferStudent(
+      homeGroupId,
+      targetActiveGroupId,
+      targetStudentInHomeGroup.rowId,
+      sessionIdx,
+      { name: student.name, barcode: student.barcode }
+    );
     if (ok) {
-      // Mark as present 'P' in new group
-      updateAttendance(targetActiveGroupId, student.rowId, sessionIdx, 'P');
       recordScanToLog({
         groupId: targetActiveGroupId,
         sessionIndex: sessionIdx,
-        studentRowId: student.rowId,
+        studentRowId: targetStudentInHomeGroup.rowId,
         studentName: student.name,
         barcode: student.barcode || '',
         dateStr: new Date().toISOString().split('T')[0],
@@ -1275,13 +1393,51 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       setFlashSuccess({
         name: student.name,
         statusText: `تم تحويل التلميذ نهائياً إلى فوج ${targetActiveGroupId} ✓`,
-        details: `تم نقله من ${homeGroupId} وتسجيله حاضراً في الحصة ${sessionIdx + 1}`
+        details: `حُفظت بيانات ${homeGroupId} السابقة وسُجل كـ (N) في الحصة ${sessionIdx + 1}`
       });
 
       setPendingCoverRequests((prev) => prev.filter((r) => r.id !== req.id));
       setTimeout(() => setFlashSuccess(null), 2500);
     } else {
       alert('تعذر إتمام عملية النقل');
+    }
+  };
+
+  // Choice 3: Enroll as New Student (N) in this group
+  const handleAcceptNewStudentCover = (req: PendingCoverRequest) => {
+    const { student, targetActiveGroupId, sessionIdx } = req;
+    const targetGroup = data.groupData[targetActiveGroupId];
+    if (!targetGroup) return;
+
+    const newStudent = addStudent(targetActiveGroupId, {
+      name: student.name,
+      phone: student.phone,
+      discount: student.discount,
+      barcode: student.barcode
+    });
+
+    if (newStudent) {
+      updateAttendance(targetActiveGroupId, newStudent.rowId, sessionIdx, 'N');
+      playSuccessChime();
+
+      setRecentScans((prev) =>
+        prev.map((s) =>
+          s.studentName === student.name && s.groupId === targetActiveGroupId
+            ? { ...s, status: 'P' }
+            : s
+        )
+      );
+
+      setFlashSuccess({
+        name: student.name,
+        statusText: `تم تسجيل التلميذ كـ (تلميذ جديد N) في فوج ${targetActiveGroupId} ✓`,
+        details: `مادة ${targetGroup.subject} • الحصة ${sessionIdx + 1}`
+      });
+
+      setPendingCoverRequests((prev) => prev.filter((r) => r.id !== req.id));
+      setTimeout(() => setFlashSuccess(null), 2500);
+    } else {
+      alert('تعذر إضافة التلميذ كجديد');
     }
   };
 
@@ -1323,8 +1479,8 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     }, 2000);
 
     const { student, groupId, sessionIdx, debt } = debtorItem;
-    const amountNum = amount !== undefined ? amount : debt;
-    if (amountNum <= 0) return;
+    const amountNum = amount !== undefined ? Number(amount) : debt;
+    if (amountNum <= 0 || isNaN(amountNum)) return;
 
     recordAttendanceAndPayment(groupId, student.rowId, sessionIdx, 'P', amountNum);
     playSuccessChime();
@@ -1334,7 +1490,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     const dateStr = now.toLocaleDateString('ar-DZ');
     const timeStr = now.toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' });
     const targetGroup = data.groupData[groupId];
-    const totalFee = student.fee || 2500;
+    const totalFee = student.fee || (debtorItem.debt + (student.totalReceived || 0)) || 2500;
     const totalPaid = (student.totalReceived || 0) + amountNum;
     const balance = totalPaid - totalFee;
 
@@ -1380,17 +1536,30 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       });
     }
 
-    // Remove from pending debtors
+    // Remove from pending debtors and clean up custom amount state
     setPendingDebtors((prev) => prev.filter((d) => d.id !== debtorItem.id));
+    setDebtorCustomAmounts((prev) => {
+      const next = { ...prev };
+      delete next[debtorItem.id];
+      return next;
+    });
 
     // Update status in recent scans
+    const remainingDebt = Math.max(0, debtorItem.debt - amountNum);
     setRecentScans((prev) =>
-      prev.map((s) => (s.studentName === student.name && s.groupId === groupId ? { ...s, status: 'P', debt: 0 } : s))
+      prev.map((s) =>
+        s.studentName === student.name && s.groupId === groupId
+          ? { ...s, status: remainingDebt > 0 ? 'DEBT' : 'P', debt: remainingDebt }
+          : s
+      )
     );
 
     setFlashSuccess({
       name: student.name,
-      statusText: `تم تسديد ${amountNum.toLocaleString()} دج بنجاح ✓`,
+      statusText:
+        remainingDebt > 0
+          ? `تم تسديد ${amountNum.toLocaleString()} دج (متبقي كدين: ${remainingDebt.toLocaleString()} دج) بنجاح ✓`
+          : `تم تسديد ${amountNum.toLocaleString()} دج بنجاح ✓`,
       details: printNow ? 'تمت طباعة الوصل الحراري' : 'أُضيف لطابور الطباعة'
     });
 
@@ -1400,6 +1569,11 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
   // Debtor Quick Action: Confirm entry as debtor (dismiss from waiting queue, keep attendance)
   const handleDismissDebtorFromQueue = (debtorId: string) => {
     setPendingDebtors((prev) => prev.filter((d) => d.id !== debtorId));
+    setDebtorCustomAmounts((prev) => {
+      const next = { ...prev };
+      delete next[debtorId];
+      return next;
+    });
   };
 
   // Debtor Action 3: Cancel debtor attendance - reverses attendance (does NOT take attendance)
@@ -1411,6 +1585,11 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
 
     // Remove from pending debtors queue
     setPendingDebtors((prev) => prev.filter((d) => d.id !== debtorItem.id));
+    setDebtorCustomAmounts((prev) => {
+      const next = { ...prev };
+      delete next[debtorItem.id];
+      return next;
+    });
 
     // Remove from recent scans
     setRecentScans((prev) =>
@@ -1564,10 +1743,13 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       return;
     }
 
-    const success = transferStudent(fromGroupId, targetGid, student.rowId);
+    const success = transferStudent(fromGroupId, targetGid, student.rowId, changeTargetSessionIdx, {
+      name: student.name,
+      barcode: student.barcode
+    });
     if (success) {
       playSuccessChime();
-      setChangeSuccessMsg(`تم نقل التلميذ "${student.name}" من فوج ${fromGroupId} إلى فوج ${targetGid} بنجاح ✓`);
+      setChangeSuccessMsg(`تم نقل التلميذ "${student.name}" من فوج ${fromGroupId} إلى فوج ${targetGid} بنجاح (سُجل كـ N وحفظت بيانات الفوج القديم كـ CH) ✓`);
       setChangeSelectedStudent(null);
       setChangeSearchQuery('');
       setChangeTargetGroupId('');
@@ -1588,7 +1770,10 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     }
 
     const payAmt = parseFloat(coverAmountInput) || 0;
-    recordCoverAttendance(targetGid, originalGroupId, student.rowId, coverSessionIdx, payAmt);
+    recordCoverAttendance(targetGid, originalGroupId, student.rowId, coverSessionIdx, payAmt, undefined, {
+      name: student.name,
+      barcode: student.barcode
+    });
     recordScanToLog({
       groupId: targetGid,
       sessionIndex: coverSessionIdx,
@@ -1608,14 +1793,14 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
         studentName: student.name,
         groupId: targetGid,
         sessionIndex: coverSessionIdx,
-        status: 'M',
+        status: 'C',
         time: new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' })
       },
       ...prev.slice(0, 9)
     ]);
 
     setCoverSuccessMsg(
-      `تم تسجيل حضور التعويض للتلميذ "${student.name}" في فوجه الأصلي ${originalGroupId} وفوج ${targetGid} بنجاح ✓`
+      `تم تسجيل حضور التعويض للتلميذ "${student.name}" في فوجه الأصلي (${originalGroupId} - الحصة ${coverSessionIdx + 1}) بنجاح دون إضافة اسمه لفوج ${targetGid} ✓`
     );
     setCoverSelectedStudent(null);
     setCoverSearchQuery('');
@@ -1735,6 +1920,63 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {/* Button 1: Add/Activate Group in Station */}
+          <button
+            type="button"
+            onClick={() => {
+              const existingGids = new Set(activeGroups.map((g) => g.groupId));
+              const available = data.groups.find((g) => !existingGids.has(g.id)) || data.groups[0];
+              const gid = available?.id || '';
+              setStationSelectedGid(gid);
+              const gSheet = data.groupData[gid];
+              setStationSelectedSessionIdx(gSheet ? getDefaultSessionIndex(gSheet, new Date()) : 0);
+              setStationIsCovering(false);
+              setShowAddStationGroupModal(true);
+            }}
+            className="m3-btn-text"
+            style={{
+              fontSize: '0.72rem',
+              fontWeight: 800,
+              padding: '2px 8px',
+              borderRadius: '4px',
+              backgroundColor: '#eff6ff',
+              border: '1px solid #bfdbfe',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              color: '#1d4ed8'
+            }}
+            title="إضافة أو تفعيل فوج في محطة المسح"
+          >
+            <Plus size={13} />
+            <span>+ إضافة فوج للمحطة</span>
+          </button>
+
+          {/* Button 2: Create Brand New Group */}
+          <button
+            type="button"
+            onClick={() => setIsAddGroupModalOpen(true)}
+            className="m3-btn-text"
+            style={{
+              fontSize: '0.72rem',
+              fontWeight: 800,
+              padding: '2px 8px',
+              borderRadius: '4px',
+              backgroundColor: '#f0fdf4',
+              border: '1px solid #bbf7d0',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              color: '#15803d'
+            }}
+            title="إنشاء فوج دراسي جديد في المركز"
+          >
+            <FolderPlus size={13} />
+            <span>+ إنشاء فوج جديد</span>
+          </button>
+
           <button
             type="button"
             onClick={() => syncNow()}
@@ -1778,7 +2020,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
             <span>استعادة من السجل المحلي</span>
           </button>
 
-          {dismissedGroupIds.length > 0 && (
+          {isMounted && dismissedGroupIds.length > 0 && (
             <button
               type="button"
               onClick={handleRestoreDismissedGroups}
@@ -2052,6 +2294,50 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                 </div>
               );
             })}
+
+            {/* Quick Add Another Group Card in Grid */}
+            <button
+              type="button"
+              onClick={() => {
+                const existingGids = new Set(activeGroups.map((g) => g.groupId));
+                const available = data.groups.find((g) => !existingGids.has(g.id)) || data.groups[0];
+                const gid = available?.id || '';
+                setStationSelectedGid(gid);
+                const gSheet = data.groupData[gid];
+                setStationSelectedSessionIdx(gSheet ? getDefaultSessionIndex(gSheet, new Date()) : 0);
+                setStationIsCovering(false);
+                setShowAddStationGroupModal(true);
+              }}
+              style={{
+                backgroundColor: 'var(--md-sys-color-surface-container-lowest)',
+                borderRadius: '8px',
+                border: '2px dashed var(--md-sys-color-outline-variant)',
+                padding: '12px 10px',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                cursor: 'pointer',
+                color: 'var(--md-sys-color-primary)',
+                fontWeight: 800,
+                fontSize: '0.78rem',
+                minHeight: '88px',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = 'var(--md-sys-color-primary)';
+                e.currentTarget.style.backgroundColor = 'var(--md-sys-color-primary-container)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = 'var(--md-sys-color-outline-variant)';
+                e.currentTarget.style.backgroundColor = 'var(--md-sys-color-surface-container-lowest)';
+              }}
+              title="إضافة وتفعيل فوج آخر في محطة المسح"
+            >
+              <Plus size={20} />
+              <span>+ إضافة فوج للمحطة</span>
+            </button>
           </div>
         ) : (
           <div
@@ -2067,7 +2353,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
               <Clock size={16} />
               <span>لا يوجد أي فوج دراسي في هذا الوقت</span>
             </div>
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
               <button
                 type="button"
                 onClick={() => {
@@ -2087,6 +2373,15 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                 style={{ fontSize: '0.72rem', fontWeight: 700 }}
               >
                 + تفعيل فوج يدوياً
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsAddGroupModalOpen(true)}
+                className="m3-btn m3-btn-sm"
+                style={{ backgroundColor: '#15803d', color: '#fff', fontSize: '0.72rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '4px' }}
+              >
+                <FolderPlus size={13} />
+                <span>+ إنشاء فوج جديد بالمركز</span>
               </button>
             </div>
           </div>
@@ -2302,7 +2597,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                       حاضر ✓
                     </span>
                   )}
-                  {scan.status === 'M' && (
+                  {(scan.status === 'M' || scan.status === 'C') && (
                     <span style={{ backgroundColor: '#fef3c7', color: '#b45309', padding: '1px 6px', borderRadius: '4px', fontWeight: 800, fontSize: '0.68rem' }}>
                       تعويض 🔄
                     </span>
@@ -2507,97 +2802,147 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                     </span>
                   </div>
 
-                  {pendingCoverRequests.map((req) => (
-                    <div
-                      key={req.id}
-                      style={{
-                        backgroundColor: '#fffbeb',
-                        border: '1px solid #f59e0b',
-                        borderRadius: '8px',
-                        padding: '8px 12px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: '8px',
-                        flexWrap: 'wrap',
-                        boxShadow: '0 2px 6px rgba(245, 158, 11, 0.1)'
-                      }}
-                    >
-                      {/* Name and Origin Info */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                        <strong style={{ fontSize: '0.92rem', color: '#92400e' }}>
-                          {req.student.name}
-                        </strong>
-                        <span style={{ fontSize: '0.72rem', color: '#78350f', backgroundColor: '#fde68a', padding: '1px 6px', borderRadius: '4px', fontWeight: 700 }}>
-                          فوج {req.homeGroupId}
-                        </span>
-                        <span style={{ fontSize: '0.72rem', color: '#92400e' }}>
-                          ➔ يحضر في: {req.targetActiveGroupId}
-                        </span>
+                  {pendingCoverRequests.map((req) => {
+                    const match = req.coveringMatch;
+                    const targetGroup = data.groupData[req.targetActiveGroupId];
+                    const targetSubj = targetGroup?.subject || '';
+                    const canCover = match ? match.canCover : true;
+                    const isNewStudent = match?.isNewStudent;
+                    const hasError = match && !match.canCover && !match.isNewStudent;
+
+                    return (
+                      <div
+                        key={req.id}
+                        style={{
+                          backgroundColor: hasError ? '#fef2f2' : '#fffbeb',
+                          border: `1.5px solid ${hasError ? '#f87171' : canCover ? '#f59e0b' : '#3b82f6'}`,
+                          borderRadius: '8px',
+                          padding: '10px 12px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '8px',
+                          boxShadow: '0 2px 6px rgba(0, 0, 0, 0.06)'
+                        }}
+                      >
+                        {/* Header: Name, Subject, Group Info */}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', flexWrap: 'wrap' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            <strong style={{ fontSize: '0.94rem', color: '#1e293b' }}>
+                              {req.student.name}
+                            </strong>
+                            <span style={{ fontSize: '0.72rem', color: '#0f766e', backgroundColor: '#ccfbf1', padding: '1px 6px', borderRadius: '4px', fontWeight: 800 }}>
+                              {targetSubj}
+                            </span>
+                            <span style={{ fontSize: '0.72rem', color: '#78350f', backgroundColor: '#fde68a', padding: '1px 6px', borderRadius: '4px', fontWeight: 700 }}>
+                              الأصل: {match?.matchedGroup?.groupId || req.homeGroupId}
+                            </span>
+                            <span style={{ fontSize: '0.72rem', color: '#4338ca', fontWeight: 700 }}>
+                              ➔ يحضر في: {req.targetActiveGroupId} (ح {req.sessionIdx + 1})
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Match Status Explanation Message */}
+                        {match && (
+                          <div
+                            style={{
+                              fontSize: '0.76rem',
+                              fontWeight: 700,
+                              padding: '5px 8px',
+                              borderRadius: '4px',
+                              backgroundColor: hasError ? '#fee2e2' : canCover ? '#fef3c7' : '#e0f2fe',
+                              color: hasError ? '#b91c1c' : canCover ? '#92400e' : '#0369a1',
+                              border: `1px solid ${hasError ? '#fca5a5' : canCover ? '#fde68a' : '#bae6fd'}`
+                            }}
+                          >
+                            {match.message}
+                          </div>
+                        )}
+
+                        {/* Action Buttons */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                          {canCover && (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmActionModal({ type: 'cover', req })}
+                              className="m3-btn m3-btn-sm"
+                              style={{
+                                backgroundColor: '#d97706',
+                                color: '#ffffff',
+                                fontSize: '0.76rem',
+                                padding: '3px 10px',
+                                height: '28px',
+                                fontWeight: 800,
+                                borderRadius: '6px'
+                              }}
+                              title="تسجيل كحصة تعويض في الفوج الأصلي"
+                            >
+                              🔄 تسجيل تعويض
+                            </button>
+                          )}
+
+                          {isNewStudent && (
+                            <button
+                              type="button"
+                              onClick={() => handleAcceptNewStudentCover(req)}
+                              className="m3-btn m3-btn-sm"
+                              style={{
+                                backgroundColor: '#059669',
+                                color: '#ffffff',
+                                fontSize: '0.76rem',
+                                padding: '3px 10px',
+                                height: '28px',
+                                fontWeight: 800,
+                                borderRadius: '6px'
+                              }}
+                              title="تسجيل كتلميذ جديد (N) في هذا الفوج"
+                            >
+                              ➕ تسجيل كجديد (N)
+                            </button>
+                          )}
+
+                          {/* Always Show Change Student Group option */}
+                          <button
+                            type="button"
+                            onClick={() => setConfirmActionModal({ type: 'transfer', req })}
+                            className="m3-btn m3-btn-sm"
+                            style={{
+                              backgroundColor: '#4f46e5',
+                              color: '#ffffff',
+                              fontSize: '0.76rem',
+                              padding: '3px 10px',
+                              height: '28px',
+                              fontWeight: 800,
+                              borderRadius: '6px'
+                            }}
+                            title="نقل التلميذ نهائياً لهذا الفوج (CH في القديم / N في الجديد)"
+                          >
+                            🔀 نقل دائم (CH/N)
+                          </button>
+
+                          {/* Cancel Button */}
+                          <button
+                            type="button"
+                            onClick={() => handleCancelCoverRequest(req.id)}
+                            className="m3-btn m3-btn-sm"
+                            style={{
+                              backgroundColor: '#ffffff',
+                              color: '#64748b',
+                              border: '1px solid #cbd5e1',
+                              fontSize: '0.74rem',
+                              padding: '3px 8px',
+                              height: '28px',
+                              fontWeight: 700,
+                              borderRadius: '6px'
+                            }}
+                            title="إلغاء الطلب وعدم احتساب الحضور"
+                          >
+                            ✕ إلغاء
+                          </button>
+                        </div>
                       </div>
-
-                      {/* Compact Action Buttons */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                        {/* Cover Button */}
-                        <button
-                          type="button"
-                          onClick={() => setConfirmActionModal({ type: 'cover', req })}
-                          className="m3-btn m3-btn-sm"
-                          style={{
-                            backgroundColor: '#d97706',
-                            color: '#ffffff',
-                            fontSize: '0.76rem',
-                            padding: '3px 10px',
-                            height: '28px',
-                            fontWeight: 800,
-                            borderRadius: '6px'
-                          }}
-                          title="تسجيل كحصة تعويض في الفوج الأصلي"
-                        >
-                          🔄 تعويض
-                        </button>
-
-                        {/* Move Button */}
-                        <button
-                          type="button"
-                          onClick={() => setConfirmActionModal({ type: 'transfer', req })}
-                          className="m3-btn m3-btn-sm"
-                          style={{
-                            backgroundColor: '#4f46e5',
-                            color: '#ffffff',
-                            fontSize: '0.76rem',
-                            padding: '3px 10px',
-                            height: '28px',
-                            fontWeight: 800,
-                            borderRadius: '6px'
-                          }}
-                          title="نقل التلميذ نهائياً لهذا الفوج"
-                        >
-                          🔀 نقل
-                        </button>
-
-                        {/* Cancel Button - does NOT take attendance */}
-                        <button
-                          type="button"
-                          onClick={() => handleCancelCoverRequest(req.id)}
-                          className="m3-btn m3-btn-sm"
-                          style={{
-                            backgroundColor: '#ffffff',
-                            color: '#92400e',
-                            border: '1px solid #d97706',
-                            fontSize: '0.74rem',
-                            padding: '3px 8px',
-                            height: '28px',
-                            fontWeight: 700,
-                            borderRadius: '6px'
-                          }}
-                          title="إلغاء الطلب وعدم احتساب الحضور"
-                        >
-                          ✕ إلغاء
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 
@@ -2613,7 +2958,10 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                   {pendingDebtors.length > 0 && (
                     <button
                       type="button"
-                      onClick={() => setPendingDebtors([])}
+                      onClick={() => {
+                        setPendingDebtors([]);
+                        setDebtorCustomAmounts({});
+                      }}
                       className="m3-btn-text"
                       style={{ fontSize: '0.68rem', color: '#b91c1c' }}
                     >
@@ -2642,115 +2990,257 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                   </div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    {pendingDebtors.map((debtor, idx) => (
-                      <div
-                        key={debtor.id}
-                        style={{
-                          backgroundColor: '#fef2f2',
-                          border: '1px solid #fecaca',
-                          borderRadius: '8px',
-                          padding: '8px 12px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          gap: '8px',
-                          flexWrap: 'wrap',
-                          boxShadow: '0 1px 3px rgba(239, 68, 68, 0.08)'
-                        }}
-                      >
-                        {/* Student Name and Debt Amount */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                          <span
-                            style={{
-                              width: '20px',
-                              height: '20px',
-                              borderRadius: '50%',
-                              backgroundColor: '#b91c1c',
-                              color: '#fff',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              fontSize: '0.68rem',
-                              fontWeight: 900
-                            }}
-                          >
-                            {idx + 1}
-                          </span>
-                          <strong style={{ fontSize: '0.92rem', color: '#7f1d1d' }}>
-                            {debtor.student.name}
-                          </strong>
-                          <span style={{ fontSize: '0.74rem', color: '#991b1b', backgroundColor: '#fee2e2', padding: '1px 6px', borderRadius: '4px', fontWeight: 700 }}>
-                            المبلغ المطلوب: {debtor.debt.toLocaleString()} دج
-                          </span>
+                    {pendingDebtors.map((debtor, idx) => {
+                      const rawAmt = debtorCustomAmounts[debtor.id];
+                      const currentValStr = rawAmt !== undefined ? rawAmt : String(debtor.debt);
+                      const enteredAmount = rawAmt !== undefined ? (Number(rawAmt) || 0) : debtor.debt;
+                      const isPartial = enteredAmount > 0 && enteredAmount < debtor.debt;
+                      const remainingDebt = Math.max(0, debtor.debt - enteredAmount);
+                      const halfDebt = Math.round(debtor.debt / 2);
+
+                      return (
+                        <div
+                          key={debtor.id}
+                          style={{
+                            backgroundColor: '#fef2f2',
+                            border: '1px solid #fecaca',
+                            borderRadius: '8px',
+                            padding: '8px 12px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '8px',
+                            boxShadow: '0 1px 3px rgba(239, 68, 68, 0.08)'
+                          }}
+                        >
+                          {/* Row 1: Student info and required amount / remaining debt */}
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span
+                                style={{
+                                  width: '20px',
+                                  height: '20px',
+                                  borderRadius: '50%',
+                                  backgroundColor: '#b91c1c',
+                                  color: '#fff',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: '0.68rem',
+                                  fontWeight: 900
+                                }}
+                              >
+                                {idx + 1}
+                              </span>
+                              <strong style={{ fontSize: '0.92rem', color: '#7f1d1d' }}>
+                                {debtor.student.name}
+                              </strong>
+                              <span style={{ fontSize: '0.74rem', color: '#991b1b', backgroundColor: '#fee2e2', padding: '1px 6px', borderRadius: '4px', fontWeight: 700 }}>
+                                المبلغ المطلوب: {debtor.debt.toLocaleString()} دج
+                              </span>
+                            </div>
+
+                            {/* Badge if paying partial */}
+                            {isPartial && (
+                              <span
+                                style={{
+                                  fontSize: '0.72rem',
+                                  color: '#b45309',
+                                  backgroundColor: '#fef3c7',
+                                  border: '1px solid #fde68a',
+                                  padding: '1px 6px',
+                                  borderRadius: '4px',
+                                  fontWeight: 800
+                                }}
+                              >
+                                متبقي كدين: {remainingDebt.toLocaleString()} دج
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Row 2: Amount input + Quick Presets + Action Buttons */}
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', flexWrap: 'wrap' }}>
+                            {/* Amount Input & Shortcuts */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
+                              {/* Custom Amount Field */}
+                              <div
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  backgroundColor: '#fff',
+                                  border: '1.5px solid #16a34a',
+                                  borderRadius: '6px',
+                                  padding: '1px 6px',
+                                  height: '28px'
+                                }}
+                              >
+                                <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#15803d', marginLeft: '4px' }}>
+                                  المبلغ:
+                                </span>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  step="100"
+                                  value={currentValStr}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setDebtorCustomAmounts((prev) => ({ ...prev, [debtor.id]: val }));
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      if (enteredAmount > 0) {
+                                        handleSettleDebtorInQueue(debtor, enteredAmount, true);
+                                      }
+                                    }
+                                  }}
+                                  placeholder={String(debtor.debt)}
+                                  style={{
+                                    width: '74px',
+                                    fontSize: '0.86rem',
+                                    fontWeight: 900,
+                                    color: '#15803d',
+                                    border: 'none',
+                                    outline: 'none',
+                                    background: 'transparent',
+                                    textAlign: 'center',
+                                    direction: 'ltr'
+                                  }}
+                                  title="أدخل المبلغ المستلم واضغط Enter أو زر تسديد"
+                                />
+                                <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#64748b' }}>دج</span>
+                              </div>
+
+                              {/* Shortcut: Half (50%) */}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setDebtorCustomAmounts((prev) => ({
+                                    ...prev,
+                                    [debtor.id]: String(halfDebt)
+                                  }))
+                                }
+                                className="m3-btn m3-btn-sm"
+                                style={{
+                                  backgroundColor: '#fff',
+                                  color: '#0369a1',
+                                  border: '1px solid #bae6fd',
+                                  fontSize: '0.7rem',
+                                  padding: '2px 6px',
+                                  height: '28px',
+                                  fontWeight: 800,
+                                  borderRadius: '6px',
+                                  cursor: 'pointer'
+                                }}
+                                title={`دفع النصف (${halfDebt.toLocaleString()} دج)`}
+                              >
+                                ½ النصف
+                              </button>
+
+                              {/* Shortcut: Full */}
+                              {enteredAmount !== debtor.debt && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setDebtorCustomAmounts((prev) => ({
+                                      ...prev,
+                                      [debtor.id]: String(debtor.debt)
+                                    }))
+                                  }
+                                  className="m3-btn m3-btn-sm"
+                                  style={{
+                                    backgroundColor: '#fff',
+                                    color: '#475569',
+                                    border: '1px solid #cbd5e1',
+                                    fontSize: '0.7rem',
+                                    padding: '2px 6px',
+                                    height: '28px',
+                                    fontWeight: 800,
+                                    borderRadius: '6px',
+                                    cursor: 'pointer'
+                                  }}
+                                  title={`إعادة تعيين لكامل المبلغ (${debtor.debt.toLocaleString()} دج)`}
+                                >
+                                  الكل
+                                </button>
+                              )}
+                            </div>
+
+                            {/* 3 Action Buttons */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
+                              {/* 1. Pay */}
+                              <button
+                                type="button"
+                                disabled={enteredAmount <= 0}
+                                onClick={() => handleSettleDebtorInQueue(debtor, enteredAmount, true)}
+                                className="m3-btn m3-btn-sm"
+                                style={{
+                                  backgroundColor: enteredAmount > 0 ? '#15803d' : '#94a3b8',
+                                  color: '#fff',
+                                  fontSize: '0.74rem',
+                                  padding: '3px 8px',
+                                  height: '28px',
+                                  fontWeight: 800,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '3px',
+                                  borderRadius: '6px',
+                                  cursor: enteredAmount > 0 ? 'pointer' : 'not-allowed',
+                                  boxShadow: enteredAmount > 0 ? '0 1px 2px rgba(21, 128, 61, 0.2)' : 'none'
+                                }}
+                                title={
+                                  enteredAmount > 0
+                                    ? `تسديد ${enteredAmount.toLocaleString()} دج وطباعة الوصل فوراً`
+                                    : 'أدخل مبلغاً أكبر من 0'
+                                }
+                              >
+                                <Printer size={12} />
+                                <span>تسديد ({enteredAmount.toLocaleString()}) 🖨️</span>
+                              </button>
+
+                              {/* 2. Accept without paying (keep attendance) */}
+                              <button
+                                type="button"
+                                onClick={() => handleDismissDebtorFromQueue(debtor.id)}
+                                className="m3-btn m3-btn-sm"
+                                style={{
+                                  backgroundColor: '#fff',
+                                  color: '#334155',
+                                  border: '1px solid #cbd5e1',
+                                  fontSize: '0.72rem',
+                                  padding: '3px 8px',
+                                  height: '28px',
+                                  fontWeight: 800,
+                                  borderRadius: '6px'
+                                }}
+                                title="قبول الدخول كمدين مع تثبيت الحضور"
+                              >
+                                قبول كمدين ✓
+                              </button>
+
+                              {/* 3. Cancel attendance (don't take attendance) */}
+                              <button
+                                type="button"
+                                onClick={() => handleCancelDebtorAttendance(debtor)}
+                                className="m3-btn m3-btn-sm"
+                                style={{
+                                  backgroundColor: '#fff',
+                                  color: '#b91c1c',
+                                  border: '1px solid #fca5a5',
+                                  fontSize: '0.72rem',
+                                  padding: '3px 8px',
+                                  height: '28px',
+                                  fontWeight: 800,
+                                  borderRadius: '6px'
+                                }}
+                                title="إلغاء الحضور وعدم احتسابه نهائياً"
+                              >
+                                ✕ إلغاء الحضور
+                              </button>
+                            </div>
+                          </div>
                         </div>
-
-                        {/* 3 Compact Action Buttons */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                          {/* 1. Pay */}
-                          <button
-                            type="button"
-                            onClick={() => handleSettleDebtorInQueue(debtor, debtor.debt, true)}
-                            className="m3-btn m3-btn-sm"
-                            style={{
-                              backgroundColor: '#15803d',
-                              color: '#fff',
-                              fontSize: '0.74rem',
-                              padding: '3px 8px',
-                              height: '28px',
-                              fontWeight: 800,
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '3px',
-                              borderRadius: '6px'
-                            }}
-                            title="تسديد المبلغ وطباعة الوصل فوراً"
-                          >
-                            <Printer size={12} />
-                            <span>تسديد ({debtor.debt}) 🖨️</span>
-                          </button>
-
-                          {/* 2. Accept without paying (keep attendance) */}
-                          <button
-                            type="button"
-                            onClick={() => handleDismissDebtorFromQueue(debtor.id)}
-                            className="m3-btn m3-btn-sm"
-                            style={{
-                              backgroundColor: '#fff',
-                              color: '#334155',
-                              border: '1px solid #cbd5e1',
-                              fontSize: '0.72rem',
-                              padding: '3px 8px',
-                              height: '28px',
-                              fontWeight: 800,
-                              borderRadius: '6px'
-                            }}
-                            title="قبول الدخول كمدين مع تثبيت الحضور"
-                          >
-                            قبول كمدين ✓
-                          </button>
-
-                          {/* 3. Cancel attendance (don't take attendance) */}
-                          <button
-                            type="button"
-                            onClick={() => handleCancelDebtorAttendance(debtor)}
-                            className="m3-btn m3-btn-sm"
-                            style={{
-                              backgroundColor: '#fff',
-                              color: '#b91c1c',
-                              border: '1px solid #fca5a5',
-                              fontSize: '0.72rem',
-                              padding: '3px 8px',
-                              height: '28px',
-                              fontWeight: 800,
-                              borderRadius: '6px'
-                            }}
-                            title="إلغاء الحضور وعدم احتسابه نهائياً"
-                          >
-                            ✕ إلغاء الحضور
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -3318,7 +3808,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                           color: '#b91c1c'
                         }}
                       >
-                        فوج {changeSelectedStudent.fromGroupId}
+                        فوج {changeSelectedStudent.fromGroupId} ({data.groupData[changeSelectedStudent.fromGroupId]?.subject || ''})
                       </div>
                     </div>
 
@@ -3364,6 +3854,29 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                         );
                       })()}
                     </div>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#166534', marginBottom: '2px' }}>
+                      الحصة التي سيبدأ منها في الفوج الجديد (تُسجل كـ N):
+                    </label>
+                    <select
+                      value={changeTargetSessionIdx}
+                      onChange={(e) => setChangeTargetSessionIdx(Number(e.target.value))}
+                      className="m3-input"
+                      style={{ width: '100%', height: '34px', padding: '3px 8px', fontSize: '0.78rem', fontWeight: 800 }}
+                    >
+                      {Array.from({ length: data.groupData[changeTargetGroupId]?.sessionCount || 4 }).map((_, i) => (
+                        <option key={i} value={i}>
+                          الحصة {i + 1} (تُسجل كـ N)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div style={{ backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '6px', padding: '8px 10px', fontSize: '0.74rem', color: '#1e40af', lineHeight: 1.5 }}>
+                    • <strong>الفوج السابق ({changeSelectedStudent.fromGroupId}):</strong> سيُحفظ سجله كاملاً والمدفوعات السابقة، والحصص المتبقية تصبح <strong>CH</strong>.<br />
+                    • <strong>الفوج الجديد ({changeTargetGroupId || 'الوجهة'}):</strong> سيبدأ من الحصة {changeTargetSessionIdx + 1} كـ <strong>N</strong> ويتم تحويل أي رصيد متبقي مسدد.
                   </div>
 
                   <button
@@ -3560,7 +4073,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                         className="m3-input"
                         style={{ width: '100%', height: '32px', padding: '3px 8px', fontSize: '0.78rem', fontWeight: 800, color: 'var(--md-sys-color-on-surface)', backgroundColor: '#fff' }}
                       >
-                        {Array.from({ length: 4 }).map((_, i) => (
+                        {Array.from({ length: data.groupData[coverTargetGid]?.sessionCount || data.groupData[coverTargetGid]?.sessionDates?.length || 4 }).map((_, i) => (
                           <option key={i} value={i}>
                             الحصة {i + 1}
                           </option>
@@ -3601,7 +4114,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                     }}
                   >
                     <CalendarCheck size={16} />
-                    <span>تسجيل حضور التعويض (C في الأصلي و M في الحالي) ⚡</span>
+                    <span>تسجيل حضور التعويض (C في الفوج الأصلي) ⚡</span>
                   </button>
                 </div>
               )}
@@ -3796,8 +4309,8 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                 <div style={{ fontSize: '0.9rem', color: '#334155', lineHeight: 1.6, marginBottom: '16px' }}>
                   هل تريد تسجيل حصة تعويض للتلميذ <strong style={{ color: '#b45309' }}>{confirmActionModal.req.student.name}</strong>؟
                   <div style={{ marginTop: '10px', backgroundColor: '#fffbeb', padding: '10px 12px', borderRadius: '8px', border: '1px solid #fde68a', fontSize: '0.82rem', color: '#78350f' }}>
-                    <div>• <strong>الفوج الأصلي:</strong> فوج {confirmActionModal.req.homeGroupId} (تُحتسب الحصة كتعويض <strong>C</strong> للأستاذ والمؤسسة)</div>
-                    <div style={{ marginTop: '4px' }}>• <strong>فوج التعويض اليوم:</strong> فوج {confirmActionModal.req.targetActiveGroupId} (يُسجل كحاضر بالتعويض <strong>M</strong>)</div>
+                    <div>• <strong>الفوج الأصلي:</strong> فوج {confirmActionModal.req.coveringMatch?.matchedGroup?.groupId || confirmActionModal.req.homeGroupId} (تسجيل الحصة كحضور معوض <strong>C</strong>)</div>
+                    <div style={{ marginTop: '4px' }}>• <strong>فوج التعويض اليوم:</strong> فوج {confirmActionModal.req.targetActiveGroupId} (يحضر التلميذ الحصة <strong>دون إضافة اسمه</strong> لقائمة الفوج)</div>
                   </div>
                 </div>
 
@@ -3835,8 +4348,10 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                 <div style={{ fontSize: '0.9rem', color: '#334155', lineHeight: 1.6, marginBottom: '16px' }}>
                   هل تريد تحويل التلميذ <strong style={{ color: '#4338ca' }}>{confirmActionModal.req.student.name}</strong> بشكل نهائي؟
                   <div style={{ marginTop: '10px', backgroundColor: '#eef2ff', padding: '10px 12px', borderRadius: '8px', border: '1px solid #c7d2fe', fontSize: '0.82rem', color: '#3730a3' }}>
-                    <div>• سيتم نقله دائماً من <strong>فوج {confirmActionModal.req.homeGroupId}</strong> إلى <strong>فوج {confirmActionModal.req.targetActiveGroupId}</strong>.</div>
-                    <div style={{ marginTop: '4px' }}>• يُسجل كحاضر رسمي (<strong>P</strong>) في حصة اليوم.</div>
+                    <div>• تغيير الفوج سيحافظ على سجل الحضور والمدفوعات السابق للتلميذ.</div>
+                    <div style={{ marginTop: '4px' }}>• الحصص المتبقية في الفوج القديم (فوج {confirmActionModal.req.homeGroupId}) ستُسجل كـ <strong>CH</strong>.</div>
+                    <div style={{ marginTop: '4px' }}>• سيسجل في الحصة {confirmActionModal.req.sessionIdx + 1} في فوج {confirmActionModal.req.targetActiveGroupId} كـ (تلميذ جديد <strong>N</strong>).</div>
+                    <div style={{ marginTop: '4px' }}>• يتم تحويل الرصيد المالي المتبقي تلقائياً دون تكرار احتساب ما تم دفعه.</div>
                   </div>
                 </div>
 
@@ -4382,6 +4897,172 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
             )}
           </div>
         </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: ADD / ACTIVATE GROUP IN SCANNER STATION                             */}
+      {/* ========================================================================= */}
+      {showAddStationGroupModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0,0,0,0.6)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 220
+          }}
+          onClick={() => setShowAddStationGroupModal(false)}
+        >
+          <div
+            style={{
+              backgroundColor: '#fff',
+              padding: '24px',
+              borderRadius: 'var(--md-shape-xl)',
+              maxWidth: '480px',
+              width: '92%',
+              boxShadow: 'var(--md-elevation-5)',
+              direction: 'rtl'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--md-sys-color-primary)' }}>
+                <Layers size={22} />
+                <h3 style={{ fontSize: '1.15rem', fontWeight: 900, margin: 0 }}>
+                  إضافة / تفعيل فوج في محطة المسح
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddStationGroupModal(false)}
+                className="m3-btn-text"
+                style={{ padding: '4px', borderRadius: '50%', color: '#64748b' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <p style={{ fontSize: '0.84rem', color: '#64748b', lineHeight: 1.5, marginBottom: '16px' }}>
+              اختر الفوج والحصة المراد متابعتها ومسح بطاقات تلاميذها في محطة المسح الحالية:
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '18px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, marginBottom: '4px', color: '#334155' }}>
+                  الفوج المطلوب:
+                </label>
+                <select
+                  value={stationSelectedGid}
+                  onChange={(e) => {
+                    const newGid = e.target.value;
+                    setStationSelectedGid(newGid);
+                    const gSheet = data.groupData[newGid];
+                    setStationSelectedSessionIdx(gSheet ? getDefaultSessionIndex(gSheet, new Date()) : 0);
+                  }}
+                  className="m3-input"
+                  style={{ width: '100%', height: '38px', padding: '4px 10px', fontSize: '0.86rem', fontWeight: 800, color: 'var(--md-sys-color-on-surface)', backgroundColor: '#fff' }}
+                >
+                  {data.groups.map((g) => {
+                    const isAlreadyActive = activeGroups.some((ag) => ag.groupId === g.id);
+                    return (
+                      <option key={g.id} value={g.id}>
+                        فوج {g.id} ({g.subject} - الأستاذ: {g.teacherName}) {isAlreadyActive ? '• (مفعل حالياً)' : ''}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, marginBottom: '4px', color: '#334155' }}>
+                  رقم الحصة:
+                </label>
+                <select
+                  value={stationSelectedSessionIdx}
+                  onChange={(e) => setStationSelectedSessionIdx(Number(e.target.value))}
+                  className="m3-input"
+                  style={{ width: '100%', height: '38px', padding: '4px 10px', fontSize: '0.86rem', fontWeight: 800, color: 'var(--md-sys-color-on-surface)', backgroundColor: '#fff' }}
+                >
+                  {Array.from({ length: data.groupData[stationSelectedGid]?.sessionCount || data.groupData[stationSelectedGid]?.sessionDates?.length || 4 }).map((_, i) => (
+                    <option key={i} value={i}>
+                      الحصة {i + 1}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  backgroundColor: '#fffbeb',
+                  border: '1px solid #fde68a',
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '0.82rem',
+                  fontWeight: 700,
+                  color: '#92400e'
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={stationIsCovering}
+                  onChange={(e) => setStationIsCovering(e.target.checked)}
+                  style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                />
+                <span>تحديد كفوج تعويض لهذا اليوم 🔄</span>
+              </label>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAddStationGroupModal(false);
+                  setIsAddGroupModalOpen(true);
+                }}
+                className="m3-btn m3-btn-text"
+                style={{ fontSize: '0.78rem', color: '#059669', display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 8px' }}
+              >
+                <FolderPlus size={15} />
+                <span>+ إنشاء فوج جديد بالمركز</span>
+              </button>
+
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowAddStationGroupModal(false)}
+                  className="m3-btn m3-btn-text"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmAddStationGroup}
+                  className="m3-btn m3-btn-primary"
+                  style={{ fontWeight: 800 }}
+                >
+                  تفعيل في المحطة ✓
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: CREATE NEW GROUP IN CENTER                                         */}
+      {/* ========================================================================= */}
+      {isAddGroupModalOpen && (
+        <AddGroupModal
+          onClose={() => {
+            setIsAddGroupModalOpen(false);
+          }}
+        />
       )}
     </div>
   );

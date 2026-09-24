@@ -31,7 +31,8 @@ import {
   X,
   Banknote,
   AlertTriangle,
-  RotateCcw
+  RotateCcw,
+  ArrowLeftRight
 } from 'lucide-react';
 import StudentPaymentModal from '../../components/StudentPaymentModal';
 import AddStudentModal from '../../components/AddStudentModal';
@@ -44,6 +45,7 @@ import SecurityPinModal from '../../components/SecurityPinModal';
 import HourlyPaymentFilterModal from '../../components/HourlyPaymentFilterModal';
 import GroupSessionPaymentsModal from '../../components/GroupSessionPaymentsModal';
 import TeacherPaymentModal from '../../components/TeacherPaymentModal';
+import ChangeStudentGroupModal from '../../components/ChangeStudentGroupModal';
 import { collectTodayAndHourlyPayments } from '../../utils/paymentLogger';
 import { normalizeScannedBarcode, normalizeArabicName } from '../../utils/barcodeUtils';
 import {
@@ -95,6 +97,7 @@ export default function AttendancePage() {
   const [isHourlyModalOpen, setIsHourlyModalOpen] = useState(false);
   const [isSessionPaymentsModalOpen, setIsSessionPaymentsModalOpen] = useState(false);
   const [isGroupTeacherPayModalOpen, setIsGroupTeacherPayModalOpen] = useState(false);
+  const [studentForGroupChange, setStudentForGroupChange] = useState<StudentRecord | null>(null);
   const [statsDisplayMode, setStatsDisplayMode] = useState<'cumulative' | 'hourly'>('cumulative');
   const [inlineFromTime, setInlineFromTime] = useState('13:00');
   const [inlineToTime, setInlineToTime] = useState('15:00');
@@ -1907,9 +1910,20 @@ export default function AttendancePage() {
                       if (status === 'P') chipClass = 'm3-chip-p';
                       else if (status === 'A') chipClass = 'm3-chip-a';
                       else if (status === 'M') chipClass = 'm3-chip-m';
+                      else if (status === 'C') chipClass = 'm3-chip-c';
+                      else if (status === 'CH') chipClass = 'm3-chip-ch';
+                      else if (status === 'N') chipClass = 'm3-chip-n';
 
-                      let cellTitle = 'اضغط لتغيير حالة الحضور (P / A / M)';
-                      if (status === '') {
+                      let cellTitle = 'اضغط لتغيير حالة الحضور (P / A / M / C / N / CH)';
+                      if (status === 'CH') {
+                        cellTitle = 'تغيير فوج (CH) — انتقل التلميذ إلى فوج آخر (غير محتسبة في هذا الفوج)';
+                      } else if (status === 'N') {
+                        cellTitle = 'تلميذ جديد (N) — أول حصة يحضرها التلميذ في هذا الفوج';
+                      } else if (status === 'C') {
+                        cellTitle = 'حصة مغطاة (C) — تم تعويض هذه الحصة في فوج آخر';
+                      } else if (status === 'M') {
+                        cellTitle = 'حصة تعويض (M) — حضور تعويض عن فوج آخر';
+                      } else if (status === '') {
                         if (!isCounted) {
                           cellTitle = 'حصة غير محتسبة — لم ينضم التلميذ بعد للفوج (اضغط لتسجيل الحضور)';
                         } else {
@@ -2051,6 +2065,14 @@ export default function AttendancePage() {
                           style={{ padding: '6px', color: 'var(--md-sys-color-primary)' }}
                         >
                           <CreditCard size={17} />
+                        </button>
+                        <button
+                          onClick={() => setStudentForGroupChange(student)}
+                          className="m3-btn-text"
+                          title="تغيير فوج التلميذ (Group Change)"
+                          style={{ padding: '6px', color: '#4f46e5' }}
+                        >
+                          <ArrowLeftRight size={17} />
                         </button>
                         <button
                           onClick={() => setActionStudentTarget(student)}
@@ -2334,6 +2356,15 @@ export default function AttendancePage() {
           stats={groupTeacherStats}
           specificGroupId={group.groupId}
           onClose={() => setIsGroupTeacherPayModalOpen(false)}
+        />
+      )}
+
+      {/* Change Student Group Modal */}
+      {studentForGroupChange && (
+        <ChangeStudentGroupModal
+          student={studentForGroupChange}
+          currentGroupId={group.groupId}
+          onClose={() => setStudentForGroupChange(null)}
         />
       )}
     </div>

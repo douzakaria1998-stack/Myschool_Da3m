@@ -1,4 +1,5 @@
-import { GroupSheet, StudentRecord, GroupMeta, PricingTier } from '../types/index';
+import { GroupSheet, StudentRecord, GroupMeta, PricingTier, CoveringMatchResult } from '../types/index';
+import { normalizeArabicName } from './barcodeUtils';
 
 /**
  * Formats any Date or date string to strict "YYYY/MM/DD" order
@@ -398,8 +399,8 @@ export function getLastSessionWithAttendance(students: StudentRecord[], sessionC
       if (!clean) return false;
       // Skip Excel header artifacts such as "مجموع الحضور اليومي"
       if (clean.includes('مجموع')) return false;
-      // Recognized attendance marks: P, A, M, S or Arabic equivalents
-      return ['P', 'A', 'M', 'S', 'ح', 'غ', 'م'].includes(clean) || clean.length > 0;
+      // Recognized attendance marks: P, A, M, S, C, CH, N or Arabic equivalents
+      return ['P', 'A', 'M', 'S', 'C', 'CH', 'N', 'ح', 'غ', 'م'].includes(clean) || clean.length > 0;
     });
 
     if (hasAttendance) {
@@ -544,7 +545,7 @@ export function getGroupCurrentSession(students: StudentRecord[], totalSessions:
       if (typeof val !== 'string') return false;
       const clean = val.trim().toUpperCase();
       if (!clean || clean.includes('مجموع')) return false;
-      return ['P', 'A', 'M', 'S', 'ح', 'غ', 'م'].includes(clean) || clean.length > 0;
+      return ['P', 'A', 'M', 'S', 'C', 'CH', 'N', 'ح', 'غ', 'م'].includes(clean) || clean.length > 0;
     });
     if (hasAtt) {
       maxIdx = i;
@@ -880,7 +881,7 @@ export function getStudentSessionInfo(
 ): StudentSessionInfo {
   const cycleAtt = (attendance || []).slice(0, cycleSessions);
   const hasSuspended = cycleAtt.includes('S');
-  const attendedCount = cycleAtt.filter((st) => st === 'P' || st === 'ح').length;
+  const attendedCount = cycleAtt.filter((st) => st === 'P' || st === 'C' || st === 'ح').length;
   const makeupCount = cycleAtt.filter((st) => st === 'M' || st === 'م').length;
   const totalAttended = attendedCount + makeupCount;
 
@@ -912,7 +913,7 @@ export function getStudentSessionInfo(
   if (isOneSessionPaid) {
     const attendedIndex = Math.max(
       0,
-      cycleAtt.findIndex((st) => st === 'P' || st === 'M' || st === 'ح' || st === 'م')
+      cycleAtt.findIndex((st) => st === 'P' || st === 'M' || st === 'C' || st === 'ح' || st === 'م')
     );
     return {
       firstActiveIndex: attendedIndex,
@@ -924,30 +925,30 @@ export function getStudentSessionInfo(
   let firstActiveIndex = -1;
   for (let i = 0; i < cycleAtt.length; i++) {
     const st = cycleAtt[i];
-    if (st === 'P' || st === 'A' || st === 'M' || st === 'S' || st === 'ح' || st === 'غ' || st === 'م') {
+    if (st === 'P' || st === 'A' || st === 'M' || st === 'S' || st === 'C' || st === 'CH' || st === 'N' || st === 'ح' || st === 'غ' || st === 'م') {
       firstActiveIndex = i;
       break;
     }
   }
 
-  let countedSessions = 0;
-  if (hasSuspended) {
-    countedSessions = cycleAtt.filter((st) => st === 'P' || st === 'A' || st === 'ح' || st === 'غ').length;
-  } else if (firstActiveIndex !== -1) {
-    countedSessions = cycleSessions - firstActiveIndex;
-  } else {
-    countedSessions = 0;
-  }
-
   const isSessionCounted = (sessionIdx: number): boolean => {
-    if (sessionIdx >= cycleSessions) return false;
+    if (sessionIdx < 0 || sessionIdx >= cycleSessions) return false;
+    const st = cycleAtt[sessionIdx];
+    // Remaining sessions in old group marked CH do NOT count in fees/debt
+    if (st === 'CH') return false;
     if (hasSuspended) {
-      const st = cycleAtt[sessionIdx];
-      return st === 'P' || st === 'A' || st === 'ح' || st === 'غ';
+      return st === 'P' || st === 'A' || st === 'C' || st === 'N' || st === 'ح' || st === 'غ';
     }
     if (firstActiveIndex === -1) return false;
     return sessionIdx >= firstActiveIndex;
   };
+
+  let countedSessions = 0;
+  for (let i = 0; i < cycleSessions; i++) {
+    if (isSessionCounted(i)) {
+      countedSessions++;
+    }
+  }
 
   return {
     firstActiveIndex,
@@ -1026,10 +1027,10 @@ export function parseTimeWindow(timeStr?: string): { startMinutes: number; endMi
     }
   }
 
-  // Single time (e.g. "14:00") -> default 2 hours duration (120 minutes)
+  // Single time (e.g. "14:00") -> default 1 hour and 30 minutes duration (90 minutes)
   const single = parseTimeMinutes(formatted);
   if (single !== null) {
-    return { startMinutes: single, endMinutes: single + 120 };
+    return { startMinutes: single, endMinutes: single + 90 };
   }
 
   return null;
@@ -1092,9 +1093,9 @@ export function detectCurrentActiveGroupAndSession(
     const window = parseTimeWindow(effectiveTime);
     if (window && isToday) {
       // User rule:
-      // Group appears exactly an hour before the start time and an hour after the start time
-      const scanWindowStart = window.startMinutes - 60;
-      const scanWindowEnd = window.startMinutes + 60;
+      // Group appears 1 hour and 30 minutes (90 minutes) before the start time and stays active for 1 hour and 30 minutes after start time
+      const scanWindowStart = window.startMinutes - 90;
+      const scanWindowEnd = Math.max(window.startMinutes + 90, window.endMinutes || (window.startMinutes + 90));
 
       if (currentMinutes >= scanWindowStart && currentMinutes <= scanWindowEnd) {
         let status = 'حصة جارية الآن';
@@ -1167,5 +1168,192 @@ export function generateUniqueStudentBarcode(
   // Fallback with high-resolution timestamp
   return `${prefix}-${yearPrefix}${Date.now().toString().slice(-6)}`;
 }
+
+/**
+ * Normalizes subject names for accurate cross-group matching
+ */
+export function normalizeSubjectName(subj?: string): string {
+  if (!subj) return '';
+  return subj.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/**
+ * Determines session covering eligibility and target group following the business rules:
+ * Priority 1: Same subject + Active group + Match exact session number
+ * Priority 2: Same subject + Last group + Missed session + Match exact session number
+ * Priority 3: No previous group/matching session -> New Student (N)
+ */
+export function findCoveringMatch(
+  student: StudentRecord,
+  coveringGroupId: string,
+  coveringSessionIdx: number,
+  groups: GroupMeta[],
+  groupData: Record<string, GroupSheet>
+): CoveringMatchResult {
+  const coveringGroup = groupData[coveringGroupId];
+  if (!coveringGroup) {
+    return {
+      canCover: false,
+      message: 'الفوج المطلوب غير موجود'
+    };
+  }
+
+  const coveringSubjectNorm = normalizeSubjectName(coveringGroup.subject);
+  const studentBarcode = (student.barcode || '').trim().toUpperCase();
+  const studentNormName = normalizeArabicName(student.name);
+
+  // Helper to match student record across groups
+  const isMatch = (s: StudentRecord, gid: string) => {
+    if (isSummaryRow(s, gid)) return false;
+    if (studentBarcode && s.barcode && s.barcode.trim().toUpperCase() === studentBarcode) return true;
+    return normalizeArabicName(s.name) === studentNormName;
+  };
+
+  // Find all groups where the student is enrolled for the SAME subject (excluding coveringGroupId)
+  const candidateGroups: { sheet: GroupSheet; meta?: GroupMeta; studentRec: StudentRecord; isActive: boolean }[] = [];
+
+  for (const [gid, sheet] of Object.entries(groupData)) {
+    if (gid.toUpperCase() === coveringGroupId.toUpperCase()) continue;
+    if (normalizeSubjectName(sheet.subject) !== coveringSubjectNorm) continue;
+
+    const enrolled = sheet.students?.find((s) => isMatch(s, gid));
+    if (enrolled) {
+      const meta = groups.find((g) => g.id.toUpperCase() === gid.toUpperCase());
+      const isActive = sheet.status !== 'inactive' && meta?.status !== 'inactive';
+      candidateGroups.push({ sheet, meta, studentRec: enrolled, isActive });
+    }
+  }
+
+  // Priority 1: Check for an ACTIVE group for this subject
+  const activeCandidates = candidateGroups.filter((c) => c.isActive);
+  if (activeCandidates.length > 0) {
+    // If multiple active groups, select the most recently active group
+    const selectedActive = activeCandidates[activeCandidates.length - 1];
+    const { sheet, studentRec } = selectedActive;
+    const sessionCount = sheet.sessionDates?.length || sheet.sessionCount || 4;
+
+    // Edge Case 1: Active Group Exists but Session Doesn't
+    if (coveringSessionIdx >= sessionCount) {
+      return {
+        canCover: false,
+        reason: 'SESSION_NOT_FOUND',
+        matchedGroup: sheet,
+        matchedStudent: studentRec,
+        matchedSessionIdx: coveringSessionIdx,
+        message: `لم يتم العثور على الحصة ${coveringSessionIdx + 1} في فوج التلميذ النشط لمادة ${sheet.subject} (فوج ${sheet.groupId} به ${sessionCount} حصص فقط).`
+      };
+    }
+
+    const currentStatus = (studentRec.attendance?.[coveringSessionIdx] || '').trim().toUpperCase();
+
+    // Edge Case 4: Session already attended
+    if (currentStatus === 'P' || currentStatus === 'ح') {
+      return {
+        canCover: false,
+        reason: 'ALREADY_ATTENDED',
+        matchedGroup: sheet,
+        matchedStudent: studentRec,
+        matchedSessionIdx: coveringSessionIdx,
+        message: `التلميذ مسجل حاضر بالفعل في الحصة ${coveringSessionIdx + 1} في فوجه الأصلي (${sheet.groupId}).`
+      };
+    }
+
+    // Edge Case 5: Session already covered
+    if (currentStatus === 'C' || currentStatus === 'M' || currentStatus === 'م') {
+      return {
+        canCover: false,
+        reason: 'ALREADY_COVERED',
+        matchedGroup: sheet,
+        matchedStudent: studentRec,
+        matchedSessionIdx: coveringSessionIdx,
+        message: `تم تسجيل تعويض للحصة ${coveringSessionIdx + 1} مسبقاً لهذا التلميذ في فوجه (${sheet.groupId}).`
+      };
+    }
+
+    // Valid covering in active group!
+    return {
+      canCover: true,
+      type: 'ACTIVE_GROUP_MATCH',
+      matchedGroup: sheet,
+      matchedStudent: studentRec,
+      matchedSessionIdx: coveringSessionIdx,
+      message: `تغطية الحصة ${coveringSessionIdx + 1} في الفوج النشط (${sheet.groupId}) لمادة ${sheet.subject}.`
+    };
+  }
+
+  // Priority 2: If NO active group -> Check LAST / PREVIOUS group for the SAME subject
+  const inactiveCandidates = candidateGroups.filter((c) => !c.isActive);
+  if (inactiveCandidates.length > 0) {
+    const lastInactive = inactiveCandidates[inactiveCandidates.length - 1];
+    const { sheet, studentRec } = lastInactive;
+    const sessionCount = sheet.sessionDates?.length || sheet.sessionCount || 4;
+
+    if (coveringSessionIdx >= sessionCount) {
+      return {
+        canCover: false,
+        reason: 'SESSION_NOT_FOUND',
+        matchedGroup: sheet,
+        matchedStudent: studentRec,
+        matchedSessionIdx: coveringSessionIdx,
+        message: `لا توجد حصة رقم ${coveringSessionIdx + 1} في الفوج السابق (${sheet.groupId}).`
+      };
+    }
+
+    const statusAtIdx = (studentRec.attendance?.[coveringSessionIdx] || '').trim().toUpperCase();
+
+    if (statusAtIdx === 'P' || statusAtIdx === 'ح') {
+      return {
+        canCover: false,
+        reason: 'ALREADY_ATTENDED',
+        matchedGroup: sheet,
+        matchedStudent: studentRec,
+        matchedSessionIdx: coveringSessionIdx,
+        message: `التلميذ حضر بالفعل الحصة ${coveringSessionIdx + 1} في فوجه السابق (${sheet.groupId}).`
+      };
+    }
+
+    if (statusAtIdx === 'C' || statusAtIdx === 'M' || statusAtIdx === 'م') {
+      return {
+        canCover: false,
+        reason: 'ALREADY_COVERED',
+        matchedGroup: sheet,
+        matchedStudent: studentRec,
+        matchedSessionIdx: coveringSessionIdx,
+        message: `تم تسجيل تعويض للحصة ${coveringSessionIdx + 1} مسبقاً في الفوج السابق (${sheet.groupId}).`
+      };
+    }
+
+    // Edge Case 3: Missed session matching exact covering session number
+    if (statusAtIdx === 'A' || statusAtIdx === 'غ' || statusAtIdx === '') {
+      return {
+        canCover: true,
+        type: 'LAST_GROUP_MATCH',
+        matchedGroup: sheet,
+        matchedStudent: studentRec,
+        matchedSessionIdx: coveringSessionIdx,
+        message: `تعويض الحصة ${coveringSessionIdx + 1} الضائعة من الفوج السابق (${sheet.groupId}) لمادة ${sheet.subject}.`
+      };
+    }
+
+    // Edge Case 7: Student has old group but no missed matching session
+    return {
+      canCover: false,
+      reason: 'NO_MATCHING_MISSED_SESSION',
+      matchedGroup: sheet,
+      matchedStudent: studentRec,
+      matchedSessionIdx: coveringSessionIdx,
+      message: `لا توجد حصة ضائعة مطابقة لرقم الحصة ${coveringSessionIdx + 1} في الفوج السابق (${sheet.groupId}).`
+    };
+  }
+
+  // Priority 3: No relevant previous group or session for this subject
+  return {
+    canCover: false,
+    isNewStudent: true,
+    type: 'NEW_STUDENT',
+    message: `التلميذ ليس لديه أي فوج سابق في مادة ${coveringGroup.subject}. سيتم تسجيله كتلميذ جديد (N).`
+  };
+}
+
 
 

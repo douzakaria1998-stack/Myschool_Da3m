@@ -332,6 +332,24 @@ select {
   color: var(--status-makeup);
 }
 
+.m3-chip-c {
+  background: #fef3c7;
+  color: #b45309;
+  border-color: #fcd34d;
+}
+
+.m3-chip-ch {
+  background: #ede9fe;
+  color: #6d28d9;
+  border-color: #c4b5fd;
+}
+
+.m3-chip-n {
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #6ee7b7;
+}
+
 .m3-chip-vip {
   background: var(--status-vip-container);
   color: var(--status-vip);
