@@ -12,6 +12,8 @@ import {
   Calendar,
   Clock,
   GraduationCap,
+  BookOpen,
+  X,
   Coins,
   Edit3,
   RotateCw
@@ -27,12 +29,16 @@ import {
   isGroupActive,
   sortGroupsActiveFirstOldToNew
 } from '../../utils/sessionUtils';
+import { normalizeArabicName } from '../../utils/barcodeUtils';
 
 export default function GroupsPage() {
   const { data, setSelectedGroup, getGroupStats } = useApp();
 
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'active' | 'inactive' | 'today' | 'regular' | 'vip'>('all');
+  const [selectedDay, setSelectedDay] = useState<string>('all');
+  const [selectedTeacher, setSelectedTeacher] = useState<string>('all');
+  const [selectedSubject, setSelectedSubject] = useState<string>('all');
   const [isAddGroupOpen, setIsAddGroupOpen] = useState(false);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [renewingGroupId, setRenewingGroupId] = useState<string | null>(null);
@@ -42,24 +48,109 @@ export default function GroupsPage() {
   const activeGroupsCount = data.groups.filter((g) => isGroupActive(g, data.groupData[g.id], data.pricingTiers)).length;
   const inactiveGroupsCount = data.groups.length - activeGroupsCount;
 
+  // Canonical days of the week in standard Algerian order
+  const CANONICAL_DAYS = ['السبت', 'الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة'];
+
+  // Day options with group counts
+  const dayOptions = useMemo(() => {
+    return CANONICAL_DAYS.map((day) => {
+      const normDay = normalizeArabicName(day);
+      const count = data.groups.filter((g) => {
+        const d1Norm = g.day1 ? normalizeArabicName(g.day1) : '';
+        const d2Norm = g.day2 ? normalizeArabicName(g.day2) : '';
+        return d1Norm === normDay || d2Norm === normDay;
+      }).length;
+      return { day, count };
+    }).filter((item) => item.count > 0);
+  }, [data.groups]);
+
+  // Unique teachers with group counts
+  const teacherOptions = useMemo(() => {
+    const map = new Map<string, { original: string; count: number }>();
+    data.groups.forEach((g) => {
+      if (!g.teacherName || !g.teacherName.trim()) return;
+      const clean = g.teacherName.trim();
+      const norm = normalizeArabicName(clean);
+      if (!map.has(norm)) {
+        map.set(norm, { original: clean, count: 1 });
+      } else {
+        map.get(norm)!.count += 1;
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.original.localeCompare(b.original, 'ar'));
+  }, [data.groups]);
+
+  // Unique subjects with group counts
+  const subjectOptions = useMemo(() => {
+    const map = new Map<string, { original: string; count: number }>();
+    data.groups.forEach((g) => {
+      if (!g.subject || !g.subject.trim()) return;
+      const clean = g.subject.trim();
+      const norm = normalizeArabicName(clean);
+      if (!map.has(norm)) {
+        map.set(norm, { original: clean, count: 1 });
+      } else {
+        map.get(norm)!.count += 1;
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.original.localeCompare(b.original, 'ar'));
+  }, [data.groups]);
+
   // Filter and sort groups: ALWAYS start with active groups from oldest to newest ID
   const filteredGroups = useMemo(() => {
     const matched = data.groups.filter((g) => {
-      const matchesSearch =
-        g.id.toLowerCase().includes(search.toLowerCase()) ||
-        g.subject.toLowerCase().includes(search.toLowerCase()) ||
-        g.teacherName.toLowerCase().includes(search.toLowerCase());
+      // 1. Text Search match
+      if (search.trim()) {
+        const q = search.toLowerCase();
+        const matchesSearch =
+          g.id.toLowerCase().includes(q) ||
+          g.subject.toLowerCase().includes(q) ||
+          g.teacherName.toLowerCase().includes(q) ||
+          (g.day1 && g.day1.toLowerCase().includes(q)) ||
+          (g.day2 && g.day2.toLowerCase().includes(q));
+        if (!matchesSearch) return false;
+      }
 
-      if (filterType === 'active') return matchesSearch && isGroupActive(g, data.groupData[g.id], data.pricingTiers);
-      if (filterType === 'inactive') return matchesSearch && !isGroupActive(g, data.groupData[g.id], data.pricingTiers);
-      if (filterType === 'today') return matchesSearch && isGroupToday(g, data.groupData[g.id]);
-      if (filterType === 'regular') return matchesSearch && !g.isVip;
-      if (filterType === 'vip') return matchesSearch && g.isVip;
-      return matchesSearch;
+      // 2. Status Pill match
+      if (filterType === 'active' && !isGroupActive(g, data.groupData[g.id], data.pricingTiers)) return false;
+      if (filterType === 'inactive' && isGroupActive(g, data.groupData[g.id], data.pricingTiers)) return false;
+      if (filterType === 'today' && !isGroupToday(g, data.groupData[g.id])) return false;
+      if (filterType === 'regular' && g.isVip) return false;
+      if (filterType === 'vip' && !g.isVip) return false;
+
+      // 3. Day match (checks both day1 and day2)
+      if (selectedDay !== 'all') {
+        const normSelectedDay = normalizeArabicName(selectedDay);
+        const day1Norm = g.day1 ? normalizeArabicName(g.day1) : '';
+        const day2Norm = g.day2 ? normalizeArabicName(g.day2) : '';
+        if (day1Norm !== normSelectedDay && day2Norm !== normSelectedDay) {
+          return false;
+        }
+      }
+
+      // 4. Teacher match
+      if (selectedTeacher !== 'all') {
+        const normSelectedTeacher = normalizeArabicName(selectedTeacher);
+        const groupTeacherNorm = g.teacherName ? normalizeArabicName(g.teacherName) : '';
+        if (groupTeacherNorm !== normSelectedTeacher) {
+          return false;
+        }
+      }
+
+      // 5. Subject match
+      if (selectedSubject !== 'all') {
+        const normSelectedSubject = normalizeArabicName(selectedSubject);
+        const groupSubjectNorm = g.subject ? normalizeArabicName(g.subject) : '';
+        if (groupSubjectNorm !== normSelectedSubject) {
+          return false;
+        }
+      }
+
+      return true;
     });
 
     return sortGroupsActiveFirstOldToNew(matched, data.groupData, data.pricingTiers);
-  }, [data.groups, data.groupData, data.pricingTiers, search, filterType]);
+  }, [data.groups, data.groupData, data.pricingTiers, search, filterType, selectedDay, selectedTeacher, selectedSubject]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -107,27 +198,220 @@ export default function GroupsPage() {
           gap: '12px'
         }}
       >
-        <div style={{ position: 'relative', width: '280px' }}>
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="ابحث عن فوج، أستاذ أو مادة..."
-            className="m3-input"
-            style={{ paddingInlineStart: '36px', paddingBlock: '8px', fontSize: '0.85rem' }}
-          />
-          <Search
-            size={16}
+        {/* Right Section: Search & Dropdown Filters (Day, Teacher, Subject) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', flex: '1 1 auto' }}>
+          {/* Search Input */}
+          <div style={{ position: 'relative', width: '220px', minWidth: '170px' }}>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="ابحث عن فوج، أستاذ أو مادة..."
+              className="m3-input"
+              style={{ paddingInlineStart: '34px', paddingInlineEnd: search ? '28px' : '10px', paddingBlock: '7px', fontSize: '0.84rem' }}
+            />
+            <Search
+              size={15}
+              style={{
+                position: 'absolute',
+                insetInlineStart: '11px',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                color: 'var(--md-sys-color-outline)'
+              }}
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                style={{
+                  position: 'absolute',
+                  insetInlineEnd: '8px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: 'var(--md-sys-color-outline)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: '2px'
+                }}
+                title="مسح البحث"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+
+          {/* Filter by Day (اليوم) */}
+          <div
             style={{
-              position: 'absolute',
-              insetInlineStart: '12px',
-              top: '50%',
-              transform: 'translateY(-50%)',
-              color: 'var(--md-sys-color-outline)'
+              position: 'relative',
+              display: 'inline-flex',
+              alignItems: 'center',
+              backgroundColor: selectedDay !== 'all' ? 'var(--md-sys-color-primary-container)' : 'var(--md-sys-color-surface-container)',
+              borderRadius: 'var(--md-shape-full)',
+              border: selectedDay !== 'all' ? '1.5px solid var(--md-sys-color-primary)' : '1px solid var(--md-sys-color-outline-variant)',
+              padding: '2px 8px 2px 10px',
+              transition: 'all 0.2s ease',
+              boxShadow: selectedDay !== 'all' ? '0 1px 4px rgba(0, 99, 155, 0.2)' : 'none'
             }}
-          />
+          >
+            <Calendar
+              size={14}
+              style={{
+                color: selectedDay !== 'all' ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-outline)',
+                marginInlineEnd: '4px',
+                flexShrink: 0
+              }}
+            />
+            <select
+              value={selectedDay}
+              onChange={(e) => setSelectedDay(e.target.value)}
+              style={{
+                backgroundColor: 'transparent',
+                border: 'none',
+                outline: 'none',
+                fontSize: '0.82rem',
+                fontWeight: selectedDay !== 'all' ? 800 : 600,
+                color: selectedDay !== 'all' ? 'var(--md-sys-color-on-primary-container)' : 'var(--md-sys-color-on-surface)',
+                cursor: 'pointer',
+                paddingBlock: '5px'
+              }}
+              title="تصفية حسب يوم الحصة"
+            >
+              <option value="all">اليوم: كل الأيام</option>
+              {dayOptions.map((opt) => (
+                <option key={opt.day} value={opt.day}>
+                  {opt.day} ({opt.count})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Filter by Teacher (الأستاذ) */}
+          <div
+            style={{
+              position: 'relative',
+              display: 'inline-flex',
+              alignItems: 'center',
+              backgroundColor: selectedTeacher !== 'all' ? 'var(--md-sys-color-primary-container)' : 'var(--md-sys-color-surface-container)',
+              borderRadius: 'var(--md-shape-full)',
+              border: selectedTeacher !== 'all' ? '1.5px solid var(--md-sys-color-primary)' : '1px solid var(--md-sys-color-outline-variant)',
+              padding: '2px 8px 2px 10px',
+              transition: 'all 0.2s ease',
+              boxShadow: selectedTeacher !== 'all' ? '0 1px 4px rgba(0, 99, 155, 0.2)' : 'none'
+            }}
+          >
+            <GraduationCap
+              size={15}
+              style={{
+                color: selectedTeacher !== 'all' ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-outline)',
+                marginInlineEnd: '4px',
+                flexShrink: 0
+              }}
+            />
+            <select
+              value={selectedTeacher}
+              onChange={(e) => setSelectedTeacher(e.target.value)}
+              style={{
+                backgroundColor: 'transparent',
+                border: 'none',
+                outline: 'none',
+                fontSize: '0.82rem',
+                fontWeight: selectedTeacher !== 'all' ? 800 : 600,
+                color: selectedTeacher !== 'all' ? 'var(--md-sys-color-on-primary-container)' : 'var(--md-sys-color-on-surface)',
+                cursor: 'pointer',
+                paddingBlock: '5px',
+                maxWidth: '150px'
+              }}
+              title="تصفية حسب الأستاذ"
+            >
+              <option value="all">الأستاذ: كل الأساتذة</option>
+              {teacherOptions.map((opt) => (
+                <option key={opt.original} value={opt.original}>
+                  {opt.original} ({opt.count})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Filter by Subject (المادة) */}
+          <div
+            style={{
+              position: 'relative',
+              display: 'inline-flex',
+              alignItems: 'center',
+              backgroundColor: selectedSubject !== 'all' ? 'var(--md-sys-color-primary-container)' : 'var(--md-sys-color-surface-container)',
+              borderRadius: 'var(--md-shape-full)',
+              border: selectedSubject !== 'all' ? '1.5px solid var(--md-sys-color-primary)' : '1px solid var(--md-sys-color-outline-variant)',
+              padding: '2px 8px 2px 10px',
+              transition: 'all 0.2s ease',
+              boxShadow: selectedSubject !== 'all' ? '0 1px 4px rgba(0, 99, 155, 0.2)' : 'none'
+            }}
+          >
+            <BookOpen
+              size={14}
+              style={{
+                color: selectedSubject !== 'all' ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-outline)',
+                marginInlineEnd: '4px',
+                flexShrink: 0
+              }}
+            />
+            <select
+              value={selectedSubject}
+              onChange={(e) => setSelectedSubject(e.target.value)}
+              style={{
+                backgroundColor: 'transparent',
+                border: 'none',
+                outline: 'none',
+                fontSize: '0.82rem',
+                fontWeight: selectedSubject !== 'all' ? 800 : 600,
+                color: selectedSubject !== 'all' ? 'var(--md-sys-color-on-primary-container)' : 'var(--md-sys-color-on-surface)',
+                cursor: 'pointer',
+                paddingBlock: '5px',
+                maxWidth: '130px'
+              }}
+              title="تصفية حسب المادة"
+            >
+              <option value="all">المادة: كل المواد</option>
+              {subjectOptions.map((opt) => (
+                <option key={opt.original} value={opt.original}>
+                  {opt.original} ({opt.count})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Clear Filters Button */}
+          {(selectedDay !== 'all' || selectedTeacher !== 'all' || selectedSubject !== 'all') && (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedDay('all');
+                setSelectedTeacher('all');
+                setSelectedSubject('all');
+              }}
+              className="m3-btn m3-btn-text m3-btn-sm"
+              style={{
+                color: '#dc2626',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                padding: '4px 8px',
+                fontSize: '0.78rem',
+                fontWeight: 700
+              }}
+              title="مسح فلاتر اليوم، الأستاذ والمادة"
+            >
+              <X size={13} />
+              <span>مسح الفلاتر</span>
+            </button>
+          )}
         </div>
 
+        {/* Status Pills */}
         <div
           style={{
             display: 'flex',
@@ -555,13 +839,29 @@ export default function GroupsPage() {
           >
             <Calendar size={40} style={{ margin: '0 auto 12px', color: 'var(--md-sys-color-primary)' }} />
             <h4 style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--md-sys-color-on-surface)', marginBottom: '6px' }}>
-              {filterType === 'today' ? `لا توجد أفواج مبرمجة لليوم (${todayDayName})` : 'لا توجد أفواج مطابقة للبحث'}
+              لا توجد أفواج مطابقة لمعايير البحث والتصفية الحالية
             </h4>
-            <p style={{ fontSize: '0.85rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
+            <p style={{ fontSize: '0.85rem', color: 'var(--md-sys-color-on-surface-variant)', marginBottom: '14px' }}>
               {filterType === 'today'
-                ? 'يمكنك الاطلاع على جدول باقي أيام الأسبوع باختيار "جميع الأفواج" أعلاه.'
-                : 'تأكد من كتابة اسم الفوج أو الأستاذ أو المادة بشكل صحيح.'}
+                ? 'لا توجد أفواج مبرمجة لليوم بالمعايير المختارة.'
+                : 'يرجى تجربة تغيير اليوم، الأستاذ أو المادة، أو مسح كلمات البحث.'}
             </p>
+            {(search || selectedDay !== 'all' || selectedTeacher !== 'all' || selectedSubject !== 'all' || filterType !== 'all') && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearch('');
+                  setSelectedDay('all');
+                  setSelectedTeacher('all');
+                  setSelectedSubject('all');
+                  setFilterType('all');
+                }}
+                className="m3-btn m3-btn-primary m3-btn-sm"
+                style={{ margin: '0 auto' }}
+              >
+                إعادة ضبط جميع الفلاتر
+              </button>
+            )}
           </div>
         )}
       </div>
