@@ -607,7 +607,7 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
 
   for (const [gid, gSheet] of Object.entries(centerData.groupData || {})) {
     const originalStudents = gSheet.students || [];
-    const cleanStudents = originalStudents.filter((s) => !isSummaryRow(s, gid) && s.discount !== 'تعويض');
+    const cleanStudents = originalStudents.filter((s) => !isSummaryRow(s, gid));
     if (cleanStudents.length !== originalStudents.length) {
       changed = true;
     }
@@ -1275,9 +1275,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const now = Date.now();
       const dataToSave = {
         ...targetData,
+        paymentTransactions: targetData.paymentTransactions || dataRef.current.paymentTransactions || [],
+        deletedStudents: targetData.deletedStudents || dataRef.current.deletedStudents || [],
         _client_id: clientIdRef.current,
         _saved_at: now,
-        _last_modified_at: (targetData as any)._last_modified_at || now
+        _last_modified_at: (targetData as any)._last_modified_at || (dataRef.current as any)._last_modified_at || now
       };
 
       const { error } = await supabase
@@ -2365,7 +2367,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     };
     persistData(updatedData);
-    saveToCloud(updatedData);
+    saveToCloud(dataRef.current);
     return calculatedStudent;
   };
 
@@ -2473,7 +2475,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       groupData: updatedGroupData
     };
     persistData(updatedData);
-    saveToCloud(updatedData);
+    saveToCloud(dataRef.current);
 
     return results;
   };
