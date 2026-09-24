@@ -1298,6 +1298,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
+    // 4. Cross-tab synchronization via localStorage storage event
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === STORAGE_KEY && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (parsed && parsed.groupData) {
+            const { cleaned } = sanitizeData(parsed);
+            dataRef.current = cleaned;
+            setData(cleaned);
+          }
+        } catch (err) {
+          console.error('Failed to sync from storage event', err);
+        }
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+
     // Heartbeat auto-sync every 8 seconds when pending changes exist
     const heartbeatTimer = setInterval(() => {
       const hasUnsynced =
@@ -1314,6 +1331,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       clearInterval(heartbeatTimer);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('storage', handleStorageChange);
       supabase.removeChannel(channel);
     };
   }, [saveToCloud]);
@@ -1676,14 +1694,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // 1. In ORIGINAL group (e.g. BAC05): mark the session as 'C' (Covered)
+    // 1. In ORIGINAL group (e.g. BAC05 / BACV09): mark the session as 'P' (Present / حاضر)
+    // As per user specification: "Take his attendance in his group for that session as 'P'!"
     const origSessionCount = originalGroup.sessionDates?.length || originalGroup.sessionCount || 4;
     let origIdx = targetOriginalSessionIdx !== undefined ? targetOriginalSessionIdx : sessionIndex;
     if (origIdx >= origSessionCount) origIdx = origSessionCount - 1;
 
     const newOrigAttendance: AttendanceStatus[] = [...(originalStudent.attendance || [])];
     while (newOrigAttendance.length < origSessionCount) newOrigAttendance.push('');
-    newOrigAttendance[origIdx] = 'C';
+    newOrigAttendance[origIdx] = 'P';
 
     // Handle payment if provided during cover
     let newOrigPayments = [...(originalStudent.payments || [])];

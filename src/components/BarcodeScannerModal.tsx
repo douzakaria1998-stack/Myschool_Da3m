@@ -1331,15 +1331,15 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     setRecentScans((prev) =>
       prev.map((s) =>
         s.studentName === student.name && s.groupId === targetActiveGroupId
-          ? { ...s, status: 'C' }
+          ? { ...s, status: 'P' }
           : s
       )
     );
 
     setFlashSuccess({
       name: student.name,
-      statusText: `تم تسجيل حضور التعويض في فوجه الأصلي (${sourceGid} - الحصة ${sourceSessionIdx + 1}) ✓`,
-      details: `حضر اليوم كتعويض مع فوج ${targetActiveGroupId} (دون كتابة اسمه في الفوج)`
+      statusText: `تم تسجيل حضور التلميذ كـ (حاضر P) في فوجه الأصلي (${sourceGid} - الحصة ${sourceSessionIdx + 1}) ✓`,
+      details: `حضر اليوم مع فوج ${targetActiveGroupId} (دون كتابة اسمه في الفوج)`
     });
 
     setPendingCoverRequests((prev) => prev.filter((r) => r.id !== req.id));

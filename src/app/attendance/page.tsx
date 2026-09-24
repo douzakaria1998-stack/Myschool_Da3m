@@ -267,7 +267,7 @@ export default function AttendancePage() {
     targetStudents.forEach((s) => {
       const val = s.attendance?.[selectedSessionStatsIndex];
       const st = typeof val === 'string' ? val.trim().toUpperCase() : '';
-      if (st === 'P' || st === 'ح') present++;
+      if (st === 'P' || st === 'ح' || st === 'C') present++;
       else if (st === 'A' || st === 'غ') absent++;
       else if (st === 'M' || st === 'م') makeup++;
       else unmarked++;
@@ -1720,8 +1720,8 @@ export default function AttendancePage() {
                 const formattedDate = formatToYYYYMMDD(d);
                 const isToday = isSessionDateToday(formattedDate || d);
                 const targetStudents = filteredStudents.length > 0 ? filteredStudents : realStudents;
-                const isAllPresent = targetStudents.length > 0 && targetStudents.every((s) => s.attendance[i] === 'P');
-                const presentCount = targetStudents.filter((s) => s.attendance[i] === 'P').length;
+                const isAllPresent = targetStudents.length > 0 && targetStudents.every((s) => s.attendance[i] === 'P' || s.attendance[i] === 'C' || s.attendance[i] === 'ح');
+                const presentCount = targetStudents.filter((s) => s.attendance[i] === 'P' || s.attendance[i] === 'C' || s.attendance[i] === 'ح').length;
                 const isSelected = selectedSessionStatsIndex === i;
 
                 return (
