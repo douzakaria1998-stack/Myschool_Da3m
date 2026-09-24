@@ -327,23 +327,33 @@ function mergeAttendanceSafely(remote: CenterData, local: CenterData): CenterDat
     const remoteGroup = merged.groupData[gid];
     if (!remoteGroup || !remoteGroup.students || !localGroup.students) continue;
 
-    // Build tombstone index for this group
+    // Build tombstone index for this group using unique student barcode (and fallback to name only if barcode is missing)
     const groupDeleted = mergedDeleted.filter((d) => d.groupId === gid);
-    const delRowIds = new Set<number>(groupDeleted.map((d) => d.student?.rowId).filter(Boolean));
-    const delNames = new Set<string>(groupDeleted.map((d) => normalizeArabicName(d.student?.name || '')).filter(Boolean));
-    const delBarcodes = new Set<string>(groupDeleted.map((d) => (d.student?.barcode || '').trim()).filter(Boolean));
+    const delBarcodes = new Set<string>(
+      groupDeleted
+        .map((d) => (d.student?.barcode || '').trim().toUpperCase())
+        .filter(Boolean)
+    );
+    const delNames = new Set<string>(
+      groupDeleted
+        .filter((d) => !d.student?.barcode)
+        .map((d) => normalizeArabicName(d.student?.name || ''))
+        .filter(Boolean)
+    );
 
+    // CRITICAL: Never tombstone by rowId! rowId is a dynamic table index, not a student identity!
     const isStudentTombstoned = (s: StudentRecord) => {
       if (!s) return false;
-      if (s.rowId && delRowIds.has(s.rowId)) return true;
-      const sNorm = normalizeArabicName(s.name || '');
-      if (sNorm && delNames.has(sNorm)) return true;
-      const bc = (s.barcode || '').trim();
+      const bc = (s.barcode || '').trim().toUpperCase();
       if (bc && delBarcodes.has(bc)) return true;
+      if (!bc) {
+        const sNorm = normalizeArabicName(s.name || '');
+        if (sNorm && delNames.has(sNorm)) return true;
+      }
       return false;
     };
 
-    const matchedLocalRowIds = new Set<number>();
+    const matchedLocalBarcodes = new Set<string>();
     const matchedLocalNames = new Set<string>();
     let hasDifferences = false;
 
@@ -357,17 +367,23 @@ function mergeAttendanceSafely(remote: CenterData, local: CenterData): CenterDat
         return;
       }
 
+      const rBarcode = (rStudent.barcode || '').trim().toUpperCase();
       const rNormName = normalizeArabicName(rStudent.name || '');
-      const lStudent = localGroup.students.find(
-        (s) => (s.rowId && s.rowId === rStudent.rowId) || (rNormName && normalizeArabicName(s.name || '') === rNormName)
-      );
+
+      // Match students by unique barcode or exact normalized name (NEVER by rowId!)
+      const lStudent = localGroup.students.find((s) => {
+        const lBarcode = (s.barcode || '').trim().toUpperCase();
+        if (rBarcode && lBarcode && rBarcode === lBarcode) return true;
+        if (!rBarcode && !lBarcode && rNormName && normalizeArabicName(s.name || '') === rNormName) return true;
+        return false;
+      });
 
       if (!lStudent) {
         mergedStudents.push(rStudent);
         return;
       }
 
-      if (lStudent.rowId) matchedLocalRowIds.add(lStudent.rowId);
+      if (lStudent.barcode) matchedLocalBarcodes.add(lStudent.barcode.trim().toUpperCase());
       if (lStudent.name) matchedLocalNames.add(normalizeArabicName(lStudent.name));
 
       let studentModified = false;
@@ -404,12 +420,18 @@ function mergeAttendanceSafely(remote: CenterData, local: CenterData): CenterDat
         }
       }
 
-      // Preserve phone, barcode, and discount
-      const phone = rStudent.phone?.trim() || lStudent.phone?.trim() || '';
+      // Preserve phone, barcode, discount, and student name if updated locally
+      const phone = lStudent.phone?.trim() || rStudent.phone?.trim() || '';
       const barcode = rStudent.barcode?.trim() || lStudent.barcode?.trim() || '';
       const discount = (lStudent.discount !== undefined && lStudent.discount !== '1') ? lStudent.discount : (rStudent.discount || '1');
+      const name = lStudent.name?.trim() || rStudent.name?.trim();
 
-      if (phone !== rStudent.phone || barcode !== rStudent.barcode || discount !== rStudent.discount) {
+      if (
+        phone !== rStudent.phone ||
+        barcode !== rStudent.barcode ||
+        discount !== rStudent.discount ||
+        name !== rStudent.name
+      ) {
         studentModified = true;
       }
 
@@ -417,6 +439,7 @@ function mergeAttendanceSafely(remote: CenterData, local: CenterData): CenterDat
         hasDifferences = true;
         const updatedStudentRaw: StudentRecord = {
           ...rStudent,
+          name,
           phone,
           barcode,
           discount,
@@ -445,8 +468,11 @@ function mergeAttendanceSafely(remote: CenterData, local: CenterData): CenterDat
         hasDifferences = true;
         return;
       }
+      const lBarcode = (lStudent.barcode || '').trim().toUpperCase();
       const lNorm = normalizeArabicName(lStudent.name);
-      const isMatched = (lStudent.rowId && matchedLocalRowIds.has(lStudent.rowId)) || (lNorm && matchedLocalNames.has(lNorm));
+      const isMatched =
+        (lBarcode && matchedLocalBarcodes.has(lBarcode)) ||
+        (lNorm && matchedLocalNames.has(lNorm));
       if (!isMatched) {
         localOnlyStudents.push(lStudent);
       }
@@ -484,11 +510,14 @@ function mergeAttendanceSafely(remote: CenterData, local: CenterData): CenterDat
     // Check if this tx belongs to a student who was tombstoned/deleted in this group
     const isDeleted = mergedDeleted.some((d) => {
       if (d.groupId !== tx.groupId) return false;
-      if (d.student?.rowId && tx.studentRowId && d.student.rowId === tx.studentRowId) return true;
-      if (d.student?.barcode && tx.studentBarcode && d.student.barcode === tx.studentBarcode) return true;
-      const dNorm = normalizeArabicName(d.student?.name || '');
-      const txNorm = normalizeArabicName(tx.studentName || '');
-      if (dNorm && txNorm && dNorm === txNorm) return true;
+      const dBarcode = (d.student?.barcode || '').trim().toUpperCase();
+      const txBarcode = (tx.studentBarcode || '').trim().toUpperCase();
+      if (dBarcode && txBarcode && dBarcode === txBarcode) return true;
+      if (!dBarcode && !txBarcode) {
+        const dNorm = normalizeArabicName(d.student?.name || '');
+        const txNorm = normalizeArabicName(tx.studentName || '');
+        if (dNorm && txNorm && dNorm === txNorm) return true;
+      }
       return false;
     });
     if (isDeleted) return;
@@ -2117,8 +2146,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!group) return null;
 
     const sessionCount = group.sessionDates?.length || group.sessionCount || 4;
-    const maxRowId = group.students.reduce((max, s) => Math.max(max, s.rowId || 0), 0);
-    const rowId = maxRowId + 1;
+
+    // Ensure rowId is strictly unique and never collides with any current OR deleted student in this group
+    const maxExistingRowId = group.students.reduce((max, s) => Math.max(max, s.rowId || 0), 0);
+    const maxDeletedRowId = (currentData.deletedStudents || [])
+      .filter((d) => d.groupId === groupId)
+      .reduce((max, d) => Math.max(max, d.student?.rowId || 0), 0);
+    const rowId = Math.max(maxExistingRowId, maxDeletedRowId) + 1;
 
     // Collect all existing barcodes across the center
     const allStudentsList: StudentRecord[] = [];
@@ -2132,6 +2166,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       studentInfo.barcode?.trim() ||
       existingSameName?.barcode ||
       generateUniqueStudentBarcode(allStudentsList, 'STU');
+
+    const cleanBarcode = barcode.trim().toUpperCase();
+    const cleanNormName = normalizeArabicName(studentInfo.name.trim());
+
+    // Clear any previous tombstone in deletedStudents for this student in this group
+    const updatedDeleted = (currentData.deletedStudents || []).filter((d) => {
+      if (d.groupId !== groupId) return true;
+      if (cleanBarcode && d.student?.barcode && d.student.barcode.trim().toUpperCase() === cleanBarcode) return false;
+      if (cleanNormName && normalizeArabicName(d.student?.name || '') === cleanNormName) return false;
+      return true;
+    });
 
     const newStudentRaw: StudentRecord = {
       rowId,
@@ -2153,6 +2198,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const updatedData: CenterData = {
       ...currentData,
+      deletedStudents: updatedDeleted,
       groupData: {
         ...currentData.groupData,
         [groupId]: {
@@ -2187,13 +2233,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       existingSameName?.barcode ||
       generateUniqueStudentBarcode(allStudentsList, 'STU');
 
+    const cleanBarcode = resolvedBarcode.trim().toUpperCase();
+    const cleanNormName = normalizeArabicName(studentInfo.name.trim());
+    const targetGroupIds = new Set(enrollments.map((e) => e.groupId));
+
+    // Clear any previous tombstone in deletedStudents for this student in these groups
+    const updatedDeleted = (currentData.deletedStudents || []).filter((d) => {
+      if (!targetGroupIds.has(d.groupId)) return true;
+      if (cleanBarcode && d.student?.barcode && d.student.barcode.trim().toUpperCase() === cleanBarcode) return false;
+      if (cleanNormName && normalizeArabicName(d.student?.name || '') === cleanNormName) return false;
+      return true;
+    });
+
     enrollments.forEach(({ groupId, paymentAmount }) => {
       const group = updatedGroupData[groupId];
       if (!group) return;
 
       const sessionCount = group.sessionDates?.length || group.sessionCount || 4;
-      const maxRowId = group.students.reduce((max, s) => Math.max(max, s.rowId || 0), 0);
-      const rowId = maxRowId + 1;
+      const maxExistingRowId = group.students.reduce((max, s) => Math.max(max, s.rowId || 0), 0);
+      const maxDeletedRowId = (currentData.deletedStudents || [])
+        .filter((d) => d.groupId === groupId)
+        .reduce((max, d) => Math.max(max, d.student?.rowId || 0), 0);
+      const rowId = Math.max(maxExistingRowId, maxDeletedRowId) + 1;
 
       const initialPayments: (number | string)[] = Array(sessionCount).fill('');
       const payNum = Number(paymentAmount) || 0;
@@ -2251,6 +2312,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const updatedData: CenterData = {
       ...currentData,
+      deletedStudents: updatedDeleted,
       groupData: updatedGroupData
     };
     persistData(updatedData);
@@ -2285,6 +2347,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       generateUniqueStudentBarcode(allStudentsList, 'STU');
     const resolvedPhone = studentIdentifier.phone?.trim() || existingSame?.phone || '';
     const resolvedDiscount = studentIdentifier.discount || existingSame?.discount || '1';
+
+    const targetGroupIds = new Set(payments.map((p) => p.groupId));
+    const updatedDeleted = (currentData.deletedStudents || []).filter((d) => {
+      if (!targetGroupIds.has(d.groupId)) return true;
+      if (resolvedBarcode && d.student?.barcode && d.student.barcode.trim().toUpperCase() === resolvedBarcode) return false;
+      if (cleanNormName && normalizeArabicName(d.student?.name || '') === cleanNormName) return false;
+      return true;
+    });
 
     payments.forEach(({ groupId, paymentAmount }) => {
       const group = updatedGroupData[groupId];
@@ -2346,8 +2416,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         });
       } else {
         // Enroll student in this group
-        const maxRowId = group.students.reduce((max, s) => Math.max(max, s.rowId || 0), 0);
-        const rowId = maxRowId + 1;
+        const maxExistingRowId = group.students.reduce((max, s) => Math.max(max, s.rowId || 0), 0);
+        const maxDeletedRowId = (currentData.deletedStudents || [])
+          .filter((d) => d.groupId === groupId)
+          .reduce((max, d) => Math.max(max, d.student?.rowId || 0), 0);
+        const rowId = Math.max(maxExistingRowId, maxDeletedRowId) + 1;
 
         const initialPayments: (number | string)[] = Array(sessionCount).fill('');
         if (payNum > 0) {
@@ -2390,6 +2463,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const updatedData: CenterData = {
       ...currentData,
+      deletedStudents: updatedDeleted,
       groupData: updatedGroupData
     };
     persistData(updatedData);
@@ -2762,8 +2836,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         s.rowId === existingInTo.rowId ? updatedStudent : s
       );
     } else {
-      const maxRowId = toGroup.students.reduce((max, s) => Math.max(max, s.rowId || 0), 0);
-      const newRowId = maxRowId + 1;
+      const maxExistingRowId = toGroup.students.reduce((max, s) => Math.max(max, s.rowId || 0), 0);
+      const maxDeletedRowId = (currentData.deletedStudents || [])
+        .filter((d) => d.groupId === toGroupId)
+        .reduce((max, d) => Math.max(max, d.student?.rowId || 0), 0);
+      const newRowId = Math.max(maxExistingRowId, maxDeletedRowId) + 1;
 
       const initialAttendance: AttendanceStatus[] = Array(toSessionCount).fill('');
       initialAttendance[startSessionIdx] = 'N';
@@ -2797,8 +2874,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       updatedToGroup.students = [...toGroup.students, newStudent];
     }
 
+    // Clear any previous tombstone in deletedStudents for this student in toGroupId
+    const cleanToBarcode = (originalStudent.barcode || '').trim().toUpperCase();
+    const cleanToNormName = normalizeArabicName(originalStudent.name || '');
+    const updatedDeleted = (currentData.deletedStudents || []).filter((d) => {
+      if (d.groupId !== toGroupId) return true;
+      if (cleanToBarcode && d.student?.barcode && d.student.barcode.trim().toUpperCase() === cleanToBarcode) return false;
+      if (cleanToNormName && normalizeArabicName(d.student?.name || '') === cleanToNormName) return false;
+      return true;
+    });
+
     const updatedData: CenterData = {
       ...currentData,
+      deletedStudents: updatedDeleted,
       groupData: {
         ...currentData.groupData,
         [fromGroupId]: updatedFromGroup,
