@@ -51,7 +51,8 @@ import {
   getTodayArabicDayName,
   getDefaultSessionIndex,
   findCoveringMatch,
-  normalizeSubjectName
+  normalizeSubjectName,
+  isVipGroupId
 } from '../utils/sessionUtils';
 import Link from 'next/link';
 import { getBarcodeCandidates, normalizeArabicName, normalizeScannedBarcode } from '../utils/barcodeUtils';
@@ -735,6 +736,8 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
           if (
             norm.toUpperCase().startsWith('STU') ||
             norm.toUpperCase().startsWith('BAC') ||
+            norm.toUpperCase().startsWith('SEC') ||
+            norm.toUpperCase().startsWith('BEM') ||
             Boolean(findStudentByCode(norm))
           ) {
             if (burstTargetElRef.current && burstTargetElRef.current !== scannerInputRef.current) {
@@ -1047,7 +1050,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     const targetGroup = data.groupData[groupId] || activeGroup;
     const targetMeta = data.groups.find((g) => g.id === groupId);
     const isVipGroup =
-      groupId.toUpperCase().startsWith('BACV') ||
+      isVipGroupId(groupId) ||
       groupId.toUpperCase().includes('VIP') ||
       Boolean(targetGroup?.isVip) ||
       Boolean(targetMeta?.isVip) ||

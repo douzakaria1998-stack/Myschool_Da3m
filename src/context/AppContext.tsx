@@ -24,6 +24,8 @@ import {
   isVipGroupId,
   isValidGroupId,
   getNextGroupId,
+  getGroupLevelFromId,
+  EducationalLevel,
   getStudentSessionInfo,
   generateUniqueStudentBarcode,
   isGroupActive,
@@ -699,12 +701,13 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
       changed = true;
     }
 
-    // Ensure group ID follows strict BAC{XX} / BACV{XX} format without hyphens or suffixes like BAC01-2
+    // Ensure group ID follows strict format without hyphens or suffixes like BAC01-2, SEC01, BEM01
     let finalGid = gid.trim().toUpperCase();
     if (finalGid.includes('-') || finalGid.includes('_') || !isValidGroupId(finalGid).isValid) {
-      const isVip = gSheet.isVip || /^BACV/i.test(finalGid);
+      const isVip = gSheet.isVip || isVipGroupId(finalGid);
+      const level = (gSheet as any).level || getGroupLevelFromId(finalGid);
       const existingIds = [...Object.keys(newGroupData), ...(centerData.groups || []).map((g) => g.id)];
-      finalGid = getNextGroupId(isVip, existingIds);
+      finalGid = getNextGroupId(isVip, existingIds, level);
       idMap[gid] = finalGid;
       changed = true;
     }
@@ -912,8 +915,10 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
   const cleanGroups: GroupMeta[] = [];
   for (const g of centerData.groups || []) {
     let cleanId = (idMap[g.id] || g.id).trim().toUpperCase();
+    const groupLevel = (g as any).level || getGroupLevelFromId(cleanId);
+    const isGroupVip = isVipGroupId(cleanId) || cleanId.includes('VIP') || Boolean(g.isVip);
     if (cleanId.includes('-') || cleanId.includes('_') || !isValidGroupId(cleanId).isValid) {
-      cleanId = getNextGroupId(g.isVip || cleanId.startsWith('BACV'), cleanGroups);
+      cleanId = getNextGroupId(isGroupVip, cleanGroups, groupLevel);
       changed = true;
     }
     let cleanStatus = g.status;
@@ -922,17 +927,16 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
       changed = true;
     }
 
-    const isGroupVip = cleanId.startsWith('BACV') || cleanId.includes('VIP') || Boolean(g.isVip);
     const groupType = isGroupVip ? '4-10000' : (g.type || '4-2500');
 
     if (!seenIds.has(cleanId)) {
       seenIds.add(cleanId);
-      cleanGroups.push({ ...g, id: cleanId, status: cleanStatus, sessionCount: 4, isVip: isGroupVip, type: groupType });
+      cleanGroups.push({ ...g, id: cleanId, level: groupLevel, status: cleanStatus, sessionCount: 4, isVip: isGroupVip, type: groupType });
     } else {
-      // Duplicate ID detected (e.g. duplicate BAC01) - assign next ascending ID!
-      const uniqueId = getNextGroupId(g.isVip || cleanId.startsWith('BACV'), cleanGroups);
+      // Duplicate ID detected - assign next ascending ID!
+      const uniqueId = getNextGroupId(isGroupVip, cleanGroups, groupLevel);
       seenIds.add(uniqueId);
-      cleanGroups.push({ ...g, id: uniqueId, status: cleanStatus, sessionCount: 4, isVip: isGroupVip, type: groupType });
+      cleanGroups.push({ ...g, id: uniqueId, level: groupLevel, status: cleanStatus, sessionCount: 4, isVip: isGroupVip, type: groupType });
       changed = true;
     }
   }
@@ -981,36 +985,11 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [data, setData] = useState<CenterData>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const savedData = localStorage.getItem(STORAGE_KEY);
-        if (savedData) {
-          const parsed = JSON.parse(savedData);
-          if (parsed && parsed.groupData) {
-            const { cleaned } = sanitizeData(parsed);
-            return cleaned;
-          }
-        }
-      } catch (e) {}
-    }
     const { cleaned } = sanitizeData(initialSeedData as unknown as CenterData);
     return cleaned;
   });
   const [isLoading, setIsLoading] = useState(false);
   const [selectedGroup, setSelectedGroupState] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const params = new URLSearchParams(window.location.search);
-        const qGroup = params.get('group') || params.get('groupId');
-        if (qGroup && qGroup.trim()) {
-          return qGroup.trim().toUpperCase();
-        }
-        const saved = localStorage.getItem(SELECTED_GROUP_KEY);
-        if (saved && saved.trim()) {
-          return saved.trim().toUpperCase();
-        }
-      } catch (e) {}
-    }
     const { cleaned } = sanitizeData(initialSeedData as unknown as CenterData);
     const sorted = sortGroupsActiveFirstOldToNew(cleaned.groups, cleaned.groupData, cleaned.pricingTiers);
     return sorted[0]?.id || 'BAC01';
@@ -1038,17 +1017,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [lang, setLang] = useState<'ar' | 'en'>('ar');
 
   // Print Queue for deferred thermal receipts
-  const [printQueue, setPrintQueue] = useState<QueuedReceipt[]>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem('da3m_print_queue_v1');
-        return saved ? JSON.parse(saved) : [];
-      } catch (e) {
-        return [];
-      }
-    }
-    return [];
-  });
+  const [printQueue, setPrintQueue] = useState<QueuedReceipt[]>([]);
 
   const addToPrintQueue = (receipt: QueuedReceipt) => {
     setPrintQueue((prev) => {
@@ -1358,6 +1327,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (savedGroup && savedGroup.trim()) {
         setSelectedGroupState(savedGroup.trim().toUpperCase());
       }
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const qGroup = params.get('group') || params.get('groupId');
+        if (qGroup && qGroup.trim()) {
+          setSelectedGroupState(qGroup.trim().toUpperCase());
+        }
+      } catch (e) {}
+
+      try {
+        const savedQueue = localStorage.getItem('da3m_print_queue_v1');
+        if (savedQueue) {
+          const parsedQueue = JSON.parse(savedQueue);
+          if (Array.isArray(parsedQueue)) {
+            setPrintQueue(parsedQueue);
+          }
+        }
+      } catch (e) {}
     } catch (e) {
       console.error('Failed to load stored data:', e);
     } finally {
@@ -3182,6 +3168,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // Add group
   const addGroup = (groupMeta: GroupMeta) => {
     let cleanId = groupMeta.id.trim().toUpperCase();
+    const groupLevel = groupMeta.level || getGroupLevelFromId(cleanId);
     if (
       !cleanId ||
       cleanId.includes('-') ||
@@ -3189,7 +3176,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       data.groupData[cleanId] ||
       data.groups.some((g) => g.id.toUpperCase() === cleanId)
     ) {
-      cleanId = getNextGroupId(groupMeta.isVip, data.groups);
+      cleanId = getNextGroupId(groupMeta.isVip, data.groups, groupLevel);
     }
     const sessionCount = groupMeta.sessionCount || 8;
     const effectiveDay1 = groupMeta.day1 || 'السبت';
@@ -3201,6 +3188,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const newGroupSheet: GroupSheet = {
       groupId: cleanId,
+      level: groupLevel,
       teacherName: groupMeta.teacherName,
       subject: groupMeta.subject,
       day1: groupMeta.day1,
@@ -3219,7 +3207,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const updatedData: CenterData = {
       ...data,
-      groups: [...data.groups, { ...groupMeta, id: cleanId, sessionCount, sessionDates }],
+      groups: [...data.groups, { ...groupMeta, id: cleanId, level: groupLevel, sessionCount, sessionDates }],
       groupData: {
         ...data.groupData,
         [cleanId]: newGroupSheet
@@ -3240,6 +3228,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!sourceGroup) return;
 
     const isVipGroup = customGroupFields?.isVip ?? sourceMeta?.isVip ?? sourceGroup?.isVip ?? isVipGroupId(newGroupId || sourceGroupId);
+    const groupLevel = customGroupFields?.level ?? sourceMeta?.level ?? sourceGroup?.level ?? getGroupLevelFromId(newGroupId || sourceGroupId);
     let cleanNewId = newGroupId.trim().toUpperCase();
     if (
       !cleanNewId ||
@@ -3248,7 +3237,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       data.groupData[cleanNewId] ||
       data.groups.some((g) => g.id.toUpperCase() === cleanNewId)
     ) {
-      cleanNewId = getNextGroupId(isVipGroup, data.groups);
+      cleanNewId = getNextGroupId(isVipGroup, data.groups, groupLevel);
     }
 
     const sessionCount = customGroupFields?.sessionCount || sourceGroup.sessionCount || sourceMeta?.sessionCount || 4;
@@ -3440,6 +3429,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const updatedGroup: GroupSheet = {
       ...group,
+      level: fields.level !== undefined ? fields.level : (group.level || getGroupLevelFromId(groupId)),
       teacherName: fields.teacherName !== undefined ? fields.teacherName : group.teacherName,
       subject: fields.subject !== undefined ? fields.subject : group.subject,
       day1: fields.day1 !== undefined ? fields.day1 : group.day1,

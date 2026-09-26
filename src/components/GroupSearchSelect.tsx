@@ -3,7 +3,14 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { Search, X, Check, ChevronDown, Sparkles, Calendar } from 'lucide-react';
-import { isGroupToday, formatGroupTime, normalizeArabicText, sortGroupsActiveFirstOldToNew } from '../utils/sessionUtils';
+import {
+  isGroupToday,
+  formatGroupTime,
+  normalizeArabicText,
+  sortGroupsActiveFirstOldToNew,
+  getGroupLevelFromId,
+  getLevelDisplayName
+} from '../utils/sessionUtils';
 
 interface Props {
   selectedGroupId: string;
@@ -59,6 +66,9 @@ export default function GroupSearchSelect({
       const normTeacher = normalizeArabicText(g.teacherName.toLowerCase());
       const normDay1 = normalizeArabicText(g.day1?.toLowerCase() || '');
       const normDay2 = normalizeArabicText(g.day2?.toLowerCase() || '');
+      const groupLevel = g.level || getGroupLevelFromId(g.id);
+      const normLevel = normalizeArabicText(groupLevel.toLowerCase());
+      const normLevelName = normalizeArabicText(getLevelDisplayName(groupLevel).toLowerCase());
 
       return (
         normId.includes(normQ) ||
@@ -66,6 +76,8 @@ export default function GroupSearchSelect({
         normTeacher.includes(normQ) ||
         normDay1.includes(normQ) ||
         normDay2.includes(normQ) ||
+        normLevel.includes(normQ) ||
+        normLevelName.includes(normQ) ||
         (g.isVip && (normQ.includes('vip') || normQ.includes('خاص')))
       );
     });
@@ -296,6 +308,18 @@ export default function GroupSearchSelect({
                         }}
                       >
                         {g.id}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: '0.67rem',
+                          fontWeight: 700,
+                          padding: '1px 5px',
+                          borderRadius: '3px',
+                          backgroundColor: isSelected ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-surface-container)',
+                          color: isSelected ? 'var(--md-sys-color-on-primary)' : 'var(--md-sys-color-on-surface-variant)'
+                        }}
+                      >
+                        {getLevelDisplayName(g.level || getGroupLevelFromId(g.id))}
                       </span>
                       <span
                         style={{

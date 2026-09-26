@@ -2,9 +2,16 @@
 
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { X, FolderPlus, Coins, Sparkles, Calendar } from 'lucide-react';
-import { GroupMeta } from '../types';
-import { getNextGroupId, isValidGroupId, getSuggestedGroupIds, getUpcomingSessionDate, formatToYYYYMMDD } from '../utils/sessionUtils';
+import { X, FolderPlus, Coins, Sparkles, Calendar, GraduationCap } from 'lucide-react';
+import { GroupMeta, EducationalLevel } from '../types';
+import {
+  getNextGroupId,
+  isValidGroupId,
+  getSuggestedGroupIds,
+  getUpcomingSessionDate,
+  formatToYYYYMMDD,
+  EDUCATIONAL_LEVELS
+} from '../utils/sessionUtils';
 
 interface Props {
   onClose: () => void;
@@ -13,8 +20,9 @@ interface Props {
 export default function AddGroupModal({ onClose }: Props) {
   const { addGroup, data } = useApp();
 
+  const [level, setLevel] = useState<EducationalLevel>('BAC');
   const [isVip, setIsVip] = useState(false);
-  const [groupId, setGroupId] = useState(() => getNextGroupId(false, data.groups));
+  const [groupId, setGroupId] = useState(() => getNextGroupId(false, data.groups, 'BAC'));
   const [teacherName, setTeacherName] = useState('');
   const [subject, setSubject] = useState('رياضيات');
   const [day1, setDay1] = useState('السبت');
@@ -33,6 +41,13 @@ export default function AddGroupModal({ onClose }: Props) {
 
   const daysList = ['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة'];
 
+  const handleLevelChange = (newLevel: EducationalLevel) => {
+    setLevel(newLevel);
+    const nextId = getNextGroupId(isVip, data.groups, newLevel);
+    setGroupId(nextId);
+    setError('');
+  };
+
   const handleDay1Change = (newDay: string) => {
     setDay1(newDay);
     setStartDate(formatToYYYYMMDD(getUpcomingSessionDate(newDay, new Date(), false)));
@@ -42,7 +57,7 @@ export default function AddGroupModal({ onClose }: Props) {
     e.preventDefault();
     const cleanId = groupId.trim().toUpperCase();
     if (!cleanId) {
-      setError(isVip ? 'يرجى كتابة رمز الفوج الخاص (مثال: BACV05)' : 'يرجى كتابة رمز الفوج (مثال: BAC10)');
+      setError(isVip ? `يرجى كتابة رمز الفوج الخاص (مثال: ${level}V01)` : `يرجى كتابة رمز الفوج (مثال: ${level}01)`);
       return;
     }
 
@@ -61,6 +76,7 @@ export default function AddGroupModal({ onClose }: Props) {
 
     const newGroup: GroupMeta = {
       id: groupId.trim().toUpperCase(),
+      level,
       teacherId: selectedTeacher?.id || '',
       teacherName: teacherName || selectedTeacher?.name || 'أستاذ المادة',
       subject,
@@ -111,17 +127,40 @@ export default function AddGroupModal({ onClose }: Props) {
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div>
-            <label style={{ display: 'block', fontWeight: 600, fontSize: '0.85rem', marginBottom: '6px' }}>
-              رمز الفوج (GroupID) <span style={{ color: 'var(--md-sys-color-error)' }}>*</span>
-            </label>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+              <label style={{ fontWeight: 600, fontSize: '0.85rem' }}>
+                رمز الفوج (GroupID) <span style={{ color: 'var(--md-sys-color-error)' }}>*</span>
+              </label>
+              <span
+                style={{
+                  fontSize: '0.72rem',
+                  fontWeight: 700,
+                  backgroundColor: 'var(--md-sys-color-surface-container)',
+                  color: 'var(--md-sys-color-primary)',
+                  padding: '1px 8px',
+                  borderRadius: 'var(--md-shape-full)',
+                  border: '1px solid var(--md-sys-color-outline-variant)'
+                }}
+              >
+                الطور: {EDUCATIONAL_LEVELS.find((l) => l.key === level)?.label || level} ({level})
+              </span>
+            </div>
             <input
               type="text"
               value={groupId}
               onChange={(e) => {
-                setGroupId(e.target.value.toUpperCase());
+                const val = e.target.value.toUpperCase();
+                setGroupId(val);
                 setError('');
+                if (val.startsWith('SEC')) {
+                  setLevel('SEC');
+                } else if (val.startsWith('BEM')) {
+                  setLevel('BEM');
+                } else if (val.startsWith('BAC')) {
+                  setLevel('BAC');
+                }
               }}
-              placeholder={isVip ? 'مثال: BACV05' : 'مثال: BAC10'}
+              placeholder={isVip ? `مثال: ${level}V01` : `مثال: ${level}01`}
               className="m3-input"
               style={{ fontWeight: 800, letterSpacing: '0.5px' }}
               autoFocus
@@ -130,9 +169,9 @@ export default function AddGroupModal({ onClose }: Props) {
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', flexWrap: 'wrap' }}>
               <span style={{ fontSize: '0.73rem', color: 'var(--md-sys-color-on-surface-variant)', display: 'flex', alignItems: 'center', gap: '3px' }}>
                 <Sparkles size={12} color="var(--md-sys-color-primary)" />
-                اقتراحات تصاعدية:
+                اقتراحات تصاعدية ({level}):
               </span>
-              {getSuggestedGroupIds(isVip, data.groups, 3).map((sug) => (
+              {getSuggestedGroupIds(isVip, data.groups, 3, level).map((sug) => (
                 <button
                   key={sug}
                   type="button"
@@ -157,8 +196,8 @@ export default function AddGroupModal({ onClose }: Props) {
             </div>
             <span style={{ fontSize: '0.72rem', color: 'var(--md-sys-color-on-surface-variant)', display: 'block', marginTop: '4px' }}>
               {isVip
-                ? 'رمز الفوج الخاص يبدأ دائماً بـ BACV متبوعاً بأرقام تصاعدية (مثل BACV01, BACV02...)'
-                : 'رمز الفوج العادي يبدأ دائماً بـ BAC متبوعاً بأرقام تصاعدية (مثل BAC01, BAC02, BAC10...)'}
+                ? `رمز الفوج الخاص يبدأ دائماً بـ ${level}V متبوعاً بأرقام تصاعدية (مثل ${level}V01, ${level}V02...)`
+                : `رمز الفوج العادي يبدأ دائماً بـ ${level} متبوعاً بأرقام تصاعدية (مثل ${level}01, ${level}02...)`}
             </span>
           </div>
 
@@ -196,6 +235,111 @@ export default function AddGroupModal({ onClose }: Props) {
                 placeholder="رياضيات، فيزياء..."
                 className="m3-input"
               />
+            </div>
+          </div>
+
+          {/* Section to choose Educational Level (المستوى الدراسي) */}
+          <div
+            style={{
+              backgroundColor: 'var(--md-sys-color-surface-container-low)',
+              padding: '12px 14px',
+              borderRadius: 'var(--md-shape-sm)',
+              border: '1px solid var(--md-sys-color-outline-variant)'
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: '10px'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <GraduationCap size={18} color="var(--md-sys-color-primary)" />
+                <label style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--md-sys-color-on-surface)' }}>
+                  المستوى الدراسي (Educational Level) <span style={{ color: 'var(--md-sys-color-error)' }}>*</span>
+                </label>
+              </div>
+              <span
+                style={{
+                  fontSize: '0.72rem',
+                  fontWeight: 700,
+                  backgroundColor: 'var(--md-sys-color-primary-container)',
+                  color: 'var(--md-sys-color-on-primary-container)',
+                  padding: '2px 8px',
+                  borderRadius: 'var(--md-shape-full)'
+                }}
+              >
+                رمز المستوى: {isVip ? `${level}V` : level}
+              </span>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+              {EDUCATIONAL_LEVELS.map((lvl) => {
+                const isSelected = level === lvl.key;
+                return (
+                  <button
+                    key={lvl.key}
+                    type="button"
+                    onClick={() => handleLevelChange(lvl.key)}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '4px',
+                      padding: '10px 6px',
+                      borderRadius: 'var(--md-shape-sm)',
+                      cursor: 'pointer',
+                      transition: 'all 0.18s ease-in-out',
+                      textAlign: 'center',
+                      backgroundColor: isSelected
+                        ? 'var(--md-sys-color-primary-container)'
+                        : 'var(--md-sys-color-surface)',
+                      border: isSelected
+                        ? '2px solid var(--md-sys-color-primary)'
+                        : '1px solid var(--md-sys-color-outline-variant)',
+                      boxShadow: isSelected ? '0 2px 8px rgba(0, 99, 155, 0.15)' : 'none'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <span
+                        style={{
+                          fontSize: '0.72rem',
+                          fontWeight: 800,
+                          padding: '1px 6px',
+                          borderRadius: '4px',
+                          backgroundColor: isSelected ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-surface-container-high)',
+                          color: isSelected ? 'var(--md-sys-color-on-primary)' : 'var(--md-sys-color-on-surface-variant)',
+                          letterSpacing: '0.5px'
+                        }}
+                      >
+                        {lvl.badge}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: '0.88rem',
+                          fontWeight: isSelected ? 800 : 600,
+                          color: isSelected ? 'var(--md-sys-color-on-primary-container)' : 'var(--md-sys-color-on-surface)'
+                        }}
+                      >
+                        {lvl.label}
+                      </span>
+                    </div>
+                    <span
+                      style={{
+                        fontSize: '0.67rem',
+                        color: isSelected ? 'var(--md-sys-color-on-primary-container)' : 'var(--md-sys-color-on-surface-variant)',
+                        opacity: 0.9,
+                        lineHeight: 1.2
+                      }}
+                    >
+                      {lvl.sublabel}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -283,8 +427,8 @@ export default function AddGroupModal({ onClose }: Props) {
                 onChange={(e) => {
                   const checked = e.target.checked;
                   setIsVip(checked);
-                  // Automatically switch the proposed Group ID to the next ascending ID for this type
-                  setGroupId(getNextGroupId(checked, data.groups));
+                  // Automatically switch the proposed Group ID to the next ascending ID for this level and VIP type
+                  setGroupId(getNextGroupId(checked, data.groups, level));
                   setError('');
                   if (checked && !type.includes('10000') && !type.includes('7000')) {
                     const vipTier = data.pricingTiers.find((t) => t.id.includes('10000')) || data.pricingTiers.find((t) => t.id.includes('7000'));

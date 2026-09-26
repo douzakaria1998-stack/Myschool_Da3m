@@ -2,9 +2,9 @@
 
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { X, Edit3, Coins, CheckCircle, AlertTriangle, Trash2, Calendar, Clock } from 'lucide-react';
-import { GroupMeta } from '../types';
-import { formatGroupTime, getGroupStatus, isValidGroupId } from '../utils/sessionUtils';
+import { X, Edit3, Coins, CheckCircle, AlertTriangle, Trash2, Calendar, Clock, GraduationCap } from 'lucide-react';
+import { GroupMeta, EducationalLevel } from '../types';
+import { formatGroupTime, getGroupStatus, isValidGroupId, getGroupLevelFromId, EDUCATIONAL_LEVELS } from '../utils/sessionUtils';
 
 interface Props {
   groupId: string;
@@ -23,6 +23,7 @@ export default function EditGroupModal({ groupId, onClose }: Props) {
   const initialSchoolShare = group?.schoolSharePerStudent ?? groupMeta?.schoolSharePerStudent ?? tier?.schoolRate ?? (initialFee - initialTeacherPay);
   const initialSessions = group?.sessionCount || groupMeta?.sessionCount || group?.sessionDates?.length || 8;
 
+  const [level, setLevel] = useState<EducationalLevel>(() => groupMeta?.level || (group as any)?.level || getGroupLevelFromId(groupId));
   const [teacherName, setTeacherName] = useState(group?.teacherName || groupMeta?.teacherName || '');
   const [subject, setSubject] = useState(group?.subject || groupMeta?.subject || 'رياضيات');
   const [day1, setDay1] = useState(group?.day1 || groupMeta?.day1 || 'السبت');
@@ -108,6 +109,7 @@ export default function EditGroupModal({ groupId, onClose }: Props) {
     const selectedTeacher = data.teachers.find((t) => t.name === teacherName);
 
     const updatedFields: Partial<GroupMeta> = {
+      level,
       teacherId: selectedTeacher?.id || groupMeta?.teacherId || '',
       teacherName: teacherName.trim() || 'أستاذ المادة',
       subject: subject.trim() || 'مادة تعليمية',
@@ -238,6 +240,121 @@ export default function EditGroupModal({ groupId, onClose }: Props) {
                 placeholder="رياضيات، فيزياء..."
                 className="m3-input"
               />
+            </div>
+          </div>
+
+          {/* Section to choose Educational Level (المستوى الدراسي) */}
+          <div
+            style={{
+              backgroundColor: 'var(--md-sys-color-surface-container-low)',
+              padding: '12px 14px',
+              borderRadius: 'var(--md-shape-sm)',
+              border: '1px solid var(--md-sys-color-outline-variant)'
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: '10px'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <GraduationCap size={18} color="var(--md-sys-color-primary)" />
+                <label style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--md-sys-color-on-surface)' }}>
+                  المستوى الدراسي (Educational Level)
+                </label>
+              </div>
+              <span
+                style={{
+                  fontSize: '0.72rem',
+                  fontWeight: 700,
+                  backgroundColor: 'var(--md-sys-color-primary-container)',
+                  color: 'var(--md-sys-color-on-primary-container)',
+                  padding: '2px 8px',
+                  borderRadius: 'var(--md-shape-full)'
+                }}
+              >
+                الطور: {EDUCATIONAL_LEVELS.find((l) => l.key === level)?.label || level} ({level})
+              </span>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+              {EDUCATIONAL_LEVELS.map((lvl) => {
+                const isSelected = level === lvl.key;
+                return (
+                  <button
+                    key={lvl.key}
+                    type="button"
+                    onClick={() => {
+                      setLevel(lvl.key);
+                      // If the group ID starts with one of the standard prefixes, offer to update prefix smoothly
+                      const match = groupIdInput.match(/^(?:BACV|SECV|BEMV|BAC|SEC|BEM)(\d+)$/i);
+                      if (match) {
+                        const num = match[1];
+                        const newPfx = isVip ? lvl.vipPrefix : lvl.prefix;
+                        setGroupIdInput(`${newPfx}${num}`);
+                        setIdError('');
+                      }
+                    }}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '4px',
+                      padding: '8px 6px',
+                      borderRadius: 'var(--md-shape-sm)',
+                      cursor: 'pointer',
+                      transition: 'all 0.18s ease-in-out',
+                      textAlign: 'center',
+                      backgroundColor: isSelected
+                        ? 'var(--md-sys-color-primary-container)'
+                        : 'var(--md-sys-color-surface)',
+                      border: isSelected
+                        ? '2px solid var(--md-sys-color-primary)'
+                        : '1px solid var(--md-sys-color-outline-variant)',
+                      boxShadow: isSelected ? '0 2px 8px rgba(0, 99, 155, 0.15)' : 'none'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <span
+                        style={{
+                          fontSize: '0.72rem',
+                          fontWeight: 800,
+                          padding: '1px 6px',
+                          borderRadius: '4px',
+                          backgroundColor: isSelected ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-surface-container-high)',
+                          color: isSelected ? 'var(--md-sys-color-on-primary)' : 'var(--md-sys-color-on-surface-variant)',
+                          letterSpacing: '0.5px'
+                        }}
+                      >
+                        {lvl.badge}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: '0.86rem',
+                          fontWeight: isSelected ? 800 : 600,
+                          color: isSelected ? 'var(--md-sys-color-on-primary-container)' : 'var(--md-sys-color-on-surface)'
+                        }}
+                      >
+                        {lvl.label}
+                      </span>
+                    </div>
+                    <span
+                      style={{
+                        fontSize: '0.67rem',
+                        color: isSelected ? 'var(--md-sys-color-on-primary-container)' : 'var(--md-sys-color-on-surface-variant)',
+                        opacity: 0.9,
+                        lineHeight: 1.2
+                      }}
+                    >
+                      {lvl.sublabel}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 

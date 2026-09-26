@@ -1,4 +1,4 @@
-import { GroupSheet, StudentRecord, GroupMeta, PricingTier, CoveringMatchResult } from '../types/index';
+import { GroupSheet, StudentRecord, GroupMeta, PricingTier, CoveringMatchResult, EducationalLevel } from '../types/index';
 import { normalizeArabicName } from './barcodeUtils';
 
 /**
@@ -721,53 +721,122 @@ export function sortGroupsActiveFirstOldToNew(
 }
 
 /**
- * Checks if a group ID belongs to a VIP group (BACV prefix) or standard group (BAC prefix)
+ * Educational levels definition and metadata
+ */
+export type { EducationalLevel } from '../types/index';
+
+export interface EducationalLevelOption {
+  key: EducationalLevel;
+  label: string;
+  sublabel: string;
+  prefix: string;
+  vipPrefix: string;
+  badge: string;
+}
+
+export const EDUCATIONAL_LEVELS: EducationalLevelOption[] = [
+  {
+    key: 'BAC',
+    label: 'بكالوريا',
+    sublabel: 'شهادة البكالوريا (BAC)',
+    prefix: 'BAC',
+    vipPrefix: 'BACV',
+    badge: 'BAC'
+  },
+  {
+    key: 'SEC',
+    label: 'ثانوي',
+    sublabel: 'التعليم الثانوي (SEC)',
+    prefix: 'SEC',
+    vipPrefix: 'SECV',
+    badge: 'SEC'
+  },
+  {
+    key: 'BEM',
+    label: 'الرابعة متوسط',
+    sublabel: 'شهادة التعليم المتوسط (BEM)',
+    prefix: 'BEM',
+    vipPrefix: 'BEMV',
+    badge: 'BEM'
+  }
+];
+
+/**
+ * Extracts educational level from Group ID or level string
+ */
+export function getGroupLevelFromId(groupId: string): EducationalLevel {
+  const clean = (groupId || '').trim().toUpperCase();
+  if (clean.startsWith('SEC')) return 'SEC';
+  if (clean.startsWith('BEM')) return 'BEM';
+  return 'BAC';
+}
+
+/**
+ * Returns user-friendly Arabic display name for an educational level
+ */
+export function getLevelDisplayName(level?: EducationalLevel | string): string {
+  if (!level) return 'بكالوريا';
+  const norm = level.toString().toUpperCase().trim();
+  if (norm === 'SEC' || norm.includes('ثانوي')) return 'ثانوي';
+  if (norm === 'BEM' || norm.includes('متوسط')) return 'الرابعة متوسط';
+  return 'بكالوريا';
+}
+
+/**
+ * Checks if a group ID belongs to a VIP group (BACV / SECV / BEMV prefix)
  */
 export function isVipGroupId(groupId: string): boolean {
   if (!groupId) return false;
-  return /^BACV/i.test(groupId.trim());
+  return /^(BACV|SECV|BEMV)/i.test(groupId.trim());
 }
 
 /**
  * Validates group ID strictly:
- * - Normal groups: Must start with BAC followed by at least 2 digits (e.g. BAC01, BAC02, BAC10)
- * - VIP groups: Must start with BACV followed by at least 2 digits (e.g. BACV01, BACV02, BACV05)
- * - No hyphens, dashes or suffixes (e.g. BAC01-2 is invalid)
+ * - High School / Secondary: SEC01, SEC02... (VIP: SECV01...)
+ * - BEM (4th year Middle School): BEM01, BEM02... (VIP: BEMV01...)
+ * - Baccalaureate: BAC01, BAC02... (VIP: BACV01...)
+ * - Numbers must have at least 2 digits (e.g. 01, 02, 10...)
+ * - No hyphens, dashes or random suffixes
  */
 export function isValidGroupId(groupId: string): { isValid: boolean; error?: string } {
   const clean = (groupId || '').trim().toUpperCase();
   if (!clean) {
     return { isValid: false, error: 'رمز الفوج لا يمكن أن يكون فارغاً' };
   }
-  if (!clean.startsWith('BAC')) {
-    return { isValid: false, error: 'يجب أن يبدأ رمز الفوج دائماً بـ BAC أو BACV' };
+
+  const match = clean.match(/^(BACV|SECV|BEMV|BAC|SEC|BEM)(\d+)$/);
+  if (!match) {
+    return {
+      isValid: false,
+      error: 'يجب أن يبدأ رمز الفوج بـ BAC أو SEC أو BEM (أو BACV / SECV / BEMV للأفواج الخاصة) متبوعاً بأرقام تصاعدية (مثل BAC01, SEC01, BEM01)'
+    };
   }
-  if (clean.startsWith('BACV')) {
-    const rest = clean.slice(4);
-    if (!/^\d{2,}$/.test(rest)) {
-      return { isValid: false, error: 'يجب أن يتبع BACV أرقام تصاعدية مكونة من خانتين على الأقل (مثال: BACV01 أو BACV05)' };
-    }
-    return { isValid: true };
-  } else {
-    const rest = clean.slice(3);
-    if (!/^\d{2,}$/.test(rest)) {
-      return { isValid: false, error: 'يجب أن يتبع BAC أرقام تصاعدية مكونة من خانتين على الأقل (مثال: BAC01 أو BAC10)' };
-    }
-    return { isValid: true };
+
+  const digits = match[2];
+  if (digits.length < 2) {
+    return {
+      isValid: false,
+      error: 'يجب أن يحتوي رمز الفوج على رقمين على الأقل (مثال: 01، 02، 10...)'
+    };
   }
+
+  return { isValid: true };
 }
 
 /**
- * Computes the next ascending sequential Group ID:
- * - For normal groups: BAC01, BAC02, ..., BAC09, BAC10, BAC11...
- * - For VIP groups: BACV01, BACV02, ..., BACV04, BACV05, BACV10...
+ * Computes the next ascending sequential Group ID for a specific educational level:
+ * - For BAC: BAC01, BAC02... / VIP: BACV01, BACV02...
+ * - For SEC: SEC01, SEC02... / VIP: SECV01, SECV02...
+ * - For BEM: BEM01, BEM02... / VIP: BEMV01, BEMV02...
  * - Numbers are always formatted with leading zero for single digits: 01, 02, 03...
  */
 export function getNextGroupId(
   isVip: boolean,
-  existingGroupIds: (string | { id?: string; groupId?: string })[]
+  existingGroupIds: (string | { id?: string; groupId?: string })[],
+  level: EducationalLevel = 'BAC'
 ): string {
-  const prefix = isVip ? 'BACV' : 'BAC';
+  const basePrefix = level === 'SEC' ? 'SEC' : level === 'BEM' ? 'BEM' : 'BAC';
+  const prefix = isVip ? `${basePrefix}V` : basePrefix;
   const rawIds = (existingGroupIds || [])
     .map((g) => {
       if (!g) return '';
@@ -783,14 +852,14 @@ export function getNextGroupId(
   let maxNum = 0;
   for (const id of rawIds) {
     if (isVip) {
-      const match = id.match(/^BACV(\d+)$/i);
+      const match = id.match(new RegExp(`^${basePrefix}V(\\d+)$`, 'i'));
       if (match) {
         const num = parseInt(match[1], 10);
         if (num > maxNum) maxNum = num;
       }
     } else {
-      const match = id.match(/^BAC(\d+)$/i);
-      if (match && !id.startsWith('BACV')) {
+      const match = id.match(new RegExp(`^${basePrefix}(\\d+)$`, 'i'));
+      if (match && !id.toUpperCase().startsWith(`${basePrefix}V`)) {
         const num = parseInt(match[1], 10);
         if (num > maxNum) maxNum = num;
       }
@@ -814,7 +883,8 @@ export function getNextGroupId(
 export function getSuggestedGroupIds(
   isVip: boolean,
   existingGroupIds: (string | { id?: string; groupId?: string })[],
-  count: number = 3
+  count: number = 3,
+  level: EducationalLevel = 'BAC'
 ): string[] {
   const suggestions: string[] = [];
   const rawIds = (existingGroupIds || [])
@@ -829,18 +899,19 @@ export function getSuggestedGroupIds(
     })
     .filter(Boolean);
 
-  const prefix = isVip ? 'BACV' : 'BAC';
+  const basePrefix = level === 'SEC' ? 'SEC' : level === 'BEM' ? 'BEM' : 'BAC';
+  const prefix = isVip ? `${basePrefix}V` : basePrefix;
   let maxNum = 0;
   for (const id of rawIds) {
     if (isVip) {
-      const match = id.match(/^BACV(\d+)$/i);
+      const match = id.match(new RegExp(`^${basePrefix}V(\\d+)$`, 'i'));
       if (match) {
         const num = parseInt(match[1], 10);
         if (num > maxNum) maxNum = num;
       }
     } else {
-      const match = id.match(/^BAC(\d+)$/i);
-      if (match && !id.startsWith('BACV')) {
+      const match = id.match(new RegExp(`^${basePrefix}(\\d+)$`, 'i'));
+      if (match && !id.toUpperCase().startsWith(`${basePrefix}V`)) {
         const num = parseInt(match[1], 10);
         if (num > maxNum) maxNum = num;
       }

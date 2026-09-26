@@ -282,7 +282,7 @@ export default function GroupBadgesModal({ groupId, students, onClose }: Props) 
                 onChange={(e) => {
                   const clean = normalizeScannedBarcode(e.target.value);
                   setSearchTerm(clean);
-                  if (/^(?:STU[-_]?\d+|(?:BAC|BACV)[-_]?\d+[-_]?\d*)$/i.test(clean)) {
+                  if (/^(?:STU[-_]?\d+|(?:BAC|BACV|SEC|SECV|BEM|BEMV)[-_]?\d+[-_]?\d*)$/i.test(clean)) {
                     setTimeout(() => {
                       searchInputRef.current?.select();
                     }, 50);

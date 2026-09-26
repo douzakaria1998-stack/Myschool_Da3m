@@ -305,8 +305,8 @@ export function normalizeScannedBarcode(raw: string): string {
   if (!raw) return '';
   const trimmed = raw.trim();
 
-  // Incomplete user typing like "STU", "STU-", "BAC", preserve as is without inventing digits
-  if (/^STU[-_]?$/i.test(trimmed) || /^BACV?[-_]?$/i.test(trimmed)) {
+  // Incomplete user typing like "STU", "STU-", "BAC", "SEC", "BEM", preserve as is without inventing digits
+  if (/^STU[-_]?$/i.test(trimmed) || /^(BACV?|SECV?|BEMV?)[-_]?$/i.test(trimmed)) {
     return trimmed.toUpperCase();
   }
 
@@ -344,34 +344,36 @@ export function normalizeScannedBarcode(raw: string): string {
     return `STU-${mTotal[1]}`;
   }
 
-  // 2. Check for group barcode patterns: BAC / BACV (or Arabic لاشؤ, لاضؤ)
+  // 2. Check for group barcode patterns: BAC / BACV / SEC / SECV / BEM / BEMV (or Arabic لاشؤ, لاضؤ)
   // Pattern: (prefix)(delimiter?)(groupNum)(delimiter)(studentNum)
-  // Examples: BAC01-6, BAC01-- (AZERTY 6), BAC01-_ (AZERTY 8), BAC01)- (AZERTY 6), BACà&)- (AZERTY 01-6)
+  // Examples: BAC01-6, SEC01-2, BEM01-1, BACV05-1...
   const bacMatches = Array.from(
-    trimmed.matchAll(/(BACV|BAC|لاشؤ|لاضؤ)[-_)°\s]*([-&éÉ"'(èÈ_!çÇàÀ0-9٠-٩]+)[-_)°\s]+([-&éÉ"'(èÈ_!çÇàÀ0-9٠-٩]+)/gi)
+    trimmed.matchAll(/(BACV|BAC|SECV|SEC|BEMV|BEM|لاشؤ|لاضؤ)[-_)°\s]*([-&éÉ"'(èÈ_!çÇàÀ0-9٠-٩]+)[-_)°\s]+([-&éÉ"'(èÈ_!çÇàÀ0-9٠-٩]+)/gi)
   );
   if (bacMatches.length > 0) {
     const lastBac = bacMatches[bacMatches.length - 1];
-    const prefix = lastBac[1].toUpperCase().startsWith('BACV') ? 'BACV' : 'BAC';
+    let rawPrefix = lastBac[1].toUpperCase();
+    if (rawPrefix === 'لاشؤ' || rawPrefix === 'لاضؤ') rawPrefix = 'BAC';
     const groupNum = decodePayloadDigits(lastBac[2]);
     const studentNum = decodePayloadDigits(lastBac[3]);
 
     if (groupNum && studentNum) {
       const gPadded = groupNum.padStart(2, '0');
-      return `${prefix}${gPadded}-${parseInt(studentNum, 10)}`;
+      return `${rawPrefix}${gPadded}-${parseInt(studentNum, 10)}`;
     }
   }
 
-  // 2b. Group-only barcode without student row (e.g. BAC01 or BACà&)
+  // 2b. Group-only barcode without student row (e.g. BAC01, SEC01, BEM01)
   const bacGroupMatches = Array.from(
-    trimmed.matchAll(/(BACV|BAC|لاشؤ|لاضؤ)[-_)°\s]*([-&éÉ"'(èÈ_!çÇàÀ0-9٠-٩]+)$/gi)
+    trimmed.matchAll(/(BACV|BAC|SECV|SEC|BEMV|BEM|لاشؤ|لاضؤ)[-_)°\s]*([-&éÉ"'(èÈ_!çÇàÀ0-9٠-٩]+)$/gi)
   );
   if (bacGroupMatches.length > 0) {
     const lastBac = bacGroupMatches[bacGroupMatches.length - 1];
-    const prefix = lastBac[1].toUpperCase().startsWith('BACV') ? 'BACV' : 'BAC';
+    let rawPrefix = lastBac[1].toUpperCase();
+    if (rawPrefix === 'لاشؤ' || rawPrefix === 'لاضؤ') rawPrefix = 'BAC';
     const groupNum = decodePayloadDigits(lastBac[2]);
     if (groupNum) {
-      return `${prefix}${groupNum.padStart(2, '0')}`;
+      return `${rawPrefix}${groupNum.padStart(2, '0')}`;
     }
   }
 

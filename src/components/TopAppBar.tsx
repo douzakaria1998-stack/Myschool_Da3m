@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useApp } from '../context/AppContext';
 import { Sun, Moon, Download, GraduationCap, School, CloudCheck, CloudOff, RefreshCw, Scan, Clock, Trash2 } from 'lucide-react';
@@ -21,9 +21,18 @@ export default function TopAppBar() {
     syncNow
   } = useApp();
 
+  const [isMounted, setIsMounted] = useState(false);
   const [isManualSyncing, setIsManualSyncing] = useState(false);
   const [isHourlyFilterOpen, setIsHourlyFilterOpen] = useState(false);
   const [isRecycleBinOpen, setIsRecycleBinOpen] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  const effectiveTheme = isMounted ? theme : 'light';
+  const effectiveLang = isMounted ? lang : 'ar';
+  const deletedCount = isMounted ? (data.deletedStudents?.length || 0) : 0;
 
   const handleManualSync = async () => {
     setIsManualSyncing(true);
@@ -100,7 +109,7 @@ export default function TopAppBar() {
         <button
           onClick={() => setIsHourlyFilterOpen(true)}
           className="m3-btn"
-          title={lang === 'ar' ? 'تصفية المداخيل حسب الساعات واليوم' : 'Hourly Income & Payments Filter'}
+          title={effectiveLang === 'ar' ? 'تصفية المداخيل حسب الساعات واليوم' : 'Hourly Income & Payments Filter'}
           style={{
             height: '34px',
             display: 'inline-flex',
@@ -109,9 +118,9 @@ export default function TopAppBar() {
             gap: '6px',
             padding: '0 11px',
             borderRadius: 'var(--md-shape-full)',
-            border: theme === 'dark' ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #6ee7b7',
-            backgroundColor: theme === 'dark' ? 'rgba(16, 185, 129, 0.15)' : '#ecfdf5',
-            color: theme === 'dark' ? '#6ee7b7' : '#065f46',
+            border: effectiveTheme === 'dark' ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #6ee7b7',
+            backgroundColor: effectiveTheme === 'dark' ? 'rgba(16, 185, 129, 0.15)' : '#ecfdf5',
+            color: effectiveTheme === 'dark' ? '#6ee7b7' : '#065f46',
             cursor: 'pointer',
             fontSize: '0.8rem',
             fontWeight: 700,
@@ -120,14 +129,14 @@ export default function TopAppBar() {
           }}
         >
           <Clock size={14} />
-          <span>{lang === 'ar' ? 'مداخيل الساعات' : 'Hourly Income'}</span>
+          <span>{effectiveLang === 'ar' ? 'مداخيل الساعات' : 'Hourly Income'}</span>
         </button>
 
         {/* Recycle Bin / Restored Students */}
         <button
           onClick={() => setIsRecycleBinOpen(true)}
           className="m3-btn"
-          title={lang === 'ar' ? 'سلة المحذوفات واسترجاع الطلبة المحذوفين' : 'Recycle Bin & Restored Students'}
+          title={effectiveLang === 'ar' ? 'سلة المحذوفات واسترجاع الطلبة المحذوفين' : 'Recycle Bin & Restored Students'}
           style={{
             height: '34px',
             display: 'inline-flex',
@@ -136,14 +145,14 @@ export default function TopAppBar() {
             gap: '6px',
             padding: '0 11px',
             borderRadius: 'var(--md-shape-full)',
-            border: (data.deletedStudents?.length || 0) > 0
-              ? (theme === 'dark' ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid #f87171')
+            border: deletedCount > 0
+              ? (effectiveTheme === 'dark' ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid #f87171')
               : '1px solid var(--md-sys-color-outline-variant)',
-            backgroundColor: (data.deletedStudents?.length || 0) > 0
-              ? (theme === 'dark' ? 'rgba(239, 68, 68, 0.15)' : '#fef2f2')
+            backgroundColor: deletedCount > 0
+              ? (effectiveTheme === 'dark' ? 'rgba(239, 68, 68, 0.15)' : '#fef2f2')
               : 'var(--md-sys-color-surface-container-high)',
-            color: (data.deletedStudents?.length || 0) > 0
-              ? (theme === 'dark' ? '#f87171' : '#b91c1c')
+            color: deletedCount > 0
+              ? (effectiveTheme === 'dark' ? '#f87171' : '#b91c1c')
               : 'var(--md-sys-color-on-surface)',
             cursor: 'pointer',
             fontSize: '0.8rem',
@@ -154,8 +163,8 @@ export default function TopAppBar() {
         >
           <Trash2 size={14} />
           <span>
-            {lang === 'ar' ? 'سلة المحذوفات' : 'Recycle Bin'}
-            {(data.deletedStudents?.length || 0) > 0 ? ` (${data.deletedStudents?.length})` : ''}
+            {effectiveLang === 'ar' ? 'سلة المحذوفات' : 'Recycle Bin'}
+            {deletedCount > 0 ? ` (${deletedCount})` : ''}
           </span>
         </button>
 
@@ -166,12 +175,12 @@ export default function TopAppBar() {
           className="m3-btn"
           title={
             cloudSyncStatus === 'synced'
-              ? (lang === 'ar'
-                  ? `متزامن سحابياً مع Supabase ${lastSyncedAt ? `(آخر حفظ: ${lastSyncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })})` : ''} - اضغط للمزامنة الفورية`
+              ? (effectiveLang === 'ar'
+                  ? `متزامن سحابياً مع Supabase ${isMounted && lastSyncedAt ? `(آخر حفظ: ${lastSyncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })})` : ''} - اضغط للمزامنة الفورية`
                   : 'Synced with Supabase - Click to sync now')
               : isSyncing
-              ? (lang === 'ar' ? 'جاري المزامنة مع السحابة...' : 'Syncing with Supabase...')
-              : (lang === 'ar' ? 'غير متصل بالسحابة (محلي) - اضغط لإعادة المحاولة' : 'Cloud offline - Click to retry')
+              ? (effectiveLang === 'ar' ? 'جاري المزامنة مع السحابة...' : 'Syncing with Supabase...')
+              : (effectiveLang === 'ar' ? 'غير متصل بالسحابة (محلي) - اضغط لإعادة المحاولة' : 'Cloud offline - Click to retry')
           }
           style={{
             height: '34px',
@@ -189,16 +198,16 @@ export default function TopAppBar() {
             backgroundColor: isSyncing
               ? 'var(--md-sys-color-primary-container)'
               : cloudSyncStatus === 'error'
-              ? (theme === 'dark' ? 'rgba(239, 68, 68, 0.15)' : '#fee2e2')
+              ? (effectiveTheme === 'dark' ? 'rgba(239, 68, 68, 0.15)' : '#fee2e2')
               : cloudSyncStatus === 'offline'
-              ? (theme === 'dark' ? 'rgba(245, 158, 11, 0.15)' : '#fef3c7')
+              ? (effectiveTheme === 'dark' ? 'rgba(245, 158, 11, 0.15)' : '#fef3c7')
               : 'var(--md-sys-color-surface-container-high)',
             color: isSyncing
               ? 'var(--md-sys-color-on-primary-container)'
               : cloudSyncStatus === 'error'
-              ? (theme === 'dark' ? '#fca5a5' : '#991b1b')
+              ? (effectiveTheme === 'dark' ? '#fca5a5' : '#991b1b')
               : cloudSyncStatus === 'offline'
-              ? (theme === 'dark' ? '#fcd34d' : '#92400e')
+              ? (effectiveTheme === 'dark' ? '#fcd34d' : '#92400e')
               : 'var(--md-sys-color-on-surface)',
             cursor: isSyncing ? 'default' : 'pointer',
             fontSize: '0.8rem',
@@ -211,17 +220,17 @@ export default function TopAppBar() {
           {isSyncing ? (
             <>
               <RefreshCw size={14} className="animate-spin" />
-              <span>{lang === 'ar' ? 'جاري الحفظ...' : 'Syncing...'}</span>
+              <span>{effectiveLang === 'ar' ? 'جاري الحفظ...' : 'Syncing...'}</span>
             </>
           ) : cloudSyncStatus === 'synced' ? (
             <>
               <CloudCheck size={15} style={{ color: '#16a34a' }} />
-              <span>{lang === 'ar' ? 'سحابي متزامن' : 'Synced'}</span>
+              <span>{effectiveLang === 'ar' ? 'سحابي متزامن' : 'Synced'}</span>
             </>
           ) : (
             <>
               <CloudOff size={14} style={{ color: cloudSyncStatus === 'error' ? '#ef4444' : '#d97706' }} />
-              <span>{cloudSyncStatus === 'error' ? (lang === 'ar' ? 'خطأ مزامنة' : 'Sync Error') : (lang === 'ar' ? 'وضع محلي' : 'Offline')}</span>
+              <span>{cloudSyncStatus === 'error' ? (effectiveLang === 'ar' ? 'خطأ مزامنة' : 'Sync Error') : (effectiveLang === 'ar' ? 'وضع محلي' : 'Offline')}</span>
             </>
           )}
         </button>
@@ -279,7 +288,7 @@ export default function TopAppBar() {
           }}
         >
           <Download size={14} />
-          <span>{lang === 'ar' ? 'تصدير نسخة' : 'Export'}</span>
+          <span>{effectiveLang === 'ar' ? 'تصدير نسخة' : 'Export'}</span>
         </button>
 
         {/* Language Toggle */}
@@ -305,14 +314,14 @@ export default function TopAppBar() {
             justifyContent: 'center'
           }}
         >
-          {lang === 'ar' ? 'EN' : 'عربي'}
+          {effectiveLang === 'ar' ? 'EN' : 'عربي'}
         </button>
 
         {/* Theme Toggle */}
         <button
           onClick={toggleTheme}
           className="m3-btn"
-          title={theme === 'light' ? 'الوضع الليلي' : 'الوضع النهاري'}
+          title={effectiveTheme === 'light' ? 'الوضع الليلي' : 'الوضع النهاري'}
           style={{
             width: '34px',
             height: '34px',
@@ -328,7 +337,7 @@ export default function TopAppBar() {
             flexShrink: 0
           }}
         >
-          {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
+          {effectiveTheme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
         </button>
       </div>
 

@@ -14,7 +14,7 @@ import {
   Sparkles,
   AlertCircle
 } from 'lucide-react';
-import { getGroupStatus, isGroupActive } from '../utils/sessionUtils';
+import { getGroupStatus, isGroupActive, isVipGroupId } from '../utils/sessionUtils';
 import { sanitizePrintTitle } from '../utils/printTitleUtils';
 
 interface Props {
@@ -45,7 +45,7 @@ export default function MultiGroupStudentEnrollModal({ isOpen, onClose }: Props)
   // Compute fee for a group based on discount
   const getGroupFee = (group: GroupMeta): number => {
     const isVip =
-      group.id.toUpperCase().startsWith('BACV') ||
+      isVipGroupId(group.id) ||
       group.id.toUpperCase().includes('VIP') ||
       Boolean(group.isVip) ||
       Boolean(data.groupData[group.id]?.isVip) ||
@@ -188,7 +188,7 @@ export default function MultiGroupStudentEnrollModal({ isOpen, onClose }: Props)
           const g = data.groups.find((grp) => grp.id === id);
           if (g) {
             const isVip =
-              g.id.toUpperCase().startsWith('BACV') ||
+              isVipGroupId(g.id) ||
               g.id.toUpperCase().includes('VIP') ||
               Boolean(g.isVip) ||
               Boolean(data.groupData[g.id]?.isVip) ||

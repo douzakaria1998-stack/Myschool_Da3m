@@ -82,8 +82,11 @@ export interface StudentPaymentAccount {
   transactions: StudentAccountTransaction[];
 }
 
+export type EducationalLevel = 'BAC' | 'SEC' | 'BEM';
+
 export interface GroupSheet {
   groupId: string;
+  level?: EducationalLevel; // 'BAC' (بكالوريا) | 'SEC' (ثانوي) | 'BEM' (الرابعة متوسط)
   teacherName: string;
   subject: string;
   day1: string;
@@ -124,6 +127,7 @@ export interface Teacher {
 
 export interface GroupMeta {
   id: string;
+  level?: EducationalLevel; // 'BAC' (بكالوريا) | 'SEC' (ثانوي) | 'BEM' (الرابعة متوسط)
   teacherId: string;
   teacherName: string;
   subject: string;

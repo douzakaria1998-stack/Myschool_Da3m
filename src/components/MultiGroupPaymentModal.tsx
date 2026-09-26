@@ -20,7 +20,7 @@ import {
   UserCheck
 } from 'lucide-react';
 import { normalizeArabicName, getBarcodeCandidates } from '../utils/barcodeUtils';
-import { isSummaryRow } from '../utils/sessionUtils';
+import { isSummaryRow, isVipGroupId } from '../utils/sessionUtils';
 import { playSuccessChime } from '../utils/soundUtils';
 import { sanitizePrintTitle } from '../utils/printTitleUtils';
 import { normalizeScannedBarcode } from '../utils/barcodeUtils';
@@ -164,7 +164,7 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
       if (found) {
         const groupMeta = data.groups.find((g) => g.id === gid);
         const isVipGroup =
-          gid.toUpperCase().startsWith('BACV') ||
+          isVipGroupId(gid) ||
           gid.toUpperCase().includes('VIP') ||
           Boolean(group.isVip) ||
           Boolean(groupMeta?.isVip) ||
@@ -297,8 +297,8 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
     }
 
     const isVip =
+      isVipGroupId(additionalGroupId) ||
       additionalGroupId.toUpperCase().includes('VIP') ||
-      additionalGroupId.toUpperCase().startsWith('BACV') ||
       Boolean(groupSheet?.isVip) ||
       Boolean(groupMeta?.isVip) ||
       Boolean(groupSheet?.type?.includes('10000')) ||
@@ -819,7 +819,7 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
                   onChange={(e) => {
                     const cleanVal = normalizeScannedBarcode(e.target.value);
                     setSearchQuery(cleanVal);
-                    if (/^(?:STU[-_]?\d+|(?:BAC|BACV)[-_]?\d+[-_]?\d*)$/i.test(cleanVal)) {
+                    if (/^(?:STU[-_]?\d+|(?:BAC|BACV|SEC|SECV|BEM|BEMV)[-_]?\d+[-_]?\d*)$/i.test(cleanVal)) {
                       setTimeout(() => {
                         searchInputRef.current?.select();
                       }, 50);

@@ -32,7 +32,7 @@ import Link from 'next/link';
 import StudentPaymentModal from './StudentPaymentModal';
 import ThermalReceiptsModal from './ThermalReceiptsModal';
 import StudentBadgeModal from './StudentBadgeModal';
-import { formatGroupTime, isSummaryRow } from '../utils/sessionUtils';
+import { formatGroupTime, isSummaryRow, isVipGroupId } from '../utils/sessionUtils';
 import { normalizeArabicName } from '../utils/barcodeUtils';
 import { getStudentPaymentAccount } from '../utils/studentAccountUtils';
 
@@ -79,7 +79,7 @@ export default function StudentProfileModal({ student, groupId, onClose }: Props
       );
       if (match) {
         const isVipGroup =
-          gid.toUpperCase().startsWith('BACV') ||
+          isVipGroupId(gid) ||
           gid.toUpperCase().includes('VIP') ||
           Boolean(gSheet.isVip) ||
           Boolean(gSheet.type?.includes('10000'));

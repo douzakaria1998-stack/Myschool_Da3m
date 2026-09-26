@@ -420,7 +420,7 @@ export default function AddStudentModal({ groupId, onClose }: Props) {
                         const cleanVal = normalizeScannedBarcode(e.target.value);
                         setExistingSearch(cleanVal);
                         setError('');
-                        if (/^(?:STU[-_]?\d+|(?:BAC|BACV)[-_]?\d+[-_]?\d*)$/i.test(cleanVal)) {
+                        if (/^(?:STU[-_]?\d+|(?:BAC|BACV|SEC|SECV|BEM|BEMV)[-_]?\d+[-_]?\d*)$/i.test(cleanVal)) {
                           setTimeout(() => {
                             searchInputRef.current?.select();
                           }, 50);

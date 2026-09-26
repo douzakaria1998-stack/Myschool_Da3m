@@ -9,6 +9,7 @@ import {
   isValidGroupId,
   getNextGroupId,
   getSuggestedGroupIds,
+  getGroupLevelFromId,
   getNextSessionDateAfter,
   formatToYYYYMMDD
 } from '../utils/sessionUtils';
@@ -26,6 +27,7 @@ export default function RenewGroupModal({ sourceGroupId, onClose, onCreated }: P
   const sourceMeta = data.groups.find((g) => g.id === sourceGroupId);
 
   const isVip = sourceMeta?.isVip ?? sourceGroup?.isVip ?? isVipGroupId(sourceGroupId);
+  const sourceLevel = sourceMeta?.level || sourceGroup?.level || getGroupLevelFromId(sourceGroupId);
 
   // Filter genuine students from source group
   const realStudents = useMemo(() => {
@@ -45,13 +47,13 @@ export default function RenewGroupModal({ sourceGroupId, onClose, onCreated }: P
     return realStudents.filter(hasAttendedSession1);
   }, [realStudents]);
 
-  // Generate smart ascending sequential ID suggestions (e.g. BAC10, BAC11 or BACV05, BACV10)
+  // Generate smart ascending sequential ID suggestions
   const suggestions = useMemo(() => {
-    return getSuggestedGroupIds(isVip, data.groups, 3);
-  }, [isVip, data.groups]);
+    return getSuggestedGroupIds(isVip, data.groups, 3, sourceLevel);
+  }, [isVip, data.groups, sourceLevel]);
 
-  // New Group ID state - defaults to the next available ascending ID
-  const [newGroupId, setNewGroupId] = useState<string>(() => getNextGroupId(isVip, data.groups));
+  // New Group ID state - defaults to the next available ascending ID for this level
+  const [newGroupId, setNewGroupId] = useState<string>(() => getNextGroupId(isVip, data.groups, sourceLevel));
   const [searchQuery, setSearchQuery] = useState('');
   const [filterMode, setFilterMode] = useState<'session1' | 'all' | 'custom'>('session1');
 
@@ -235,7 +237,7 @@ export default function RenewGroupModal({ sourceGroupId, onClose, onCreated }: P
                 type="text"
                 value={newGroupId}
                 onChange={(e) => setNewGroupId(e.target.value.toUpperCase())}
-                placeholder={isVip ? 'مثال: BACV05' : 'مثال: BAC10'}
+                placeholder={isVip ? `مثال: ${sourceLevel}V01` : `مثال: ${sourceLevel}01`}
                 className="m3-input"
                 style={{
                   padding: '5px 10px',
@@ -249,8 +251,8 @@ export default function RenewGroupModal({ sourceGroupId, onClose, onCreated }: P
               />
               <span style={{ fontSize: '0.7rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
                 {isVip
-                  ? 'أفواج VIP الخاصة تبدأ دائماً بـ BACV بأرقام تصاعدية (01, 02...)'
-                  : 'الأفواج العادية تبدأ دائماً بـ BAC بأرقام تصاعدية (01, 02...)'}
+                  ? `أفواج VIP الخاصة تبدأ دائماً بـ ${sourceLevel}V بأرقام تصاعدية (01, 02...)`
+                  : `الأفواج العادية تبدأ دائماً بـ ${sourceLevel} بأرقام تصاعدية (01, 02...)`}
               </span>
             </div>
 

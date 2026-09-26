@@ -12,11 +12,13 @@ import {
   Calendar,
   Clock,
   GraduationCap,
+  School,
   BookOpen,
   X,
   Coins,
   Edit3,
-  RotateCw
+  RotateCw,
+  User
 } from 'lucide-react';
 import AddGroupModal from '../../components/AddGroupModal';
 import EditGroupModal from '../../components/EditGroupModal';
@@ -27,7 +29,10 @@ import {
   formatGroupTime,
   getGroupStatus,
   isGroupActive,
-  sortGroupsActiveFirstOldToNew
+  sortGroupsActiveFirstOldToNew,
+  getGroupLevelFromId,
+  getLevelDisplayName,
+  EDUCATIONAL_LEVELS
 } from '../../utils/sessionUtils';
 import { normalizeArabicName } from '../../utils/barcodeUtils';
 
@@ -36,6 +41,7 @@ export default function GroupsPage() {
 
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'active' | 'inactive' | 'today' | 'regular' | 'vip'>('all');
+  const [selectedLevel, setSelectedLevel] = useState<string>('all');
   const [selectedDay, setSelectedDay] = useState<string>('all');
   const [selectedTeacher, setSelectedTeacher] = useState<string>('all');
   const [selectedSubject, setSelectedSubject] = useState<string>('all');
@@ -118,7 +124,13 @@ export default function GroupsPage() {
       if (filterType === 'regular' && g.isVip) return false;
       if (filterType === 'vip' && !g.isVip) return false;
 
-      // 3. Day match (checks both day1 and day2)
+      // 3. Educational level match
+      if (selectedLevel !== 'all') {
+        const groupLvl = g.level || getGroupLevelFromId(g.id);
+        if (groupLvl !== selectedLevel) return false;
+      }
+
+      // 4. Day match (checks both day1 and day2)
       if (selectedDay !== 'all') {
         const normSelectedDay = normalizeArabicName(selectedDay);
         const day1Norm = g.day1 ? normalizeArabicName(g.day1) : '';
@@ -128,7 +140,7 @@ export default function GroupsPage() {
         }
       }
 
-      // 4. Teacher match
+      // 5. Teacher match
       if (selectedTeacher !== 'all') {
         const normSelectedTeacher = normalizeArabicName(selectedTeacher);
         const groupTeacherNorm = g.teacherName ? normalizeArabicName(g.teacherName) : '';
@@ -137,7 +149,7 @@ export default function GroupsPage() {
         }
       }
 
-      // 5. Subject match
+      // 6. Subject match
       if (selectedSubject !== 'all') {
         const normSelectedSubject = normalizeArabicName(selectedSubject);
         const groupSubjectNorm = g.subject ? normalizeArabicName(g.subject) : '';
@@ -150,7 +162,7 @@ export default function GroupsPage() {
     });
 
     return sortGroupsActiveFirstOldToNew(matched, data.groupData, data.pricingTiers);
-  }, [data.groups, data.groupData, data.pricingTiers, search, filterType, selectedDay, selectedTeacher, selectedSubject]);
+  }, [data.groups, data.groupData, data.pricingTiers, search, filterType, selectedLevel, selectedDay, selectedTeacher, selectedSubject]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -244,6 +256,55 @@ export default function GroupsPage() {
             )}
           </div>
 
+          {/* Filter by Level (المستوى الدراسي) */}
+          <div
+            style={{
+              position: 'relative',
+              display: 'inline-flex',
+              alignItems: 'center',
+              backgroundColor: selectedLevel !== 'all' ? 'var(--md-sys-color-primary-container)' : 'var(--md-sys-color-surface-container)',
+              borderRadius: 'var(--md-shape-full)',
+              border: selectedLevel !== 'all' ? '1.5px solid var(--md-sys-color-primary)' : '1px solid var(--md-sys-color-outline-variant)',
+              padding: '2px 8px 2px 10px',
+              transition: 'all 0.2s ease',
+              boxShadow: selectedLevel !== 'all' ? '0 1px 4px rgba(0, 99, 155, 0.2)' : 'none'
+            }}
+          >
+            <School
+              size={14}
+              style={{
+                color: selectedLevel !== 'all' ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-outline)',
+                marginInlineEnd: '4px',
+                flexShrink: 0
+              }}
+            />
+            <select
+              value={selectedLevel}
+              onChange={(e) => setSelectedLevel(e.target.value)}
+              style={{
+                backgroundColor: 'transparent',
+                border: 'none',
+                outline: 'none',
+                fontSize: '0.82rem',
+                fontWeight: selectedLevel !== 'all' ? 800 : 600,
+                color: selectedLevel !== 'all' ? 'var(--md-sys-color-on-primary-container)' : 'var(--md-sys-color-on-surface)',
+                cursor: 'pointer',
+                paddingBlock: '5px'
+              }}
+              title="تصفية حسب المستوى الدراسي"
+            >
+              <option value="all">المستوى: جميع المستويات</option>
+              {EDUCATIONAL_LEVELS.map((lvl) => {
+                const count = data.groups.filter((g) => (g.level || getGroupLevelFromId(g.id)) === lvl.key).length;
+                return (
+                  <option key={lvl.key} value={lvl.key}>
+                    {lvl.label} ({lvl.badge}) ({count})
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+
           {/* Filter by Day (اليوم) */}
           <div
             style={{
@@ -304,8 +365,8 @@ export default function GroupsPage() {
               boxShadow: selectedTeacher !== 'all' ? '0 1px 4px rgba(0, 99, 155, 0.2)' : 'none'
             }}
           >
-            <GraduationCap
-              size={15}
+            <User
+              size={14}
               style={{
                 color: selectedTeacher !== 'all' ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-outline)',
                 marginInlineEnd: '4px',
@@ -385,10 +446,11 @@ export default function GroupsPage() {
           </div>
 
           {/* Clear Filters Button */}
-          {(selectedDay !== 'all' || selectedTeacher !== 'all' || selectedSubject !== 'all') && (
+          {(selectedLevel !== 'all' || selectedDay !== 'all' || selectedTeacher !== 'all' || selectedSubject !== 'all') && (
             <button
               type="button"
               onClick={() => {
+                setSelectedLevel('all');
                 setSelectedDay('all');
                 setSelectedTeacher('all');
                 setSelectedSubject('all');
@@ -403,7 +465,7 @@ export default function GroupsPage() {
                 fontSize: '0.78rem',
                 fontWeight: 700
               }}
-              title="مسح فلاتر اليوم، الأستاذ والمادة"
+              title="مسح فلاتر المستوى، اليوم، الأستاذ والمادة"
             >
               <X size={13} />
               <span>مسح الفلاتر</span>
@@ -518,6 +580,33 @@ export default function GroupsPage() {
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexWrap: 'nowrap', overflow: 'hidden' }}>
                   <span style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--md-sys-color-primary)', whiteSpace: 'nowrap', lineHeight: 1 }}>
                     {group.id}
+                  </span>
+
+                  {/* Educational Level Badge */}
+                  <span
+                    className="m3-chip"
+                    style={{
+                      backgroundColor:
+                        (group.level || getGroupLevelFromId(group.id)) === 'BAC'
+                          ? 'var(--md-sys-color-primary-container)'
+                          : (group.level || getGroupLevelFromId(group.id)) === 'SEC'
+                          ? 'var(--md-sys-color-secondary-container)'
+                          : 'var(--status-vip-container, #fef3c7)',
+                      color:
+                        (group.level || getGroupLevelFromId(group.id)) === 'BAC'
+                          ? 'var(--md-sys-color-on-primary-container)'
+                          : (group.level || getGroupLevelFromId(group.id)) === 'SEC'
+                          ? 'var(--md-sys-color-on-secondary-container)'
+                          : 'var(--status-vip, #b45309)',
+                      fontWeight: 800,
+                      fontSize: '0.68rem',
+                      padding: '2px 7px',
+                      whiteSpace: 'nowrap',
+                      letterSpacing: '0.2px'
+                    }}
+                    title={`المستوى: ${getLevelDisplayName(group.level || getGroupLevelFromId(group.id))}`}
+                  >
+                    {getLevelDisplayName(group.level || getGroupLevelFromId(group.id))}
                   </span>
 
                   {/* Status Badge directly next to group ID */}
