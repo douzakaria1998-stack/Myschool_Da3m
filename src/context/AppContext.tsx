@@ -37,7 +37,6 @@ import {
 } from '../utils/sessionUtils';
 import { normalizeArabicName } from '../utils/barcodeUtils';
 import { recordPaymentTransaction, removePaymentTransactionsForStudent } from '../utils/paymentLogger';
-import { getStudentAvailableCredits } from '../utils/studentAccountUtils';
 
 interface AppContextType {
   data: CenterData;
@@ -107,32 +106,7 @@ interface AppContextType {
     targetStartSessionIdx?: number,
     studentIdentifier?: { name?: string; barcode?: string }
   ) => boolean;
-  applyStudentCredit: (
-    studentName: string,
-    barcode: string | undefined,
-    targetGroupId: string,
-    amountToApply: number,
-    preferredSourceGroupId?: string
-  ) => boolean;
-  transferStudentCredit: (
-    studentName: string,
-    barcode: string | undefined,
-    sourceGroupId: string,
-    targetGroupId: string,
-    amountToTransfer: number,
-    notes?: string
-  ) => { success: boolean; transferredAmount: number; remainingTargetDebt: number; remainingSourceCredit: number };
-  autoApplySameSubjectCredit: (
-    studentName: string,
-    barcode: string | undefined,
-    targetGroupId: string
-  ) => {
-    totalApplied: number;
-    remainingDebt: number;
-    coveredFully: boolean;
-    transfers: Array<{ sourceGroupId: string; subject: string; amount: number }>;
-  };
-  reconcileAllSameSubjectCredits: (specificData?: CenterData) => boolean;
+  applyStudentCredit: (studentName: string, barcode: string | undefined, targetGroupId: string, amountToApply: number) => boolean;
   updateStudent: (groupId: string, rowId: number, fields: Partial<StudentRecord>) => void;
   // Group & Teacher Actions
   addGroup: (group: GroupMeta) => void;
@@ -1337,12 +1311,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           if (changed) {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(cleaned));
           }
-          // Automatically reconcile same-subject credits on local startup without requiring scans
-          try {
-            reconcileAllSameSubjectCredits(cleaned);
-          } catch (e) {
-            console.warn('Initial same-subject credit reconciliation error:', e);
-          }
         }
       } else {
         const { cleaned } = sanitizeData(initialSeedData as unknown as CenterData);
@@ -1434,11 +1402,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           } catch (e) {}
           setLastSyncedAt(new Date(remoteRow.updated_at || Date.now()));
           setCloudSyncStatus('synced');
-          try {
-            reconcileAllSameSubjectCredits(cleaned);
-          } catch (e) {
-            console.warn('Cloud same-subject reconciliation error:', e);
-          }
         } else {
           // Supabase is empty, initialize it with current data
           const { cleaned } = sanitizeData(initialSeedData as unknown as CenterData);
@@ -1489,9 +1452,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             } catch (e) {}
             setLastSyncedAt(new Date((payload.new as any).updated_at || Date.now()));
             setCloudSyncStatus('synced');
-            try {
-              reconcileAllSameSubjectCredits(cleaned);
-            } catch (e) {}
           }
         }
       )
@@ -2394,15 +2354,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
     persistData(updatedData);
     saveToCloud(dataRef.current);
-
-    try {
-      autoApplySameSubjectCredit(newStudentRaw.name, newStudentRaw.barcode, groupId);
-    } catch (e) {
-      console.warn('Auto apply same subject credit error during addStudent:', e);
-    }
-
-    const finalStudent = dataRef.current.groupData[groupId]?.students.find((s) => s.rowId === rowId) || calculatedStudent;
-    return finalStudent;
+    return calculatedStudent;
   };
 
   // Enroll student in multiple groups with immediate payments
@@ -2510,14 +2462,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
     persistData(updatedData);
     saveToCloud(dataRef.current);
-
-    enrollments.forEach((e) => {
-      try {
-        autoApplySameSubjectCredit(studentInfo.name, resolvedBarcode, e.groupId);
-      } catch (err) {
-        console.warn('Auto apply same subject credit error during enrollment:', err);
-      }
-    });
 
     return results;
   };
@@ -3114,335 +3058,85 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       });
     }
 
-    try {
-      autoApplySameSubjectCredit(originalStudent.name, originalStudent.barcode, toGroupId);
-    } catch (e) {
-      console.warn('Auto apply same subject credit error during transferStudent:', e);
-    }
-
     return true;
   };
 
-  // Transfer student surplus credit between groups (with deduction from source and addition to target)
-  const transferStudentCredit = (
+  // Apply available student credit/balance to reduce debt or pay for a group
+  const applyStudentCredit = (
     studentName: string,
     barcode: string | undefined,
-    sourceGroupId: string,
     targetGroupId: string,
-    amountToTransfer: number,
-    notes?: string
-  ): { success: boolean; transferredAmount: number; remainingTargetDebt: number; remainingSourceCredit: number } => {
-    if (amountToTransfer <= 0 || sourceGroupId === targetGroupId) {
-      return { success: false, transferredAmount: 0, remainingTargetDebt: 0, remainingSourceCredit: 0 };
-    }
-
+    amountToApply: number
+  ): boolean => {
+    if (amountToApply <= 0) return false;
     const currentData = dataRef.current;
-    const sourceGroup = currentData.groupData[sourceGroupId];
     const targetGroup = currentData.groupData[targetGroupId];
-    if (!sourceGroup || !targetGroup) {
-      return { success: false, transferredAmount: 0, remainingTargetDebt: 0, remainingSourceCredit: 0 };
-    }
+    if (!targetGroup) return false;
 
     const normName = normalizeArabicName(studentName);
     const barcodeUpper = (barcode || '').trim().toUpperCase();
 
-    const sourceStudent = sourceGroup.students.find(
+    const student = targetGroup.students.find(
       (s) =>
-        !isSummaryRow(s, sourceGroupId) &&
-        ((barcodeUpper && s.barcode && s.barcode.trim().toUpperCase() === barcodeUpper) ||
-          (s.name && normalizeArabicName(s.name) === normName))
+        (barcodeUpper && s.barcode && s.barcode.trim().toUpperCase() === barcodeUpper) ||
+        (s.name && normalizeArabicName(s.name) === normName)
     );
-    const targetStudent = targetGroup.students.find(
-      (s) =>
-        !isSummaryRow(s, targetGroupId) &&
-        ((barcodeUpper && s.barcode && s.barcode.trim().toUpperCase() === barcodeUpper) ||
-          (s.name && normalizeArabicName(s.name) === normName))
-    );
+    if (!student) return false;
 
-    if (!sourceStudent || !targetStudent) {
-      return { success: false, transferredAmount: 0, remainingTargetDebt: 0, remainingSourceCredit: 0 };
-    }
-
-    const sourceReceived = (sourceStudent.payments || []).reduce<number>((sum, p) => sum + (Number(p) || 0), 0) || sourceStudent.totalReceived || 0;
-    const sourceFee = sourceStudent.fee || 0;
-    const sourceSurplus = Math.max(0, sourceReceived - sourceFee);
-
-    if (sourceSurplus <= 0) {
-      return { success: false, transferredAmount: 0, remainingTargetDebt: targetStudent.debt, remainingSourceCredit: 0 };
-    }
-
-    const actualTransfer = Math.min(amountToTransfer, sourceSurplus);
-    if (actualTransfer <= 0) {
-      return { success: false, transferredAmount: 0, remainingTargetDebt: targetStudent.debt, remainingSourceCredit: sourceSurplus };
-    }
-
-    // 1. Deduct from sourceStudent.payments
-    const sourceSessionCount = sourceGroup.sessionDates?.length || sourceGroup.sessionCount || 4;
-    const newSourcePayments: (number | string)[] = [...(sourceStudent.payments || [])];
-    while (newSourcePayments.length < sourceSessionCount) newSourcePayments.push('');
-
-    let remainingToDeduct = actualTransfer;
-    for (let i = newSourcePayments.length - 1; i >= 0 && remainingToDeduct > 0; i--) {
-      const curVal = Number(newSourcePayments[i]) || 0;
-      if (curVal > 0) {
-        if (curVal <= remainingToDeduct) {
-          newSourcePayments[i] = '';
-          remainingToDeduct -= curVal;
-        } else {
-          newSourcePayments[i] = curVal - remainingToDeduct;
-          remainingToDeduct = 0;
-        }
-      }
-    }
-    if (remainingToDeduct > 0) {
-      const cur0 = Number(newSourcePayments[0]) || 0;
-      newSourcePayments[0] = Math.max(0, cur0 - remainingToDeduct);
-    }
-
-    const updatedSourceStudent = calculateStudentFinances(
-      { ...sourceStudent, payments: newSourcePayments },
-      sourceGroup.type,
-      currentData.pricingTiers,
-      sourceGroup
-    );
-
-    // 2. Add to targetStudent.payments
-    const targetSessionCount = targetGroup.sessionDates?.length || targetGroup.sessionCount || 4;
-    const newTargetPayments: (number | string)[] = [...(targetStudent.payments || [])];
-    while (newTargetPayments.length < targetSessionCount) newTargetPayments.push('');
+    const sessionCount = targetGroup.sessionDates?.length || targetGroup.sessionCount || 4;
+    const newPayments = [...(student.payments || [])];
+    while (newPayments.length < sessionCount) newPayments.push('');
 
     let applied = false;
-    for (let i = 0; i < targetSessionCount; i++) {
-      const curVal = Number(newTargetPayments[i]) || 0;
+    for (let i = 0; i < sessionCount; i++) {
+      const curVal = Number(newPayments[i]) || 0;
       if (curVal === 0) {
-        newTargetPayments[i] = actualTransfer;
+        newPayments[i] = amountToApply;
         applied = true;
         break;
       }
     }
     if (!applied) {
-      const cur0 = Number(newTargetPayments[0]) || 0;
-      newTargetPayments[0] = cur0 + actualTransfer;
+      const cur0 = Number(newPayments[0]) || 0;
+      newPayments[0] = cur0 + amountToApply;
     }
 
-    const updatedTargetStudent = calculateStudentFinances(
-      { ...targetStudent, payments: newTargetPayments },
-      targetGroup.type,
-      currentData.pricingTiers,
-      targetGroup
-    );
-
-    const updatedGroupData = {
-      ...currentData.groupData,
-      [sourceGroupId]: {
-        ...sourceGroup,
-        students: sourceGroup.students.map((s) => (s.rowId === sourceStudent.rowId ? updatedSourceStudent : s))
-      },
-      [targetGroupId]: {
-        ...targetGroup,
-        students: targetGroup.students.map((s) => (s.rowId === targetStudent.rowId ? updatedTargetStudent : s))
-      }
-    };
+    const updatedStudents = targetGroup.students.map((s) => {
+      if (s.rowId !== student.rowId) return s;
+      return calculateStudentFinances(
+        { ...s, payments: newPayments },
+        targetGroup.type,
+        currentData.pricingTiers,
+        targetGroup
+      );
+    });
 
     const updatedData: CenterData = {
       ...currentData,
-      groupData: updatedGroupData
+      groupData: {
+        ...currentData.groupData,
+        [targetGroupId]: { ...targetGroup, students: updatedStudents }
+      }
     };
 
     persistData(updatedData);
     saveToCloud(updatedData);
 
-    // Deduct transaction in source group
-    recordPaymentTransaction({
-      groupId: sourceGroupId,
-      groupSubject: sourceGroup.subject,
-      teacherName: sourceGroup.teacherName,
-      studentRowId: sourceStudent.rowId,
-      studentName: sourceStudent.name,
-      studentPhone: sourceStudent.phone,
-      studentBarcode: sourceStudent.barcode,
-      sessionIndex: 0,
-      amount: -actualTransfer,
-      source: 'multi_group',
-      notes: notes || `[خصم تحويل رصيد] تحويل ${actualTransfer.toLocaleString()} دج من فائض مادة ${sourceGroup.subject} (${sourceGroupId}) لصالح مادة ${targetGroup.subject} (${targetGroupId})`
-    });
-
-    // Add transaction in target group
     recordPaymentTransaction({
       groupId: targetGroupId,
       groupSubject: targetGroup.subject,
       teacherName: targetGroup.teacherName,
-      studentRowId: targetStudent.rowId,
-      studentName: targetStudent.name,
-      studentPhone: targetStudent.phone,
-      studentBarcode: targetStudent.barcode,
+      studentRowId: student.rowId,
+      studentName: student.name,
+      studentPhone: student.phone,
+      studentBarcode: student.barcode,
       sessionIndex: 0,
-      amount: actualTransfer,
+      amount: amountToApply,
       source: 'multi_group',
-      notes: notes || `[استلام رصيد محول] استلام ${actualTransfer.toLocaleString()} دج من فائض مادة ${sourceGroup.subject} (${sourceGroupId})`
+      notes: `[استخدام رصيد التلميذ] تم تطبيق رصيد بقيمة ${amountToApply} دج لصالح الفوج ${targetGroupId}`
     });
 
-    return {
-      success: true,
-      transferredAmount: actualTransfer,
-      remainingTargetDebt: updatedTargetStudent.debt,
-      remainingSourceCredit: updatedSourceStudent.credit || 0
-    };
-  };
-
-  // Automatically apply surplus credit from groups of the SAME subject to complete unpaid group
-  const autoApplySameSubjectCredit = (
-    studentName: string,
-    barcode: string | undefined,
-    targetGroupId: string
-  ): {
-    totalApplied: number;
-    remainingDebt: number;
-    coveredFully: boolean;
-    transfers: Array<{ sourceGroupId: string; subject: string; amount: number }>;
-  } => {
-    const currentData = dataRef.current;
-    const targetGroup = currentData.groupData[targetGroupId];
-    if (!targetGroup) return { totalApplied: 0, remainingDebt: 0, coveredFully: false, transfers: [] };
-
-    const normName = normalizeArabicName(studentName);
-    const barcodeUpper = (barcode || '').trim().toUpperCase();
-
-    const targetStudent = targetGroup.students.find(
-      (s) =>
-        !isSummaryRow(s, targetGroupId) &&
-        ((barcodeUpper && s.barcode && s.barcode.trim().toUpperCase() === barcodeUpper) ||
-          (s.name && normalizeArabicName(s.name) === normName))
-    );
-    if (!targetStudent) return { totalApplied: 0, remainingDebt: 0, coveredFully: false, transfers: [] };
-
-    const targetReceived = (targetStudent.payments || []).reduce<number>((sum, p) => sum + (Number(p) || 0), 0) || targetStudent.totalReceived || 0;
-    const targetFee = targetStudent.fee || 0;
-    let targetDebt = Math.max(0, targetFee - targetReceived);
-
-    if (targetDebt <= 0) {
-      return { totalApplied: 0, remainingDebt: 0, coveredFully: true, transfers: [] };
-    }
-
-    // Find all groups where student has credit in the SAME subject
-    const available = getStudentAvailableCredits(studentName, barcode, currentData, targetGroupId);
-    const sameSubjectCredits = available.filter((c) => c.isSameSubject && c.availableCredit > 0);
-
-    if (sameSubjectCredits.length === 0) {
-      return { totalApplied: 0, remainingDebt: targetDebt, coveredFully: false, transfers: [] };
-    }
-
-    let totalApplied = 0;
-    const transfers: Array<{ sourceGroupId: string; subject: string; amount: number }> = [];
-
-    for (const src of sameSubjectCredits) {
-      if (targetDebt <= 0) break;
-      const amountToTake = Math.min(src.availableCredit, targetDebt);
-      if (amountToTake <= 0) continue;
-
-      const res = transferStudentCredit(
-        studentName,
-        barcode,
-        src.groupId,
-        targetGroupId,
-        amountToTake,
-        `[تسوية تلقائية لنفس المادة] تحويل ${amountToTake.toLocaleString()} دج من فائض مادة ${src.subject} (${src.groupId}) لصالح (${targetGroupId})`
-      );
-
-      if (res.success && res.transferredAmount > 0) {
-        totalApplied += res.transferredAmount;
-        targetDebt = res.remainingTargetDebt;
-        transfers.push({
-          sourceGroupId: src.groupId,
-          subject: src.subject,
-          amount: res.transferredAmount
-        });
-      }
-    }
-
-    return {
-      totalApplied,
-      remainingDebt: targetDebt,
-      coveredFully: targetDebt === 0,
-      transfers
-    };
-  };
-
-  // Apply available student credit/balance to reduce debt or pay for a group (with proper source deduction)
-  const applyStudentCredit = (
-    studentName: string,
-    barcode: string | undefined,
-    targetGroupId: string,
-    amountToApply: number,
-    preferredSourceGroupId?: string
-  ): boolean => {
-    if (amountToApply <= 0) return false;
-    const currentData = dataRef.current;
-
-    const available = getStudentAvailableCredits(studentName, barcode, currentData, targetGroupId);
-    if (available.length === 0) return false;
-
-    let candidateList = available;
-    if (preferredSourceGroupId) {
-      const match = available.find((a) => a.groupId === preferredSourceGroupId);
-      if (match) {
-        candidateList = [match, ...available.filter((a) => a.groupId !== preferredSourceGroupId)];
-      }
-    }
-
-    let remainingToApply = amountToApply;
-    for (const src of candidateList) {
-      if (remainingToApply <= 0) break;
-      const take = Math.min(src.availableCredit, remainingToApply);
-      if (take <= 0) continue;
-
-      const res = transferStudentCredit(
-        studentName,
-        barcode,
-        src.groupId,
-        targetGroupId,
-        take,
-        `[استخدام رصيد التلميذ] تطبيق ${take.toLocaleString()} دج من فائض مادة ${src.subject} (${src.groupId}) لصالح ${targetGroupId}`
-      );
-      if (res.success) {
-        remainingToApply -= res.transferredAmount;
-      }
-    }
-
-    return remainingToApply < amountToApply;
-  };
-
-  // Automatically reconcile all same-subject credits across all groups without requiring a scan
-  const reconcileAllSameSubjectCredits = (specificData?: CenterData): boolean => {
-    const currentData = specificData || dataRef.current;
-    if (!currentData || !currentData.groupData) return false;
-
-    let anyReconciled = false;
-    const groupEntries = Object.entries(currentData.groupData);
-
-    for (const [targetGid, targetGroup] of groupEntries) {
-      if (!targetGroup || !Array.isArray(targetGroup.students)) continue;
-
-      for (const student of targetGroup.students) {
-        if (isSummaryRow(student, targetGid)) continue;
-
-        const totalReceived =
-          (student.payments || []).reduce<number>((sum, p) => sum + (Number(p) || 0), 0) ||
-          student.totalReceived ||
-          0;
-        const fee = student.fee || 0;
-        const debt = Math.max(0, fee - totalReceived);
-
-        if (debt > 0) {
-          const res = autoApplySameSubjectCredit(student.name, student.barcode, targetGid);
-          if (res.totalApplied > 0) {
-            anyReconciled = true;
-          }
-        }
-      }
-    }
-
-    return anyReconciled;
+    return true;
   };
 
   // Update student arbitrary fields
@@ -3585,7 +3279,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         rowId: idx + 1,
         name: s.name,
         phone: s.phone || '',
-        barcode: s.barcode,
         discount: s.discount || '1',
         attendance: Array(sessionCount).fill(''),
         payments: Array(sessionCount).fill(''),
@@ -3657,17 +3350,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
 
     persistData(updatedData);
-    saveToCloud(updatedData);
     setSelectedGroup(cleanNewId);
-
-    // Automatically transfer any surplus money from the old course to the new course for renewed students
-    try {
-      newStudents.forEach((student) => {
-        autoApplySameSubjectCredit(student.name, student.barcode, cleanNewId);
-      });
-    } catch (e) {
-      console.warn('Auto apply same subject credit error during group renewal:', e);
-    }
   };
 
   // Update group finances (student fee, teacher payment, school share)
@@ -4387,9 +4070,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         clearRecycleBin,
         transferStudent,
         applyStudentCredit,
-        transferStudentCredit,
-        autoApplySameSubjectCredit,
-        reconcileAllSameSubjectCredits,
         updateStudent,
         addGroup,
         renewGroupWithStudents,

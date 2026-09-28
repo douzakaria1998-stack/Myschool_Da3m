@@ -1,7 +1,7 @@
 // Student Central Payment Account & Attendance-Based Financial Utilities
 import { CenterData, StudentRecord, GroupSheet, StudentPaymentAccount, StudentRecoverySession, StudentAccountTransaction, PaymentTransactionType } from '../types';
 import { normalizeArabicName } from './barcodeUtils';
-import { isSummaryRow, isSameSubject, isGroupEnded } from './sessionUtils';
+import { isSummaryRow } from './sessionUtils';
 import { getPaymentTransactions, PaymentRecordItem, recordPaymentTransaction } from './paymentLogger';
 
 /**
@@ -250,88 +250,3 @@ export function recordStudentAccountAdjustment(
     notes: `[${type}] ${notes}`
   });
 }
-
-export interface StudentCreditGroupInfo {
-  groupId: string;
-  subject: string;
-  teacherName?: string;
-  fee: number;
-  totalReceived: number;
-  availableCredit: number;
-  isSameSubject: boolean;
-  isEnded: boolean;
-  studentRowId: number;
-}
-
-/**
- * Finds all groups across the center where the student has extra surplus money (credit).
- * If targetGroupId is provided, flags whether each credit is in the same subject.
- * Automatically prioritizes ended/inactive courses and same-subject courses.
- */
-export function getStudentAvailableCredits(
-  studentName: string,
-  barcode: string | undefined,
-  data: CenterData,
-  targetGroupId?: string
-): StudentCreditGroupInfo[] {
-  const normName = normalizeArabicName(studentName || '');
-  const barcodeUpper = (barcode || '').trim().toUpperCase();
-  const targetGroup = targetGroupId ? data.groupData[targetGroupId] : undefined;
-  const targetSubject = targetGroup?.subject || data.groups?.find((g) => g.id === targetGroupId)?.subject || '';
-
-  const results: StudentCreditGroupInfo[] = [];
-
-  Object.entries(data.groupData || {}).forEach(([gid, gSheet]) => {
-    if (!gSheet || !Array.isArray(gSheet.students)) return;
-    if (targetGroupId && gid === targetGroupId) return;
-
-    const match = gSheet.students.find(
-      (s) =>
-        !isSummaryRow(s, gid) &&
-        ((barcodeUpper && s.barcode && s.barcode.trim().toUpperCase() === barcodeUpper) ||
-          (s.name && normalizeArabicName(s.name) === normName))
-    );
-
-    if (match) {
-      const totalPaid =
-        (match.payments || []).reduce<number>((sum, p) => {
-          const val = typeof p === 'number' ? p : parseFloat(String(p));
-          return sum + (isNaN(val) ? 0 : val);
-        }, 0) || match.totalReceived || 0;
-
-      const fee = match.fee || 0;
-      const credit = Math.max(0, totalPaid - fee);
-
-      if (credit > 0) {
-        const groupMeta = data.groups?.find((g) => g.id === gid);
-        const isEnded = gSheet.status === 'inactive' || isGroupEnded(gSheet, groupMeta, data.pricingTiers);
-        const sheetSubject = gSheet.subject || groupMeta?.subject || '';
-
-        results.push({
-          groupId: gid,
-          subject: sheetSubject,
-          teacherName: gSheet.teacherName || groupMeta?.teacherName,
-          fee,
-          totalReceived: totalPaid,
-          availableCredit: credit,
-          isSameSubject: isSameSubject(sheetSubject, targetSubject),
-          isEnded,
-          studentRowId: match.rowId
-        });
-      }
-    }
-  });
-
-  // Prioritization order:
-  // 1. Same subject first (true before false)
-  // 2. Ended/inactive courses first (old finished course first, as requested: "the first course has ended and the second is new, and he has extra money in the old subject")
-  // 3. Higher available credit first
-  results.sort((a, b) => {
-    if (a.isSameSubject !== b.isSameSubject) return a.isSameSubject ? -1 : 1;
-    if (a.isEnded !== b.isEnded) return a.isEnded ? -1 : 1;
-    return b.availableCredit - a.availableCredit;
-  });
-
-  return results;
-}
-

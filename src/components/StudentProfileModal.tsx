@@ -34,7 +34,7 @@ import ThermalReceiptsModal from './ThermalReceiptsModal';
 import StudentBadgeModal from './StudentBadgeModal';
 import { formatGroupTime, isSummaryRow, isVipGroupId } from '../utils/sessionUtils';
 import { normalizeArabicName } from '../utils/barcodeUtils';
-import { getStudentPaymentAccount, getStudentAvailableCredits } from '../utils/studentAccountUtils';
+import { getStudentPaymentAccount } from '../utils/studentAccountUtils';
 
 interface Props {
   student: StudentRecord;
@@ -43,7 +43,7 @@ interface Props {
 }
 
 export default function StudentProfileModal({ student, groupId, onClose }: Props) {
-  const { data, updateStudent, deleteStudent, applyStudentCredit, transferStudentCredit, setSelectedGroup } = useApp();
+  const { data, updateStudent, deleteStudent, applyStudentCredit, setSelectedGroup } = useApp();
   const group = data.groupData[groupId] as GroupSheet | undefined;
   const groupMeta = data.groups.find((g) => g.id === groupId);
 
@@ -892,137 +892,57 @@ export default function StudentProfileModal({ student, groupId, onClose }: Props
               </div>
 
               {/* Action Banner: Apply Existing Credit */}
-              {paymentAccount.availableBalance > 0 && currentStudent.debt > 0 && (() => {
-                const availableCreditGroups = getStudentAvailableCredits(student.name, student.barcode, data, groupId);
-                return (
-                  <div
+              {paymentAccount.availableBalance > 0 && currentStudent.debt > 0 && (
+                <div
+                  style={{
+                    backgroundColor: '#ecfdf5',
+                    border: '1.5px solid #10b981',
+                    borderRadius: '8px',
+                    padding: '10px 14px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '10px',
+                    flexWrap: 'wrap'
+                  }}
+                >
+                  <div>
+                    <strong style={{ fontSize: '0.86rem', color: '#065f46', display: 'block' }}>
+                      💡 يتوفر للتلميذ رصيد فائض بقيمة {paymentAccount.availableBalance.toLocaleString()} دج
+                    </strong>
+                    <span style={{ fontSize: '0.74rem', color: '#047857' }}>
+                      يمكنك تطبيقه لتسديد دين الفوج الحالي {groupId} (المطلوب: {currentStudent.debt.toLocaleString()} دج)
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const amountToUse = Math.min(paymentAccount.availableBalance, currentStudent.debt);
+                      const ok = applyStudentCredit(student.name, student.barcode, groupId, amountToUse);
+                      if (ok) {
+                        setCreditApplySuccess(`تم تطبيق رصيد بقيمة ${amountToUse.toLocaleString()} دج على الفوج ${groupId} بنجاح ✓`);
+                        setTimeout(() => setCreditApplySuccess(''), 3000);
+                      }
+                    }}
+                    className="m3-btn m3-btn-sm"
                     style={{
-                      backgroundColor: '#ecfdf5',
-                      border: '1.5px solid #10b981',
-                      borderRadius: '8px',
-                      padding: '12px 14px',
+                      backgroundColor: '#059669',
+                      color: '#fff',
+                      fontWeight: 800,
+                      fontSize: '0.76rem',
                       display: 'flex',
-                      flexDirection: 'column',
-                      gap: '10px'
+                      alignItems: 'center',
+                      gap: '4px',
+                      borderRadius: '6px',
+                      padding: '4px 10px'
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
-                      <div>
-                        <strong style={{ fontSize: '0.88rem', color: '#065f46', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          💡 يتوفر للتلميذ رصيد فائض بقيمة {paymentAccount.availableBalance.toLocaleString()} دج
-                        </strong>
-                        <span style={{ fontSize: '0.74rem', color: '#047857' }}>
-                          يمكنك استخدامه لتسديد دين الفوج الحالي ({groupId}) المطلوب: {currentStudent.debt.toLocaleString()} دج
-                        </span>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const amountToUse = Math.min(paymentAccount.availableBalance, currentStudent.debt);
-                          const ok = applyStudentCredit(student.name, student.barcode, groupId, amountToUse);
-                          if (ok) {
-                            setCreditApplySuccess(`تم تطبيق رصيد بقيمة ${amountToUse.toLocaleString()} دج على الفوج ${groupId} بنجاح ✓`);
-                            setTimeout(() => setCreditApplySuccess(''), 3000);
-                          }
-                        }}
-                        className="m3-btn m3-btn-sm"
-                        style={{
-                          backgroundColor: '#059669',
-                          color: '#fff',
-                          fontWeight: 800,
-                          fontSize: '0.76rem',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                          borderRadius: '6px',
-                          padding: '5px 12px'
-                        }}
-                      >
-                        <Coins size={14} />
-                        <span>تطبيق كامل الرصيد ({Math.min(paymentAccount.availableBalance, currentStudent.debt).toLocaleString()} دج)</span>
-                      </button>
-                    </div>
-
-                    {availableCreditGroups.length > 0 && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', borderTop: '1px dashed #a7f3d0', paddingTop: '8px' }}>
-                        <div style={{ fontSize: '0.72rem', color: '#047857', fontWeight: 700 }}>
-                          مصادر الفائض المتوفرة حسب المادة والفوج:
-                        </div>
-                        {availableCreditGroups.map((cred) => {
-                          const amountToTake = Math.min(cred.availableCredit, currentStudent.debt);
-                          return (
-                            <div
-                              key={cred.groupId}
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'space-between',
-                                backgroundColor: '#fff',
-                                border: '1px solid #d1fae5',
-                                borderRadius: '6px',
-                                padding: '6px 10px',
-                                gap: '8px'
-                              }}
-                            >
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <span
-                                  style={{
-                                    fontSize: '0.7rem',
-                                    padding: '1px 6px',
-                                    borderRadius: '4px',
-                                    fontWeight: 800,
-                                    backgroundColor: cred.isSameSubject ? '#dbeafe' : '#fef3c7',
-                                    color: cred.isSameSubject ? '#1d4ed8' : '#b45309'
-                                  }}
-                                >
-                                  {cred.isSameSubject ? 'نفس المادة' : 'مادة أخرى'}
-                                </span>
-                                <strong style={{ fontSize: '0.82rem', color: '#1e293b' }}>
-                                  مادة {cred.subject} (فوج {cred.groupId})
-                                </strong>
-                                <span style={{ fontSize: '0.78rem', color: '#059669', fontWeight: 800 }}>
-                                  +{cred.availableCredit.toLocaleString()} دج
-                                </span>
-                              </div>
-
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const res = transferStudentCredit(
-                                    student.name,
-                                    student.barcode,
-                                    cred.groupId,
-                                    groupId,
-                                    amountToTake,
-                                    `[تحويل من بطاقة التلميذ] تحويل ${amountToTake.toLocaleString()} دج من مادة ${cred.subject} (${cred.groupId}) لصالح (${groupId})`
-                                  );
-                                  if (res.success) {
-                                    setCreditApplySuccess(`تم تحويل ${res.transferredAmount.toLocaleString()} دج من مادة ${cred.subject} بنجاح ✓`);
-                                    setTimeout(() => setCreditApplySuccess(''), 3000);
-                                  }
-                                }}
-                                className="m3-btn m3-btn-sm"
-                                style={{
-                                  backgroundColor: '#ecfdf5',
-                                  color: '#065f46',
-                                  border: '1px solid #10b981',
-                                  fontSize: '0.72rem',
-                                  fontWeight: 800,
-                                  padding: '2px 8px',
-                                  borderRadius: '4px'
-                                }}
-                              >
-                                تحويل ({amountToTake.toLocaleString()} دج)
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
+                    <Coins size={14} />
+                    <span>تطبيق الرصيد ({Math.min(paymentAccount.availableBalance, currentStudent.debt).toLocaleString()} دج)</span>
+                  </button>
+                </div>
+              )}
 
               {/* Recovery Sessions List (Matching Specification Section 9 & 21) */}
               <div

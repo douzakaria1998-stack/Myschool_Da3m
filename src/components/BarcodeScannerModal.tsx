@@ -52,13 +52,11 @@ import {
   getDefaultSessionIndex,
   findCoveringMatch,
   normalizeSubjectName,
-  isSameSubject,
   isVipGroupId
 } from '../utils/sessionUtils';
 import Link from 'next/link';
 import { getBarcodeCandidates, normalizeArabicName, normalizeScannedBarcode } from '../utils/barcodeUtils';
 import { recordScanToLog, getScanLog } from '../utils/scanLogger';
-import { getStudentAvailableCredits, StudentCreditGroupInfo } from '../utils/studentAccountUtils';
 import AddGroupModal from './AddGroupModal';
 
 export interface PendingCoverRequest {
@@ -115,8 +113,6 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     clearPrintQueue,
     addStudent,
     transferStudent,
-    transferStudentCredit,
-    autoApplySameSubjectCredit,
     updateStudentFullFinances,
     cloudSyncStatus,
     lastSyncedAt,
@@ -203,22 +199,6 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
   const [confirmActionModal, setConfirmActionModal] = useState<{
     type: 'cover' | 'transfer';
     req: PendingCoverRequest;
-  } | null>(null);
-
-  // Cross-Subject Surplus Credit Transfer Confirmation Dialog
-  const [crossSubjectTransferPrompt, setCrossSubjectTransferPrompt] = useState<{
-    id: string;
-    student: StudentRecord;
-    targetGroupId: string;
-    targetSessionIdx: number;
-    targetSubject: string;
-    targetFee: number;
-    currentDebt: number;
-    availableCredits: StudentCreditGroupInfo[];
-    selectedSourceGroupId: string;
-    transferAmount: number;
-    isCover?: boolean;
-    originalGid?: string;
   } | null>(null);
 
   const [pendingDebtors, setPendingDebtors] = useState<
@@ -1114,7 +1094,11 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     let isPaid = false;
     if (student.discount === '0') {
       isPaid = true;
-    } else if (effectiveDebt <= 0 && expectedCycleFee > 0) {
+    } else if (student.debt > 0) {
+      isPaid = false;
+    } else if (totalPaid <= 0 && expectedCycleFee > 0) {
+      isPaid = false;
+    } else if (totalPaid >= expectedCycleFee && expectedCycleFee > 0) {
       isPaid = true;
     } else if (student.fee > 0 && student.debt <= 0 && totalPaid > 0) {
       isPaid = true;
@@ -1124,27 +1108,6 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       isPaid = true;
     } else {
       isPaid = false;
-    }
-
-    let finalDebt = effectiveDebt;
-    let autoAppliedSameSubject = 0;
-    let diffSubjectCredits: StudentCreditGroupInfo[] = [];
-
-    // If student has debt, check for surplus credit in other groups
-    if (!isPaid && effectiveDebt > 0) {
-      const studentCredits = getStudentAvailableCredits(student.name, student.barcode, data, groupId);
-      const sameSubjectCredits = studentCredits.filter((c) => c.isSameSubject && c.availableCredit > 0);
-      diffSubjectCredits = studentCredits.filter((c) => !c.isSameSubject && c.availableCredit > 0);
-
-      // RULE 1: Automatic completion for SAME subject (كل مادة تكمل بعضها)
-      if (sameSubjectCredits.length > 0) {
-        const autoRes = autoApplySameSubjectCredit(student.name, student.barcode, groupId);
-        autoAppliedSameSubject = autoRes.totalApplied;
-        finalDebt = autoRes.remainingDebt;
-        if (autoRes.coveredFully || finalDebt === 0) {
-          isPaid = true;
-        }
-      }
     }
 
     // CRITICAL: Always record attendance immediately upon scan so student walks into class!
@@ -1180,7 +1143,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
         groupId,
         sessionIndex: sessionIdx,
         status: isPaid ? (isCover ? 'M' : 'P') : 'DEBT',
-        debt: finalDebt,
+        debt: effectiveDebt,
         time: nowTimeStr
       },
       ...prev.slice(0, 9)
@@ -1191,21 +1154,21 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       playSuccessChime();
       setFlashSuccess({
         name: student.name,
-        statusText: autoAppliedSameSubject > 0
-          ? 'حاضر (مسدد بالكامل ✓)'
-          : isAlreadyPresent
+        statusText: isAlreadyPresent
           ? 'مسجل حاضر بالفعل ✓'
           : isCover
           ? 'حاضر (حصة تعويض) ✓'
           : 'حاضر (مسدد بالكامل) ✓',
-        details: autoAppliedSameSubject > 0
-          ? `تم تسوية كامل المبلغ تلقائياً من الفائض في مادة ${targetGroup?.subject || ''} (${autoAppliedSameSubject.toLocaleString()} دج) • فوج ${groupId}`
-          : `فوج ${groupId} • الحصة ${sessionIdx + 1}`
+        details: `فوج ${groupId} • الحصة ${sessionIdx + 1}`
       });
 
-      setTimeout(() => setFlashSuccess(null), 1800);
+      setTimeout(() => setFlashSuccess(null), 1600);
     } else {
       // Unpaid student:
+      // 1. Marked present immediately!
+      // 2. Warning chime plays.
+      // 3. PUSHED TO THE UNPAID WAITING QUEUE ON THE LEFT SIDE!
+      // 4. Scanner on the right NEVER BLOCKS other students!
       playWarningAlert();
 
       setPendingDebtors((prev) => {
@@ -1218,7 +1181,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
             student,
             groupId,
             sessionIdx,
-            debt: finalDebt,
+            debt: effectiveDebt,
             time: nowTimeStr
           }
         ];
@@ -1226,44 +1189,14 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
 
       setLeftTab('queue');
 
-      // RULE 2: Prompt user for Cross-Subject transfer if student has surplus in a different subject
-      if (diffSubjectCredits.length > 0) {
-        const defaultTransferAmt = Math.min(diffSubjectCredits[0].availableCredit, finalDebt);
-        setCrossSubjectTransferPrompt({
-          id: String(Date.now()),
-          student,
-          targetGroupId: groupId,
-          targetSessionIdx: sessionIdx,
-          targetSubject: targetGroup?.subject || '',
-          targetFee: expectedCycleFee,
-          currentDebt: finalDebt,
-          availableCredits: diffSubjectCredits,
-          selectedSourceGroupId: diffSubjectCredits[0].groupId,
-          transferAmount: defaultTransferAmt,
-          isCover,
-          originalGid
-        });
+      setFlashSuccess({
+        name: student.name,
+        statusText: `حاضر ⚠️ (مدين: ${effectiveDebt.toLocaleString()} دج)`,
+        details: `أُضيف لقائمة انتظار غير المسددين على اليسار 👈`,
+        isWarning: true
+      });
 
-        setFlashSuccess({
-          name: student.name,
-          statusText: `حاضر ⚠️ (المطلوب: ${finalDebt.toLocaleString()} دج • يتوفر رصيد في مادة أخرى)`,
-          details: `يرجى تأكيد تحويل الرصيد الفائض من مادة ${diffSubjectCredits[0].subject} (${diffSubjectCredits[0].availableCredit.toLocaleString()} دج)`,
-          isWarning: true
-        });
-      } else {
-        setFlashSuccess({
-          name: student.name,
-          statusText: autoAppliedSameSubject > 0
-            ? `حاضر ⚠️ (المطلوب للدفع: ${finalDebt.toLocaleString()} دج فقط)`
-            : `حاضر ⚠️ (مدين: ${finalDebt.toLocaleString()} دج)`,
-          details: autoAppliedSameSubject > 0
-            ? `تم خصم فائض ${autoAppliedSameSubject.toLocaleString()} دج من مادة ${targetGroup?.subject || ''} • الباقي ${finalDebt.toLocaleString()} دج`
-            : `أُضيف لقائمة انتظار غير المسددين على اليسار 👈`,
-          isWarning: true
-        });
-      }
-
-      setTimeout(() => setFlashSuccess(null), 2000);
+      setTimeout(() => setFlashSuccess(null), 1800);
     }
   };
 
@@ -1676,72 +1609,6 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     });
 
     setTimeout(() => setFlashSuccess(null), 2000);
-  };
-
-  // Cross-Subject Credit Transfer Execution Handler
-  const handleConfirmCrossSubjectTransfer = () => {
-    if (!crossSubjectTransferPrompt) return;
-    const { student, targetGroupId, targetSessionIdx, targetSubject, selectedSourceGroupId, transferAmount } =
-      crossSubjectTransferPrompt;
-
-    if (!transferAmount || transferAmount <= 0) return;
-
-    const sourceCredit = crossSubjectTransferPrompt.availableCredits.find((c) => c.groupId === selectedSourceGroupId);
-    const sourceSubject = sourceCredit?.subject || '';
-
-    const res = transferStudentCredit(
-      student.name,
-      student.barcode,
-      selectedSourceGroupId,
-      targetGroupId,
-      transferAmount,
-      `[تحويل رصيد بموافقة الإدارة] تحويل ${transferAmount.toLocaleString()} دج من فائض مادة ${sourceSubject} (${selectedSourceGroupId}) لصالح مادة ${targetSubject} (${targetGroupId})`
-    );
-
-    if (res.success) {
-      playSuccessChime();
-      const remainingDebt = res.remainingTargetDebt;
-
-      if (remainingDebt === 0) {
-        // Full debt covered!
-        setPendingDebtors((prev) => prev.filter((d) => d.student.name.trim() !== student.name.trim() || d.groupId !== targetGroupId));
-        setRecentScans((prev) =>
-          prev.map((s) =>
-            s.studentName === student.name && s.groupId === targetGroupId
-              ? { ...s, status: 'P', debt: 0 }
-              : s
-          )
-        );
-        setFlashSuccess({
-          name: student.name,
-          statusText: 'تم تحويل الرصيد وتسديد الاشتراك بالكامل ✓',
-          details: `تم تحويل ${res.transferredAmount.toLocaleString()} دج من فائض مادة ${sourceSubject} لصالح مادة ${targetSubject}`
-        });
-      } else {
-        // Partial debt covered
-        setPendingDebtors((prev) =>
-          prev.map((d) =>
-            d.student.name.trim() === student.name.trim() && d.groupId === targetGroupId
-              ? { ...d, debt: remainingDebt }
-              : d
-          )
-        );
-        setRecentScans((prev) =>
-          prev.map((s) =>
-            s.studentName === student.name && s.groupId === targetGroupId
-              ? { ...s, debt: remainingDebt }
-              : s
-          )
-        );
-        setFlashSuccess({
-          name: student.name,
-          statusText: `تم تحويل ${res.transferredAmount.toLocaleString()} دج من مادة ${sourceSubject} ✓`,
-          details: `المبلغ المتبقي المطلوب كدين: ${remainingDebt.toLocaleString()} دج فقط`,
-          isWarning: true
-        });
-      }
-    }
-    setCrossSubjectTransferPrompt(null);
   };
 
   // ==========================================
@@ -3133,8 +3000,6 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                       const isPartial = enteredAmount > 0 && enteredAmount < debtor.debt;
                       const remainingDebt = Math.max(0, debtor.debt - enteredAmount);
                       const halfDebt = Math.round(debtor.debt / 2);
-                      const debtorAvailableCredits = getStudentAvailableCredits(debtor.student.name, debtor.student.barcode, data, debtor.groupId);
-                      const debtorDiffCredits = debtorAvailableCredits.filter((c) => !c.isSameSubject && c.availableCredit > 0);
 
                       return (
                         <div
@@ -3194,51 +3059,6 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                               </span>
                             )}
                           </div>
-
-                          {/* Optional: Cross-subject surplus credit banner & action */}
-                          {debtorDiffCredits.length > 0 && (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const targetGroup = data.groupData[debtor.groupId];
-                                  const defaultTransferAmt = Math.min(debtorDiffCredits[0].availableCredit, debtor.debt);
-                                  setCrossSubjectTransferPrompt({
-                                    id: String(Date.now()),
-                                    student: debtor.student,
-                                    targetGroupId: debtor.groupId,
-                                    targetSessionIdx: debtor.sessionIdx,
-                                    targetSubject: targetGroup?.subject || '',
-                                    targetFee: debtor.student.fee || debtor.debt,
-                                    currentDebt: debtor.debt,
-                                    availableCredits: debtorDiffCredits,
-                                    selectedSourceGroupId: debtorDiffCredits[0].groupId,
-                                    transferAmount: defaultTransferAmt
-                                  });
-                                }}
-                                className="m3-btn m3-btn-sm"
-                                style={{
-                                  backgroundColor: '#ecfdf5',
-                                  color: '#065f46',
-                                  border: '1.5px solid #10b981',
-                                  borderRadius: '6px',
-                                  fontSize: '0.74rem',
-                                  fontWeight: 800,
-                                  padding: '3px 8px',
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '6px',
-                                  cursor: 'pointer'
-                                }}
-                                title="تحويل الفائض المتاح في مادة أخرى لتسديد هذا الدين"
-                              >
-                                <ArrowLeftRight size={13} color="#059669" />
-                                <span>
-                                  💡 يتوفر رصيد فائض (+{debtorDiffCredits[0].availableCredit.toLocaleString()} دج في مادة {debtorDiffCredits[0].subject}) • اضغط للتحويل
-                                </span>
-                              </button>
-                            </div>
-                          )}
 
                           {/* Row 2: Amount input + Quick Presets + Action Buttons */}
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', flexWrap: 'wrap' }}>
@@ -4561,257 +4381,6 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                 </div>
               </>
             )}
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* MODAL: CONFIRM CROSS-SUBJECT CREDIT TRANSFER                              */}
-      {/* ========================================================================= */}
-      {crossSubjectTransferPrompt && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(0,0,0,0.6)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 260
-          }}
-          onClick={() => setCrossSubjectTransferPrompt(null)}
-        >
-          <div
-            style={{
-              backgroundColor: '#fff',
-              padding: '24px',
-              borderRadius: 'var(--md-shape-xl)',
-              maxWidth: '520px',
-              width: '94%',
-              boxShadow: 'var(--md-elevation-5)',
-              direction: 'rtl',
-              border: '2px solid #059669'
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '14px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#047857' }}>
-                <ArrowLeftRight size={22} color="#059669" />
-                <h3 style={{ fontSize: '1.15rem', fontWeight: 900, margin: 0 }}>
-                  تحويل رصيد فائض بين المواد الدراسية 🔀
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setCrossSubjectTransferPrompt(null)}
-                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#64748b' }}
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            {/* Student & Group Info */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#f8fafc', padding: '10px 14px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '14px' }}>
-              <div>
-                <span style={{ fontSize: '0.75rem', color: '#64748b' }}>اسم التلميذ:</span>
-                <strong style={{ display: 'block', fontSize: '1rem', color: '#0f172a' }}>
-                  {crossSubjectTransferPrompt.student.name}
-                </strong>
-              </div>
-              <div style={{ textAlign: 'left' }}>
-                <span style={{ fontSize: '0.75rem', color: '#64748b' }}>المطلوب في {crossSubjectTransferPrompt.targetSubject}:</span>
-                <strong style={{ display: 'block', fontSize: '1.05rem', color: '#b91c1c' }}>
-                  {crossSubjectTransferPrompt.currentDebt.toLocaleString()} دج
-                </strong>
-              </div>
-            </div>
-
-            {/* Source Group Selection & Balance Information */}
-            <div style={{ marginBottom: '14px' }}>
-              <label style={{ fontSize: '0.82rem', fontWeight: 700, color: '#334155', display: 'block', marginBottom: '6px' }}>
-                اختر الفوج المصدر الذي يحتوي على الفائض:
-              </label>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                {crossSubjectTransferPrompt.availableCredits.map((cred) => {
-                  const isSelected = cred.groupId === crossSubjectTransferPrompt.selectedSourceGroupId;
-                  return (
-                    <div
-                      key={cred.groupId}
-                      onClick={() => {
-                        const newMax = Math.min(cred.availableCredit, crossSubjectTransferPrompt.currentDebt);
-                        setCrossSubjectTransferPrompt((prev) => prev ? {
-                          ...prev,
-                          selectedSourceGroupId: cred.groupId,
-                          transferAmount: newMax
-                        } : null);
-                      }}
-                      style={{
-                        padding: '10px 12px',
-                        borderRadius: '8px',
-                        border: isSelected ? '2px solid #059669' : '1px solid #cbd5e1',
-                        backgroundColor: isSelected ? '#ecfdf5' : '#fff',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between'
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <input
-                          type="radio"
-                          checked={isSelected}
-                          onChange={() => {}}
-                          style={{ accentColor: '#059669' }}
-                        />
-                        <div>
-                          <strong style={{ fontSize: '0.88rem', color: isSelected ? '#065f46' : '#1e293b' }}>
-                            مادة {cred.subject} (فوج {cred.groupId})
-                          </strong>
-                          {cred.teacherName && (
-                            <div style={{ fontSize: '0.74rem', color: '#64748b' }}>الأستاذ: {cred.teacherName}</div>
-                          )}
-                        </div>
-                      </div>
-                      <span
-                        style={{
-                          backgroundColor: isSelected ? '#d1fae5' : '#f1f5f9',
-                          color: isSelected ? '#047857' : '#475569',
-                          padding: '2px 8px',
-                          borderRadius: '6px',
-                          fontWeight: 800,
-                          fontSize: '0.84rem'
-                        }}
-                      >
-                        +{cred.availableCredit.toLocaleString()} دج فائض
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Transfer Amount Input & Presets */}
-            {(() => {
-              const selectedCred = crossSubjectTransferPrompt.availableCredits.find(
-                (c) => c.groupId === crossSubjectTransferPrompt.selectedSourceGroupId
-              ) || crossSubjectTransferPrompt.availableCredits[0];
-              const maxPossible = selectedCred ? Math.min(selectedCred.availableCredit, crossSubjectTransferPrompt.currentDebt) : 0;
-              const sourceTotalSurplus = selectedCred?.availableCredit || 0;
-              const remainingDebtAfter = Math.max(0, crossSubjectTransferPrompt.currentDebt - crossSubjectTransferPrompt.transferAmount);
-
-              return (
-                <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '12px', marginBottom: '16px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#166534' }}>
-                      المبلغ المراد تحويله:
-                    </span>
-                    <div style={{ display: 'flex', gap: '6px' }}>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setCrossSubjectTransferPrompt((prev) =>
-                            prev ? { ...prev, transferAmount: maxPossible } : null
-                          )
-                        }
-                        className="m3-btn m3-btn-sm"
-                        style={{ fontSize: '0.7rem', padding: '2px 6px', backgroundColor: '#fff', border: '1px solid #86efac', color: '#166534', fontWeight: 800 }}
-                      >
-                        كامل المطلوب ({maxPossible.toLocaleString()} دج)
-                      </button>
-                      {sourceTotalSurplus !== maxPossible && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setCrossSubjectTransferPrompt((prev) =>
-                              prev ? { ...prev, transferAmount: Math.min(sourceTotalSurplus, prev.currentDebt) } : null
-                            )
-                          }
-                          className="m3-btn m3-btn-sm"
-                          style={{ fontSize: '0.7rem', padding: '2px 6px', backgroundColor: '#fff', border: '1px solid #86efac', color: '#166534', fontWeight: 800 }}
-                        >
-                          كامل الفائض ({sourceTotalSurplus.toLocaleString()} دج)
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <input
-                      type="number"
-                      min="1"
-                      max={sourceTotalSurplus}
-                      value={crossSubjectTransferPrompt.transferAmount || ''}
-                      onChange={(e) => {
-                        const val = Math.max(0, Math.min(Number(e.target.value) || 0, sourceTotalSurplus));
-                        setCrossSubjectTransferPrompt((prev) => (prev ? { ...prev, transferAmount: val } : null));
-                      }}
-                      style={{
-                        flex: 1,
-                        padding: '6px 10px',
-                        fontSize: '1rem',
-                        fontWeight: 900,
-                        color: '#15803d',
-                        backgroundColor: '#fff',
-                        border: '1.5px solid #16a34a',
-                        borderRadius: '6px',
-                        outline: 'none',
-                        textAlign: 'center'
-                      }}
-                    />
-                    <span style={{ fontWeight: 800, color: '#166534' }}>دج</span>
-                  </div>
-
-                  {/* Live Simulation Note */}
-                  <div style={{ marginTop: '8px', fontSize: '0.78rem', color: '#15803d' }}>
-                    {remainingDebtAfter === 0 ? (
-                      <span style={{ fontWeight: 800, color: '#15803d' }}>
-                        ✓ سيتم تسديد اشتراك مادة {crossSubjectTransferPrompt.targetSubject} بالكامل (0 دج دين متبقي).
-                      </span>
-                    ) : (
-                      <span style={{ fontWeight: 700, color: '#b45309' }}>
-                        ⚠️ سيبقى على التلميذ دين بمبلغ {remainingDebtAfter.toLocaleString()} دج في مادة {crossSubjectTransferPrompt.targetSubject}.
-                      </span>
-                    )}
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* Prompt Question */}
-            <div style={{ fontSize: '0.84rem', color: '#475569', marginBottom: '16px', lineHeight: 1.5 }}>
-              هل توافق على تحويل هذا الرصيد الفائض لتسديد اشتراك التلميذ؟
-            </div>
-
-            {/* Actions */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                onClick={() => setCrossSubjectTransferPrompt(null)}
-                className="m3-btn m3-btn-text"
-                style={{ fontSize: '0.84rem', color: '#64748b' }}
-              >
-                لا، الاحتفاظ بالرصيد
-              </button>
-              <button
-                type="button"
-                disabled={!crossSubjectTransferPrompt.transferAmount || crossSubjectTransferPrompt.transferAmount <= 0}
-                onClick={handleConfirmCrossSubjectTransfer}
-                className="m3-btn m3-btn-primary"
-                style={{
-                  backgroundColor: '#059669',
-                  borderColor: '#059669',
-                  fontWeight: 800,
-                  fontSize: '0.84rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px'
-                }}
-              >
-                <Check size={16} />
-                <span>نعم، تحويل الرصيد والتسديد</span>
-              </button>
-            </div>
           </div>
         </div>
       )}
