@@ -8,6 +8,7 @@ import GroupSearchSelect from '../../components/GroupSearchSelect';
 import { isSummaryRow, formatToYYYYMMDD, formatGroupTime } from '../../utils/sessionUtils';
 import { sanitizePrintTitle, triggerPrintWithDocumentTitle } from '../../utils/printTitleUtils';
 import { StudentRecord } from '../../types';
+import { getStudentPreviousGroupDebts } from '../../utils/studentAccountUtils';
 
 const STUDENTS_PER_PAGE = 76;
 const STUDENTS_PER_TABLE = 38;
@@ -18,6 +19,8 @@ export default function PrintPage() {
 
   // Cycle offset in case group has 8 sessions (e.g. VIP groups): 0 = sessions 1-4, 4 = sessions 5-8
   const [sessionCycleOffset, setSessionCycleOffset] = useState<number>(0);
+  const [showCurrentDebt, setShowCurrentDebt] = useState<boolean>(true);
+  const [showPreviousDebt, setShowPreviousDebt] = useState<boolean>(true);
 
   // Synchronize URL search params and selectedGroup so browser refresh preserves the exact group sheet
   React.useEffect(() => {
@@ -44,6 +47,21 @@ export default function PrintPage() {
   const realStudents = React.useMemo(() => {
     return (group?.students || []).filter((s) => !isSummaryRow(s, group?.groupId));
   }, [group?.students, group?.groupId]);
+
+  const groupDebtSummary = React.useMemo(() => {
+    let currentDebt = 0;
+    let prevSameSubjectDebt = 0;
+    realStudents.forEach((s) => {
+      currentDebt += s.debt || 0;
+      const p = getStudentPreviousGroupDebts(s.name, s.barcode, data, group?.groupId || '', s.debt);
+      prevSameSubjectDebt += p.lastGroupDebt || 0;
+    });
+    return {
+      currentDebt,
+      prevSameSubjectDebt,
+      totalDebt: currentDebt + prevSameSubjectDebt
+    };
+  }, [realStudents, data, group?.groupId]);
 
   const printTitle = React.useMemo(() => {
     if (!group) return 'كشف الحضور';
@@ -137,9 +155,9 @@ export default function PrintPage() {
                 border: '1.5px solid #000000',
                 padding: '3px 1px',
                 textAlign: 'center',
-                width: '26px',
+                width: '22px',
                 fontWeight: 800,
-                fontSize: '8pt'
+                fontSize: '7.8pt'
               }}
             >
               #
@@ -147,9 +165,9 @@ export default function PrintPage() {
             <th
               style={{
                 border: '1.5px solid #000000',
-                padding: '3px 6px',
+                padding: '3px 4px',
                 fontWeight: 800,
-                fontSize: '8.8pt'
+                fontSize: '8.4pt'
               }}
             >
               الاسم واللقب
@@ -166,17 +184,17 @@ export default function PrintPage() {
                     border: '1.5px solid #000000',
                     padding: '2px 1px',
                     textAlign: 'center',
-                    width: '30px',
+                    width: '26px',
                     backgroundColor: '#e2e8f0'
                   }}
                 >
-                  <div style={{ fontWeight: 800, fontSize: '7.5pt', lineHeight: 1.1 }}>
+                  <div style={{ fontWeight: 800, fontSize: '7.2pt', lineHeight: 1.1 }}>
                     حصة {num + 1}
                   </div>
                   {shortDate && (
                     <div
                       style={{
-                        fontSize: '6.2pt',
+                        fontSize: '6pt',
                         color: '#475569',
                         fontFamily: 'monospace',
                         marginTop: '2px',
@@ -193,15 +211,49 @@ export default function PrintPage() {
             <th
               style={{
                 border: '1.5px solid #000000',
-                padding: '3px 2px',
+                padding: '3px 1px',
                 textAlign: 'center',
-                width: '48px',
+                width: showCurrentDebt && showPreviousDebt ? '36px' : '44px',
                 fontWeight: 800,
-                fontSize: '8.2pt'
+                fontSize: '7.8pt'
               }}
             >
               المسدد
             </th>
+            {showCurrentDebt && (
+              <th
+                style={{
+                  border: '1.5px solid #000000',
+                  padding: '3px 1px',
+                  textAlign: 'center',
+                  width: showPreviousDebt ? '36px' : '44px',
+                  fontWeight: 800,
+                  fontSize: '7.8pt',
+                  backgroundColor: '#fee2e2',
+                  color: '#991b1b'
+                }}
+                title="الدين الحالي لهذا الفوج"
+              >
+                الدين
+              </th>
+            )}
+            {showPreviousDebt && (
+              <th
+                style={{
+                  border: '1.5px solid #000000',
+                  padding: '3px 1px',
+                  textAlign: 'center',
+                  width: '44px',
+                  fontWeight: 800,
+                  fontSize: '7.2pt',
+                  backgroundColor: '#fef2f2',
+                  color: '#b91c1c'
+                }}
+                title="ديون التلميذ من الفوج السابق لنفس المادة"
+              >
+                د.سابق
+              </th>
+            )}
           </tr>
         </thead>
         <tbody>
@@ -214,6 +266,13 @@ export default function PrintPage() {
                 ? student.totalReceived.toLocaleString()
                 : '0'
               : '';
+
+            const pDebtInfo = hasStudent && student
+              ? getStudentPreviousGroupDebts(student.name, student.barcode, data, group.groupId, student.debt)
+              : null;
+            const currentDebtVal = hasStudent && student ? student.debt || 0 : 0;
+            const prevDebtVal = pDebtInfo?.lastGroupDebt || 0;
+            const prevGroupId = pDebtInfo?.lastGroupId || '';
 
             return (
               <tr
@@ -230,7 +289,7 @@ export default function PrintPage() {
                     textAlign: 'center',
                     padding: '2px 1px',
                     fontWeight: 800,
-                    fontSize: '8pt',
+                    fontSize: '7.8pt',
                     color: hasStudent ? '#000000' : '#94a3b8'
                   }}
                 >
@@ -239,9 +298,9 @@ export default function PrintPage() {
                 <td
                   style={{
                     border: '1px solid #000000',
-                    padding: '2px 6px',
+                    padding: '2px 4px',
                     fontWeight: 800,
-                    fontSize: '8.8pt',
+                    fontSize: '8.4pt',
                     whiteSpace: 'nowrap',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis'
@@ -278,15 +337,65 @@ export default function PrintPage() {
                 <td
                   style={{
                     border: '1px solid #000000',
-                    padding: '2px 2px',
+                    padding: '2px 1px',
                     textAlign: 'center',
                     fontWeight: 800,
-                    fontSize: '8.2pt',
+                    fontSize: '7.8pt',
                     color: hasStudent && student.totalReceived > 0 ? '#0f766e' : '#000000'
                   }}
                 >
                   {paidText || <span style={{ visibility: 'hidden' }}>—</span>}
                 </td>
+                {showCurrentDebt && (
+                  <td
+                    style={{
+                      border: '1px solid #000000',
+                      padding: '2px 1px',
+                      textAlign: 'center',
+                      fontWeight: 800,
+                      fontSize: '7.8pt',
+                      backgroundColor: currentDebtVal > 0 ? '#fff5f5' : undefined,
+                      color: currentDebtVal > 0 ? '#b91c1c' : '#000000'
+                    }}
+                  >
+                    {hasStudent ? (
+                      currentDebtVal > 0 ? currentDebtVal.toLocaleString() : student.discount === '0' || student.totalReceived > 0 ? '0' : (student.fee ? student.fee.toLocaleString() : '0')
+                    ) : (
+                      <span style={{ visibility: 'hidden' }}>—</span>
+                    )}
+                  </td>
+                )}
+                {showPreviousDebt && (
+                  <td
+                    style={{
+                      border: '1px solid #000000',
+                      padding: '1px 1px',
+                      textAlign: 'center',
+                      fontWeight: 800,
+                      fontSize: '7.2pt',
+                      backgroundColor: prevDebtVal > 0 ? '#fef2f2' : undefined,
+                      color: prevDebtVal > 0 ? '#dc2626' : '#94a3b8'
+                    }}
+                    title={prevDebtVal > 0 ? `دين الفوج السابق (${prevGroupId}): ${prevDebtVal.toLocaleString()} دج` : ''}
+                  >
+                    {hasStudent ? (
+                      prevDebtVal > 0 ? (
+                        <div style={{ lineHeight: 1.05 }}>
+                          <div>{prevDebtVal.toLocaleString()}</div>
+                          {prevGroupId && (
+                            <div style={{ fontSize: '5.6pt', color: '#64748b', fontWeight: 600 }}>
+                              ({prevGroupId})
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        '—'
+                      )
+                    ) : (
+                      <span style={{ visibility: 'hidden' }}>—</span>
+                    )}
+                  </td>
+                )}
               </tr>
             );
           })}
@@ -363,6 +472,39 @@ export default function PrintPage() {
           >
             <Layers size={15} color="var(--md-sys-color-primary)" />
             <span>كشف مزدوج: 76 تلميذ / صفحة ({pages.length} صفحة)</span>
+          </div>
+
+          {/* Debt Display Toggles on Print Worksheet */}
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '12px',
+              fontSize: '0.78rem',
+              backgroundColor: 'var(--md-sys-color-surface-container)',
+              border: '1px solid var(--md-sys-color-outline-variant)',
+              padding: '4px 10px',
+              borderRadius: '8px'
+            }}
+          >
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontWeight: 600 }}>
+              <input
+                type="checkbox"
+                checked={showCurrentDebt}
+                onChange={(e) => setShowCurrentDebt(e.target.checked)}
+                style={{ cursor: 'pointer' }}
+              />
+              <span>الدين الحالي</span>
+            </label>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer', color: '#b91c1c', fontWeight: 700 }}>
+              <input
+                type="checkbox"
+                checked={showPreviousDebt}
+                onChange={(e) => setShowPreviousDebt(e.target.checked)}
+                style={{ cursor: 'pointer' }}
+              />
+              <span>دين الفوج السابق (نفس المادة)</span>
+            </label>
           </div>
         </div>
 
@@ -451,14 +593,14 @@ export default function PrintPage() {
               <div
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(4, 1fr)',
+                  gridTemplateColumns: groupDebtSummary.prevSameSubjectDebt > 0 ? 'repeat(5, 1fr)' : 'repeat(4, 1fr)',
                   gap: '8px',
                   backgroundColor: '#f8fafc',
                   border: '1.5px solid #cbd5e1',
                   padding: '7px 14px',
                   borderRadius: '4px',
                   marginBottom: '10px',
-                  fontSize: '0.88rem'
+                  fontSize: '0.85rem'
                 }}
               >
                 <div>
@@ -472,13 +614,21 @@ export default function PrintPage() {
                   {group.day2 ? ` • ${group.day2} (${formatGroupTime(group.time2)})` : ''})
                 </div>
                 <div>
-                  <strong>إجمالي الطلبة:</strong> {realStudents.length} تلميذ
+                  <strong>الطلبة:</strong> {realStudents.length} تلميذ
                   {pages.length > 1 && (
                     <span style={{ fontSize: '0.75rem', color: '#64748b', marginInlineStart: '4px' }}>
                       [{page.startIdx} - {page.endIdx}]
                     </span>
                   )}
                 </div>
+                {groupDebtSummary.prevSameSubjectDebt > 0 && (
+                  <div style={{ color: '#b91c1c' }}>
+                    <strong>ديون سابقة (نفس المادة):</strong>{' '}
+                    <span style={{ fontWeight: 800 }}>
+                      {groupDebtSummary.prevSameSubjectDebt.toLocaleString()} دج
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* 2 Tables Side-by-Side (38 students each = 76 students per page) */}

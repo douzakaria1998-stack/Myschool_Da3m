@@ -1249,6 +1249,45 @@ export function normalizeSubjectName(subj?: string): string {
 }
 
 /**
+ * Resolves a canonical key for known subjects to prevent false matches
+ * (e.g. distinguishing 'علوم طبيعية' from 'علوم فيزيائية').
+ */
+export function getCanonicalSubject(sub?: string): string {
+  if (!sub) return '';
+  const clean = normalizeArabicText(sub).toLowerCase().replace(/[\s\-_]+/g, '');
+  if (clean.includes('فيزيا') || clean.includes('physic')) return 'physics';
+  if (clean.includes('رياض') || clean.includes('math')) return 'math';
+  if (clean.includes('فلسف') || clean.includes('philo')) return 'philosophy';
+  if (clean.includes('اسلام') || clean.includes('شريع')) return 'islamic';
+  if (clean.includes('فرنس') || clean.includes('franc')) return 'french';
+  if (clean.includes('انجل') || clean.includes('eng')) return 'english';
+  if (clean.includes('المان') || clean.includes('deutsch') || clean.includes('german')) return 'german';
+  if (clean.includes('اسبان') || clean.includes('span')) return 'spanish';
+  if (clean.includes('ايطال') || clean.includes('ital')) return 'italian';
+  if (clean.includes('تاريخ') || clean.includes('جغراف') || clean.includes('اجتماع')) return 'history_geo';
+  if (clean.includes('عرب') || clean.includes('ادب')) return 'arabic';
+  if (clean.includes('طبيع') || clean.includes('حياه') || clean.includes('علوم') || clean.includes('bio') || clean.includes('scien')) return 'science';
+  return clean.replace(/^ال/, '');
+}
+
+/**
+ * Compares two subject names to check if they represent the same subject.
+ * Handles Arabic variations (with or without 'ال', sciences vs physical sciences, etc.)
+ */
+export function isSameSubject(sub1?: string, sub2?: string): boolean {
+  if (!sub1 || !sub2) return false;
+  const canon1 = getCanonicalSubject(sub1);
+  const canon2 = getCanonicalSubject(sub2);
+  if (canon1 && canon2) {
+    return canon1 === canon2;
+  }
+  const clean1 = normalizeArabicText(sub1).toLowerCase().replace(/^ال/, '').replace(/\s+/g, '');
+  const clean2 = normalizeArabicText(sub2).toLowerCase().replace(/^ال/, '').replace(/\s+/g, '');
+  if (!clean1 || !clean2) return false;
+  return clean1 === clean2 || clean1.includes(clean2) || clean2.includes(clean1);
+}
+
+/**
  * Determines session covering eligibility and target group following the business rules:
  * Priority 1: Same subject + Active group + Match exact session number
  * Priority 2: Same subject + Last group + Missed session + Match exact session number

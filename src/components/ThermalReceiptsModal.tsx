@@ -6,6 +6,7 @@ import { useApp } from '../context/AppContext';
 import { X, Printer, Receipt, Check, Save, CreditCard, Search } from 'lucide-react';
 import { getDefaultSessionIndex, isSessionDateToday, isSummaryRow, formatToYYYYMMDD } from '../utils/sessionUtils';
 import { sanitizePrintTitle } from '../utils/printTitleUtils';
+import { getStudentPreviousGroupDebts } from '../utils/studentAccountUtils';
 
 interface Props {
   group: GroupSheet;
@@ -191,6 +192,10 @@ export default function ThermalReceiptsModal({ group, onClose }: Props) {
     const balance = Math.max(0, student.fee - totalPaid);
     const receiptNo = `${group.groupId}-${(student.rowId || idx + 1).toString().padStart(3, '0')}`;
 
+    const prevDebtInfo = getStudentPreviousGroupDebts(student.name, student.barcode, data, group.groupId, balance);
+    const prevDebt = prevDebtInfo.lastGroupDebt;
+    const totalSubjectDebt = prevDebtInfo.totalSubjectDebt;
+
     return `
       <div class="receipt">
         <!-- School Logo -->
@@ -252,9 +257,19 @@ export default function ThermalReceiptsModal({ group, onClose }: Props) {
         </div>
         <div class="divider"></div>
         <div class="flex-row bold status-text">
-          <span>الوضعية المتبقية:</span>
+          <span>الوضعية المتبقية للفوج:</span>
           <span>${balance > 0 ? `دين متبقي: ${balance} دج` : 'خالص بالكامل ✓'}</span>
         </div>
+        ${prevDebt > 0 ? `
+        <div class="flex-row small" style="color: #b91c1c; font-weight: bold; margin-top: 3px;">
+          <span>دين الفوج السابق (${prevDebtInfo.lastGroupId || ''}):</span>
+          <span>${prevDebt.toLocaleString()} دج</span>
+        </div>
+        <div class="flex-row bold" style="background: #fee2e2; padding: 3px 6px; border-radius: 4px; margin-top: 3px; font-size: 11px;">
+          <span>إجمالي دين المادة (${group.subject}):</span>
+          <span style="color: #991b1b;">${totalSubjectDebt.toLocaleString()} دج</span>
+        </div>
+        ` : ''}
         
         <!-- Barcode Simulation -->
         <div class="center barcode">*${receiptNo}*</div>
@@ -954,7 +969,34 @@ export default function ThermalReceiptsModal({ group, onClose }: Props) {
                       <td style={{ textAlign: 'center', color: 'var(--md-sys-color-outline)', padding: '3px 4px' }}>
                         {idx + 1}
                       </td>
-                      <td style={{ fontWeight: 700, padding: '3px 8px' }}>{s.name}</td>
+                      <td style={{ fontWeight: 700, padding: '3px 8px' }}>
+                        <div>{s.name}</div>
+                        {(() => {
+                          const pInfo = getStudentPreviousGroupDebts(s.name, s.barcode, data, group.groupId, s.debt);
+                          if (pInfo.lastGroupDebt > 0) {
+                            return (
+                              <span
+                                style={{
+                                  fontSize: '0.66rem',
+                                  color: '#dc2626',
+                                  fontWeight: 800,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '2px',
+                                  backgroundColor: '#fee2e2',
+                                  padding: '1px 5px',
+                                  borderRadius: '3px',
+                                  marginTop: '2px'
+                                }}
+                                title={`دين الفوج السابق لنفس المادة (${pInfo.lastGroupId}): ${pInfo.lastGroupDebt} دج`}
+                              >
+                                دين سابق: {pInfo.lastGroupDebt.toLocaleString()} دج ({pInfo.lastGroupId})
+                              </span>
+                            );
+                          }
+                          return null;
+                        })()}
+                      </td>
                       <td style={{ textAlign: 'center', padding: '3px 6px' }}>{s.fee} دج</td>
                       <td style={{ textAlign: 'center', padding: '3px 4px' }}>
                         <input
