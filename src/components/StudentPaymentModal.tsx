@@ -6,7 +6,6 @@ import { useApp, calcStudentFinancesPure } from '../context/AppContext';
 import { X, Check, Printer, AlertCircle, Receipt, Trash2, RotateCcw, AlertTriangle } from 'lucide-react';
 import { formatToYYYYMMDD } from '../utils/sessionUtils';
 import { sanitizePrintTitle } from '../utils/printTitleUtils';
-import { getStudentPreviousGroupDebts } from '../utils/studentAccountUtils';
 
 interface Props {
   groupId: string;
@@ -47,10 +46,6 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
       group
     );
   }, [student, discount, payments, group, data.pricingTiers]);
-
-  const prevSubjectDebt = useMemo(() => {
-    return getStudentPreviousGroupDebts(student.name, student.barcode, data, groupId, livePreview.debt);
-  }, [student.name, student.barcode, data, groupId, livePreview.debt]);
 
   const handlePaymentChange = (index: number, val: string) => {
     const next = [...payments];
@@ -179,20 +174,6 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
                   ${balance > 0 ? balance + ' دج (غير مسدد)' : 'مسدد بالكامل ✓'}
                 </td>
               </tr>
-              ${prevSubjectDebt.lastGroupDebt > 0 ? `
-              <tr>
-                <td>دين الفوج السابق لنفس المادة (${prevSubjectDebt.lastGroupId})</td>
-                <td style="color: #dc2626; font-weight: bold;">
-                  ${prevSubjectDebt.lastGroupDebt.toLocaleString()} دج
-                </td>
-              </tr>
-              <tr style="background-color: #fef2f2;">
-                <td><strong>إجمالي الدين المطلوب</strong></td>
-                <td style="color: #b91c1c; font-weight: 900;">
-                  <strong>${prevSubjectDebt.totalSubjectDebt.toLocaleString()} دج</strong>
-                </td>
-              </tr>
-              ` : ''}
             </tbody>
           </table>
           <div class="footer">
@@ -319,16 +300,6 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
             <span>الوضعية:</span>
             <span>${balance > 0 ? `متبقي: ${balance} دج` : 'مسدد بالكامل ✓'}</span>
           </div>
-          ${prevSubjectDebt.lastGroupDebt > 0 ? `
-          <div class="flex-row" style="color: #b91c1c; font-weight: bold; font-size: 11px; margin-top: 2px;">
-            <span>دين سابق لنفس المادة (${prevSubjectDebt.lastGroupId}):</span>
-            <span>${prevSubjectDebt.lastGroupDebt.toLocaleString()} دج</span>
-          </div>
-          <div class="flex-row bold" style="color: #b91c1c; font-size: 12px; margin-top: 2px;">
-            <span>إجمالي الدين:</span>
-            <span>${prevSubjectDebt.totalSubjectDebt.toLocaleString()} دج</span>
-          </div>
-          ` : ''}
           <div class="barcode">*${receiptNo}*</div>
           <div class="center" style="font-size: 9px; line-height: 1.3;">
             شكراً لثقتكم بمؤسستنا - مع تمنياتنا بالتفوق والنجاح<br />
@@ -396,33 +367,6 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
             <X size={20} />
           </button>
         </div>
-
-        {/* Previous Group Debt Warning Alert */}
-        {prevSubjectDebt.lastGroupDebt > 0 && (
-          <div
-            style={{
-              backgroundColor: '#fff1f2',
-              border: '1.5px solid #fecdd3',
-              borderRadius: '8px',
-              padding: '10px 14px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px',
-              color: '#9f1239',
-              marginBottom: '16px'
-            }}
-          >
-            <AlertTriangle size={22} color="#e11d48" style={{ flexShrink: 0 }} />
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 800, fontSize: '0.9rem' }}>
-                تنبيه: التلميذ لديه دين غير مسدد بقيمة {prevSubjectDebt.lastGroupDebt.toLocaleString()} دج في الفوج السابق لنفس المادة ({prevSubjectDebt.lastGroupId})!
-              </div>
-              <div style={{ fontSize: '0.8rem', marginTop: '2px', opacity: 0.9 }}>
-                دين هذا الفوج: <strong>{livePreview.debt.toLocaleString()} دج</strong> • دين الفوج السابق: <strong>{prevSubjectDebt.lastGroupDebt.toLocaleString()} دج</strong> • إجمالي دين المادة: <strong>{prevSubjectDebt.totalSubjectDebt.toLocaleString()} دج</strong>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Live Financial Summary Banner */}
         <div

@@ -48,7 +48,6 @@ import TeacherPaymentModal from '../../components/TeacherPaymentModal';
 import ChangeStudentGroupModal from '../../components/ChangeStudentGroupModal';
 import { collectTodayAndHourlyPayments } from '../../utils/paymentLogger';
 import { normalizeScannedBarcode, normalizeArabicName } from '../../utils/barcodeUtils';
-import { getStudentPreviousGroupDebts } from '../../utils/studentAccountUtils';
 import {
   isSessionDateToday,
   isGroupToday,
@@ -247,11 +246,7 @@ export default function AttendancePage() {
   const filteredStudents = realStudents.filter((s) => {
     const rawQ = searchQuery.trim();
     if (!rawQ) {
-      if (filterDebt === 'debt') {
-        if (s.debt > 0) return true;
-        const pDebt = getStudentPreviousGroupDebts(s.name, s.barcode, data, group.groupId, s.debt);
-        return pDebt.lastGroupDebt > 0;
-      }
+      if (filterDebt === 'debt') return s.debt > 0;
       if (filterDebt === 'paid') return s.debt === 0 && s.fee > 0;
       if (filterDebt === 'exempt') return s.discount === '0';
       return true;
@@ -2052,59 +2047,25 @@ export default function AttendancePage() {
                     </td>
 
                     {/* Debt */}
-                    {/* Debt */}
                     <td style={{ textAlign: 'center' }}>
-                      {(() => {
-                        const prevDebtSummary = getStudentPreviousGroupDebts(student.name, student.barcode, data, group.groupId, student.debt);
-                        return (
-                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px' }}>
-                            <span
-                              style={{
-                                fontWeight: 800,
-                                fontSize: '0.9rem',
-                                color:
-                                  student.debt > 0
-                                    ? 'var(--status-absent)'
-                                    : student.fee === 0 && student.totalReceived === 0
-                                    ? 'var(--md-sys-color-outline)'
-                                    : 'var(--status-present)'
-                              }}
-                            >
-                              {student.debt > 0
-                                ? `${student.debt.toLocaleString()} دج`
-                                : student.fee === 0 && student.totalReceived === 0
-                                ? '—'
-                                : 'مسدد ✓'}
-                            </span>
-                            {prevDebtSummary.lastGroupDebt > 0 && (
-                              <div
-                                style={{
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '3px',
-                                  backgroundColor: '#fef2f2',
-                                  border: '1px solid #fca5a5',
-                                  color: '#b91c1c',
-                                  padding: '1px 6px',
-                                  borderRadius: '4px',
-                                  fontSize: '0.72rem',
-                                  fontWeight: 800,
-                                  cursor: 'help'
-                                }}
-                                title={`دين الفوج السابق لنفس المادة (${prevDebtSummary.lastGroupId || 'سابق'}): ${prevDebtSummary.lastGroupDebt.toLocaleString()} دج | إجمالي دين المادة: ${prevDebtSummary.totalSubjectDebt.toLocaleString()} دج`}
-                              >
-                                <span>دين سابق:</span>
-                                <span>{prevDebtSummary.lastGroupDebt.toLocaleString()} دج</span>
-                                {prevDebtSummary.lastGroupId && (
-                                  <span style={{ fontSize: '0.65rem', color: '#991b1b' }}>
-                                    ({prevDebtSummary.lastGroupId})
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })()}
+                      <span
+                        style={{
+                          fontWeight: 800,
+                          fontSize: '0.9rem',
+                          color:
+                            student.debt > 0
+                              ? 'var(--status-absent)'
+                              : student.fee === 0 && student.totalReceived === 0
+                              ? 'var(--md-sys-color-outline)'
+                              : 'var(--status-present)'
+                        }}
+                      >
+                        {student.debt > 0
+                          ? `${student.debt.toLocaleString()} دج`
+                          : student.fee === 0 && student.totalReceived === 0
+                          ? '—'
+                          : 'مسدد ✓'}
+                      </span>
                     </td>
 
                     {/* Total Attendance */}

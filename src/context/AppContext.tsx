@@ -120,14 +120,12 @@ interface AppContextType {
     sourceGroupId: string,
     targetGroupId: string,
     amountToTransfer: number,
-    notes?: string,
-    skipPersist?: boolean
+    notes?: string
   ) => { success: boolean; transferredAmount: number; remainingTargetDebt: number; remainingSourceCredit: number };
   autoApplySameSubjectCredit: (
     studentName: string,
     barcode: string | undefined,
-    targetGroupId: string,
-    skipPersist?: boolean
+    targetGroupId: string
   ) => {
     totalApplied: number;
     remainingDebt: number;
@@ -443,21 +441,24 @@ function mergeAttendanceSafely(remote: CenterData, local: CenterData): CenterDat
         }
       });
 
-      // Merge payments: remote is authoritative when incoming is newer.
-      // If remote provides an explicit payments array, use it directly!
-      // Only fall back to local payments if remote has no payment records for this student.
+      // Merge payments: keep highest payment recorded for each session
       const maxSessions = Math.max(rStudent.payments?.length || 0, lStudent.payments?.length || 0, 4);
-      let newPayments: (number | string)[] = [];
-      if (Array.isArray(rStudent.payments) && rStudent.payments.length > 0) {
-        newPayments = [...rStudent.payments];
-        if (JSON.stringify(newPayments) !== JSON.stringify(lStudent.payments)) {
+      const newPayments: (number | string)[] = [];
+      for (let sIdx = 0; sIdx < maxSessions; sIdx++) {
+        const rPay = rStudent.payments ? rStudent.payments[sIdx] : '';
+        const lPay = lStudent.payments ? lStudent.payments[sIdx] : '';
+        const rNum = Number(rPay) || 0;
+        const lNum = Number(lPay) || 0;
+        if (lNum > rNum) {
+          newPayments.push(lNum);
           studentModified = true;
+        } else if (rNum > 0) {
+          newPayments.push(rNum);
+        } else if (lPay !== '' && lPay !== undefined && lPay !== null) {
+          newPayments.push(lPay);
+        } else {
+          newPayments.push(rPay ?? '');
         }
-      } else if (Array.isArray(lStudent.payments) && lStudent.payments.length > 0) {
-        newPayments = [...lStudent.payments];
-        studentModified = true;
-      } else {
-        newPayments = Array(maxSessions).fill('');
       }
 
       // Preserve phone, barcode, discount, and student name if updated locally
@@ -579,202 +580,6 @@ function mergeAttendanceSafely(remote: CenterData, local: CenterData): CenterDat
   merged.paymentTransactions = mergedTransactions;
 
   return merged;
-}
-
-function sanitizeRenewedGroupBalances(
-  groupData: Record<string, GroupSheet>,
-  pricingTiers: PricingTier[]
-): boolean {
-  let anyChanged = false;
-
-  // 1. Sanitize Physics: BAC05 -> BAC18
-  const bac05 = groupData['BAC05'];
-  const bac18 = groupData['BAC18'];
-  if (bac05 && bac18 && Array.isArray(bac05.students) && Array.isArray(bac18.students)) {
-    const getOriginalPaid05 = (name: string, att05: number): number => {
-      const norm = normalizeArabicName(name);
-      if (norm.includes('منصوري سيرين')) return 3000;
-      if (norm.includes('صوالح محمد رقيه') || norm.includes('صوالح محمد رقية')) return 3200;
-      if (norm.includes('عايشه عيشوش') || norm.includes('عائشة عيشوش')) return 5000;
-      if (norm.includes('نجود عيشوش')) return 5000;
-      if (norm.includes('علالي فضيله') || norm.includes('علالي فضيلة')) return 2000;
-      if (norm.includes('عشيري خزاني')) return 1250;
-      if (norm.includes('نغاق عايشه') || norm.includes('نغاق عائشة')) return 3750;
-      if (norm.includes('طليبه رتاج') || norm.includes('طليبة رتاج')) return 2500;
-      if (
-        norm.includes('عتوسي طارق') || norm.includes('الياس نذير') ||
-        norm.includes('رحال رزان') || norm.includes('هناء خلوط') ||
-        norm.includes('كشخه محمد الامين') || norm.includes('كشخة محمد الامين')
-      ) {
-        return 2500;
-      }
-      if (
-        norm.includes('زبيدي ايه') || norm.includes('زبيدي اية') ||
-        norm.includes('زبيدي تيسير') || norm.includes('بوغزاله حسان') || norm.includes('بوغزالة حسان') ||
-        norm.includes('سلاطنه عصام') || norm.includes('سلاطنة عصام') ||
-        norm.includes('بن عتوس منار') || norm.includes('لقميري اسراء') ||
-        norm.includes('طيباني نور') || norm.includes('قداري يمنى') ||
-        norm.includes('غريسي تقى') || norm.includes('بن خليفه ايمان') || norm.includes('بن خليفة ايمان') ||
-        norm.includes('مهاوات تقى') || norm.includes('بشيري اسامه') || norm.includes('بشيري اسامة') ||
-        norm.includes('باهي غسان') || norm.includes('طليبه محمد') || norm.includes('طليبة محمد') ||
-        norm.includes('قابوسه ايمان') || norm.includes('قابوسة ايمان') ||
-        norm.includes('عبد السلام زبيدي')
-      ) {
-        return 1250;
-      }
-      if (norm.includes('حويذق رائد') || norm.includes('بالقط احمد ياسين')) return 625;
-      if (norm.includes('نصير مريم') || norm.includes('ابراهيم واده') || norm.includes('همامي محمد حسام')) return 1875;
-      if (att05 === 0) return 0;
-      return 2500;
-    };
-
-    bac18.students.forEach((s18, idx) => {
-      if (!s18.name || isSummaryRow(s18, 'BAC18')) return;
-      const norm18 = normalizeArabicName(s18.name);
-      const barcode18 = (s18.barcode || '').trim().toUpperCase();
-
-      const s05 = bac05.students.find((s) => {
-        if (!s.name || isSummaryRow(s, 'BAC05')) return false;
-        if (barcode18 && s.barcode && s.barcode.trim().toUpperCase() === barcode18) return true;
-        const norm05 = normalizeArabicName(s.name);
-        if (norm05 === norm18) return true;
-        if (norm18.includes('اسيود') && norm05.includes('لسيود')) return true;
-        return false;
-      });
-
-      if (!s05) return;
-
-      const att05 = (s05.attendance || []).filter((a) => ['P', 'C', 'M', 'ح', 'م'].includes(a)).length;
-      const perSess05 = s05.discount === '0.8' ? 500 : 625;
-      const consumed05 = att05 * perSess05;
-      const origPaid05 = getOriginalPaid05(s18.name, att05);
-      const trueSurplus05 = Math.max(0, origPaid05 - consumed05);
-
-      // Expected payments for BAC18
-      let targetPay18: (number | string)[] = ['', '', '', ''];
-      if (s18.discount === '0.8') {
-        if (trueSurplus05 === 1000) targetPay18 = [500, 500, '', ''];
-        else if (trueSurplus05 >= 2000) targetPay18 = [500, 500, 500, 500];
-        else if (trueSurplus05 >= 500) targetPay18 = [500, '', '', ''];
-      } else {
-        if (trueSurplus05 === 625) targetPay18 = [625, '', '', ''];
-        else if (trueSurplus05 === 1250) targetPay18 = [625, 625, '', ''];
-        else if (trueSurplus05 === 1875) targetPay18 = [625, 625, 625, ''];
-        else if (trueSurplus05 === 2375) targetPay18 = [625, 625, 625, 500];
-        else if (trueSurplus05 >= 2500) targetPay18 = [625, 625, 625, 625];
-      }
-
-      if (JSON.stringify(s18.payments) !== JSON.stringify(targetPay18)) {
-        bac18.students[idx] = calcStudentFinancesPure(
-          { ...s18, payments: targetPay18 },
-          bac18.type || '4-2500',
-          pricingTiers,
-          bac18
-        );
-        anyChanged = true;
-      }
-
-      // Expected payments in BAC05: consumed amount only
-      let targetPay05: (number | string)[] = ['', '', '', ''];
-      if (consumed05 >= 2500) targetPay05 = [2500, '', '', ''];
-      else if (consumed05 === 1875) targetPay05 = ['', 1875, '', ''];
-      else if (consumed05 === 1250) targetPay05 = ['', '', 1250, ''];
-      else if (consumed05 === 1000) targetPay05 = ['', 1000, '', ''];
-      else if (consumed05 === 625) targetPay05 = ['', 625, '', ''];
-
-      const s05Idx = bac05.students.findIndex((st) => st.rowId === s05.rowId);
-      if (s05Idx >= 0 && JSON.stringify(s05.payments) !== JSON.stringify(targetPay05)) {
-        bac05.students[s05Idx] = calcStudentFinancesPure(
-          { ...s05, payments: targetPay05 },
-          bac05.type || '4-2500',
-          pricingTiers,
-          bac05
-        );
-        anyChanged = true;
-      }
-    });
-  }
-
-  // 2. Sanitize Math: BAC09 -> BAC17
-  const bac09 = groupData['BAC09'];
-  const bac17 = groupData['BAC17'];
-  if (bac09 && bac17 && Array.isArray(bac09.students) && Array.isArray(bac17.students)) {
-    const getOriginalPaid09 = (name: string, att09: number): number => {
-      const norm = normalizeArabicName(name);
-      if (norm.includes('ضيف سجي') || norm.includes('ضيف سجى')) return 7500;
-      if (
-        norm.includes('تركي احمد') || norm.includes('باهي امنه') || norm.includes('باهي آمنة') ||
-        norm.includes('غزال بيلسان') || norm.includes('كرمادي بلقيس') ||
-        norm.includes('قديري يوسف') || norm.includes('ليمان شعيب')
-      ) {
-        return 5000;
-      }
-      if (norm.includes('بشيري اسامه') || norm.includes('بشيري اسامة') || norm.includes('حميدي امجد')) {
-        return 4375;
-      }
-      if (norm.includes('بريك تميم') || norm.includes('الياس نذير')) {
-        return 2500;
-      }
-      if (norm.includes('رزان رحال')) return 1250;
-      if (norm.includes('بلطرش رجاء') || norm.includes('سالمي مريم')) return 1875;
-      if (att09 === 0) return 0;
-      return 2500;
-    };
-
-    bac17.students.forEach((s17, idx) => {
-      if (!s17.name || isSummaryRow(s17, 'BAC17')) return;
-      const norm17 = normalizeArabicName(s17.name);
-      const barcode17 = (s17.barcode || '').trim().toUpperCase();
-
-      const s09 = bac09.students.find((s) => {
-        if (!s.name || isSummaryRow(s, 'BAC09')) return false;
-        if (barcode17 && s.barcode && s.barcode.trim().toUpperCase() === barcode17) return true;
-        return normalizeArabicName(s.name) === norm17;
-      });
-
-      if (!s09) return;
-
-      const att09 = (s09.attendance || []).filter((a) => ['P', 'C', 'M', 'ح', 'م'].includes(a)).length;
-      const consumed09 = att09 * 625;
-      const origPaid09 = getOriginalPaid09(s17.name, att09);
-      const trueSurplus09 = Math.max(0, origPaid09 - consumed09);
-
-      let targetPay17: (number | string)[] = ['', '', '', ''];
-      if (trueSurplus09 === 625) targetPay17 = [625, '', '', ''];
-      else if (trueSurplus09 === 1250) targetPay17 = [625, 625, '', ''];
-      else if (trueSurplus09 === 1875) targetPay17 = [625, 625, 625, ''];
-      else if (trueSurplus09 >= 2500) targetPay17 = [625, 625, 625, 625];
-
-      if (JSON.stringify(s17.payments) !== JSON.stringify(targetPay17)) {
-        bac17.students[idx] = calcStudentFinancesPure(
-          { ...s17, payments: targetPay17 },
-          bac17.type || '4-2500',
-          pricingTiers,
-          bac17
-        );
-        anyChanged = true;
-      }
-
-      let targetPay09: (number | string)[] = ['', '', '', ''];
-      if (consumed09 >= 2500) targetPay09 = [2500, '', '', ''];
-      else if (consumed09 === 1875) targetPay09 = ['', 1875, '', ''];
-      else if (consumed09 === 1250) targetPay09 = ['', '', 1250, ''];
-      else if (consumed09 === 625) targetPay09 = ['', 625, '', ''];
-
-      const s09Idx = bac09.students.findIndex((st) => st.rowId === s09.rowId);
-      if (s09Idx >= 0 && JSON.stringify(s09.payments) !== JSON.stringify(targetPay09)) {
-        bac09.students[s09Idx] = calcStudentFinancesPure(
-          { ...s09, payments: targetPay09 },
-          bac09.type || '4-2500',
-          pricingTiers,
-          bac09
-        );
-        anyChanged = true;
-      }
-    });
-  }
-
-  return anyChanged;
 }
 
 const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: boolean } => {
@@ -1130,15 +935,6 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
     }
   }
 
-  // Enforce correct credit/debt for renewed groups (e.g. BAC05 -> BAC18, BAC09 -> BAC17)
-  const balancesRepaired = sanitizeRenewedGroupBalances(
-    newGroupData,
-    centerData.pricingTiers || (initialSeedData as unknown as CenterData).pricingTiers
-  );
-  if (balancesRepaired) {
-    changed = true;
-  }
-
   // Deduplicate and sanitize groups array
   // Rule: It's normal to have BAC01 and BACV01, but never two BAC01 or two BACV01!
   const seenIds = new Set<string>();
@@ -1470,21 +1266,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setCloudSyncStatus('syncing');
       isSavingRef.current = true;
 
-      const rawTarget = dataSnapshot || dataRef.current;
-      const { cleaned: targetData } = sanitizeData(rawTarget);
-      dataRef.current = targetData;
-      setData(targetData);
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(targetData));
-      } catch (e) {}
-
+      const targetData = dataSnapshot || dataRef.current;
       const now = Date.now();
       const dataToSave = {
         ...targetData,
         paymentTransactions: targetData.paymentTransactions || dataRef.current.paymentTransactions || [],
         deletedStudents: targetData.deletedStudents || dataRef.current.deletedStudents || [],
         _client_id: clientIdRef.current,
-        _repair_version: 5,
         _saved_at: now,
         _last_modified_at: (targetData as any)._last_modified_at || (dataRef.current as any)._last_modified_at || now
       };
@@ -1548,6 +1336,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           setData(cleaned);
           if (changed) {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(cleaned));
+          }
+          // Automatically reconcile same-subject credits on local startup without requiring scans
+          try {
+            reconcileAllSameSubjectCredits(cleaned);
+          } catch (e) {
+            console.warn('Initial same-subject credit reconciliation error:', e);
           }
         }
       } else {
@@ -1620,30 +1414,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             lastLocalEditTimeRef.current ||
             0;
 
-          const remoteRepairVersion = Number(remoteData?._repair_version) || 0;
-          const localRepairVersion = Number((dataRef.current as any)?._repair_version) || 0;
-          const isForceRepair = remoteRepairVersion > localRepairVersion;
-
           // CRITICAL: If local has unsynced changes or is newer than cloud, NEVER OVERWRITE!
-          // (Unless cloud has a newer forced repair version)
-          if (!isForceRepair && (hasLocalUnsynced || hasPendingChangesRef.current || localLastModified > remoteLastModified)) {
+          // Instead, push local data to the cloud so offline changes are saved!
+          if (hasLocalUnsynced || hasPendingChangesRef.current || localLastModified > remoteLastModified) {
             console.log('Preserving local offline data and syncing to Supabase cloud...');
             setCloudSyncStatus('syncing');
             saveToCloud(dataRef.current);
             return;
           }
 
-          if (isForceRepair) {
-            console.log('Applying forced data repair from cloud, clearing local unsynced cache...');
-            try {
-              localStorage.removeItem(UNSYNCED_CHANGES_KEY);
-              hasPendingChangesRef.current = false;
-            } catch (e) {}
-          }
-
-          // Smart Attendance Merge: When forced repair is active, accept remote cloud data directly.
-          // Otherwise, preserve local marked attendance ('P', 'M').
-          const mergedRemote = isForceRepair ? (remoteData as CenterData) : mergeAttendanceSafely(remoteData, dataRef.current);
+          // Smart Attendance Merge: Even if remote seems newer, never drop local attendance marked 'P' or 'M'
+          const mergedRemote = mergeAttendanceSafely(remoteData, dataRef.current);
           const { cleaned } = sanitizeData(mergedRemote);
           dataRef.current = cleaned;
           setData(cleaned);
@@ -1653,6 +1434,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           } catch (e) {}
           setLastSyncedAt(new Date(remoteRow.updated_at || Date.now()));
           setCloudSyncStatus('synced');
+          try {
+            reconcileAllSameSubjectCredits(cleaned);
+          } catch (e) {
+            console.warn('Cloud same-subject reconciliation error:', e);
+          }
         } else {
           // Supabase is empty, initialize it with current data
           const { cleaned } = sanitizeData(initialSeedData as unknown as CenterData);
@@ -1681,34 +1467,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               return;
             }
 
-            const incomingRepair = Number(incoming?._repair_version) || 0;
-            const currentRepair = Number((dataRef.current as any)?._repair_version) || 0;
-            const isForceIncomingRepair = incomingRepair > currentRepair;
-
             // 2. Prevent race conditions: don't overwrite if we are currently saving or have pending local edits or unsynced changes
             const hasLocalUnsynced =
               typeof window !== 'undefined' && localStorage.getItem(UNSYNCED_CHANGES_KEY) === 'true';
 
             if (
-              !isForceIncomingRepair &&
-              (isSavingRef.current ||
-                hasPendingChangesRef.current ||
-                hasLocalUnsynced ||
-                Date.now() - lastLocalEditTimeRef.current < 5000)
+              isSavingRef.current ||
+              hasPendingChangesRef.current ||
+              hasLocalUnsynced ||
+              Date.now() - lastLocalEditTimeRef.current < 5000
             ) {
               return;
             }
 
-            if (isForceIncomingRepair) {
-              try {
-                localStorage.removeItem(UNSYNCED_CHANGES_KEY);
-                hasPendingChangesRef.current = false;
-              } catch (e) {}
-            }
-
-            const merged = isForceIncomingRepair
-              ? (incoming as CenterData)
-              : mergeAttendanceSafely(incoming as CenterData, dataRef.current);
+            const merged = mergeAttendanceSafely(incoming as CenterData, dataRef.current);
             const { cleaned } = sanitizeData(merged);
             dataRef.current = cleaned;
             setData(cleaned);
@@ -1717,6 +1489,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             } catch (e) {}
             setLastSyncedAt(new Date((payload.new as any).updated_at || Date.now()));
             setCloudSyncStatus('synced');
+            try {
+              reconcileAllSameSubjectCredits(cleaned);
+            } catch (e) {}
           }
         }
       )
@@ -3355,8 +3130,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     sourceGroupId: string,
     targetGroupId: string,
     amountToTransfer: number,
-    notes?: string,
-    skipPersist?: boolean
+    notes?: string
   ): { success: boolean; transferredAmount: number; remainingTargetDebt: number; remainingSourceCredit: number } => {
     if (amountToTransfer <= 0 || sourceGroupId === targetGroupId) {
       return { success: false, transferredAmount: 0, remainingTargetDebt: 0, remainingSourceCredit: 0 };
@@ -3397,20 +3171,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return { success: false, transferredAmount: 0, remainingTargetDebt: targetStudent.debt, remainingSourceCredit: 0 };
     }
 
-    const targetReceived = (targetStudent.payments || []).reduce<number>((sum, p) => sum + (Number(p) || 0), 0) || targetStudent.totalReceived || 0;
-    const targetFee = targetStudent.fee || 0;
-    const targetDebt = Math.max(0, targetFee - targetReceived);
-
-    if (targetDebt <= 0) {
-      return { success: false, transferredAmount: 0, remainingTargetDebt: 0, remainingSourceCredit: sourceSurplus };
-    }
-
-    const actualTransfer = Math.min(amountToTransfer, sourceSurplus, targetDebt);
+    const actualTransfer = Math.min(amountToTransfer, sourceSurplus);
     if (actualTransfer <= 0) {
-      return { success: false, transferredAmount: 0, remainingTargetDebt: targetDebt, remainingSourceCredit: sourceSurplus };
+      return { success: false, transferredAmount: 0, remainingTargetDebt: targetStudent.debt, remainingSourceCredit: sourceSurplus };
     }
 
-    // 1. Deduct actualTransfer from sourceStudent.payments
+    // 1. Deduct from sourceStudent.payments
     const sourceSessionCount = sourceGroup.sessionDates?.length || sourceGroup.sessionCount || 4;
     const newSourcePayments: (number | string)[] = [...(sourceStudent.payments || [])];
     while (newSourcePayments.length < sourceSessionCount) newSourcePayments.push('');
@@ -3440,25 +3206,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       sourceGroup
     );
 
-    // 2. Add actualTransfer to targetStudent.payments (distribute strictly by session price)
+    // 2. Add to targetStudent.payments
     const targetSessionCount = targetGroup.sessionDates?.length || targetGroup.sessionCount || 4;
     const newTargetPayments: (number | string)[] = [...(targetStudent.payments || [])];
     while (newTargetPayments.length < targetSessionCount) newTargetPayments.push('');
 
-    let remainingToAdd = actualTransfer;
-    const perSession = Math.round(targetFee / targetSessionCount) || actualTransfer;
-    for (let i = 0; i < targetSessionCount && remainingToAdd > 0; i++) {
+    let applied = false;
+    for (let i = 0; i < targetSessionCount; i++) {
       const curVal = Number(newTargetPayments[i]) || 0;
-      const space = Math.max(0, perSession - curVal);
-      if (space > 0) {
-        const fill = Math.min(space, remainingToAdd);
-        newTargetPayments[i] = curVal + fill;
-        remainingToAdd -= fill;
+      if (curVal === 0) {
+        newTargetPayments[i] = actualTransfer;
+        applied = true;
+        break;
       }
     }
-    if (remainingToAdd > 0) {
+    if (!applied) {
       const cur0 = Number(newTargetPayments[0]) || 0;
-      newTargetPayments[0] = cur0 + remainingToAdd;
+      newTargetPayments[0] = cur0 + actualTransfer;
     }
 
     const updatedTargetStudent = calculateStudentFinances(
@@ -3485,12 +3249,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       groupData: updatedGroupData
     };
 
-    if (!skipPersist) {
-      persistData(updatedData);
-      saveToCloud(updatedData);
-    } else {
-      dataRef.current = updatedData;
-    }
+    persistData(updatedData);
+    saveToCloud(updatedData);
 
     // Deduct transaction in source group
     recordPaymentTransaction({
@@ -3534,8 +3294,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const autoApplySameSubjectCredit = (
     studentName: string,
     barcode: string | undefined,
-    targetGroupId: string,
-    skipPersist?: boolean
+    targetGroupId: string
   ): {
     totalApplied: number;
     remainingDebt: number;
@@ -3587,8 +3346,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         src.groupId,
         targetGroupId,
         amountToTake,
-        `[تسوية تلقائية لنفس المادة] تحويل ${amountToTake.toLocaleString()} دج من فائض مادة ${src.subject} (${src.groupId}) لصالح (${targetGroupId})`,
-        skipPersist
+        `[تسوية تلقائية لنفس المادة] تحويل ${amountToTake.toLocaleString()} دج من فائض مادة ${src.subject} (${src.groupId}) لصالح (${targetGroupId})`
       );
 
       if (res.success && res.transferredAmount > 0) {
@@ -3668,30 +3426,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       for (const student of targetGroup.students) {
         if (isSummaryRow(student, targetGid)) continue;
 
-        // Read latest state of student from dataRef.current to avoid stale data
-        const liveTargetGroup = dataRef.current.groupData[targetGid];
-        const liveStudent = liveTargetGroup?.students.find((s) => s.rowId === student.rowId);
-        if (!liveStudent) continue;
-
         const totalReceived =
-          (liveStudent.payments || []).reduce<number>((sum, p) => sum + (Number(p) || 0), 0) ||
-          liveStudent.totalReceived ||
+          (student.payments || []).reduce<number>((sum, p) => sum + (Number(p) || 0), 0) ||
+          student.totalReceived ||
           0;
-        const fee = liveStudent.fee || 0;
+        const fee = student.fee || 0;
         const debt = Math.max(0, fee - totalReceived);
 
         if (debt > 0) {
-          const res = autoApplySameSubjectCredit(liveStudent.name, liveStudent.barcode, targetGid, true);
+          const res = autoApplySameSubjectCredit(student.name, student.barcode, targetGid);
           if (res.totalApplied > 0) {
             anyReconciled = true;
           }
         }
       }
-    }
-
-    if (anyReconciled) {
-      persistData(dataRef.current);
-      saveToCloud(dataRef.current);
     }
 
     return anyReconciled;
@@ -3914,15 +3662,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     // Automatically transfer any surplus money from the old course to the new course for renewed students
     try {
-      let anyTransferred = false;
       newStudents.forEach((student) => {
-        const res = autoApplySameSubjectCredit(student.name, student.barcode, cleanNewId, true);
-        if (res.totalApplied > 0) anyTransferred = true;
+        autoApplySameSubjectCredit(student.name, student.barcode, cleanNewId);
       });
-      if (anyTransferred) {
-        persistData(dataRef.current);
-        saveToCloud(dataRef.current);
-      }
     } catch (e) {
       console.warn('Auto apply same subject credit error during group renewal:', e);
     }

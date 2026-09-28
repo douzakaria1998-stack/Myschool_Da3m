@@ -58,7 +58,7 @@ import {
 import Link from 'next/link';
 import { getBarcodeCandidates, normalizeArabicName, normalizeScannedBarcode } from '../utils/barcodeUtils';
 import { recordScanToLog, getScanLog } from '../utils/scanLogger';
-import { getStudentAvailableCredits, StudentCreditGroupInfo, getStudentPreviousGroupDebts } from '../utils/studentAccountUtils';
+import { getStudentAvailableCredits, StudentCreditGroupInfo } from '../utils/studentAccountUtils';
 import AddGroupModal from './AddGroupModal';
 
 export interface PendingCoverRequest {
@@ -1186,38 +1186,24 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       ...prev.slice(0, 9)
     ]);
 
-    const prevDebtInfo = getStudentPreviousGroupDebts(student.name, student.barcode, data, groupId, finalDebt);
-    const hasPrevSameSubjectDebt = prevDebtInfo.lastGroupDebt > 0;
-
     if (isPaid) {
-      if (hasPrevSameSubjectDebt) {
-        playWarningAlert();
-        setFlashSuccess({
-          name: student.name,
-          statusText: `حاضر (مسدد الفوج الحالي ✓) ⚠️ دين سابق: ${prevDebtInfo.lastGroupDebt.toLocaleString()} دج`,
-          details: `يوجد دين غير مسدد من الفوج السابق لنفس المادة (${prevDebtInfo.lastGroupId}) بمبلغ ${prevDebtInfo.lastGroupDebt.toLocaleString()} دج (إجمالي دين المادة: ${prevDebtInfo.totalSubjectDebt.toLocaleString()} دج)`,
-          isWarning: true
-        });
-        setTimeout(() => setFlashSuccess(null), 3000);
-      } else {
-        // Paid student: Instant chime & quick confirmation
-        playSuccessChime();
-        setFlashSuccess({
-          name: student.name,
-          statusText: autoAppliedSameSubject > 0
-            ? 'حاضر (مسدد بالكامل ✓)'
-            : isAlreadyPresent
-            ? 'مسجل حاضر بالفعل ✓'
-            : isCover
-            ? 'حاضر (حصة تعويض) ✓'
-            : 'حاضر (مسدد بالكامل) ✓',
-          details: autoAppliedSameSubject > 0
-            ? `تم تسوية كامل المبلغ تلقائياً من الفائض في مادة ${targetGroup?.subject || ''} (${autoAppliedSameSubject.toLocaleString()} دج) • فوج ${groupId}`
-            : `فوج ${groupId} • الحصة ${sessionIdx + 1}`
-        });
+      // Paid student: Instant chime & quick confirmation
+      playSuccessChime();
+      setFlashSuccess({
+        name: student.name,
+        statusText: autoAppliedSameSubject > 0
+          ? 'حاضر (مسدد بالكامل ✓)'
+          : isAlreadyPresent
+          ? 'مسجل حاضر بالفعل ✓'
+          : isCover
+          ? 'حاضر (حصة تعويض) ✓'
+          : 'حاضر (مسدد بالكامل) ✓',
+        details: autoAppliedSameSubject > 0
+          ? `تم تسوية كامل المبلغ تلقائياً من الفائض في مادة ${targetGroup?.subject || ''} (${autoAppliedSameSubject.toLocaleString()} دج) • فوج ${groupId}`
+          : `فوج ${groupId} • الحصة ${sessionIdx + 1}`
+      });
 
-        setTimeout(() => setFlashSuccess(null), 1800);
-      }
+      setTimeout(() => setFlashSuccess(null), 1800);
     } else {
       // Unpaid student:
       playWarningAlert();
@@ -1261,7 +1247,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
         setFlashSuccess({
           name: student.name,
           statusText: `حاضر ⚠️ (المطلوب: ${finalDebt.toLocaleString()} دج • يتوفر رصيد في مادة أخرى)`,
-          details: `يرجى تأكيد تحويل الرصيد الفائض من مادة ${diffSubjectCredits[0].subject} (${diffSubjectCredits[0].availableCredit.toLocaleString()} دج)${hasPrevSameSubjectDebt ? ` • دين سابق (${prevDebtInfo.lastGroupId}): ${prevDebtInfo.lastGroupDebt.toLocaleString()} دج` : ''}`,
+          details: `يرجى تأكيد تحويل الرصيد الفائض من مادة ${diffSubjectCredits[0].subject} (${diffSubjectCredits[0].availableCredit.toLocaleString()} دج)`,
           isWarning: true
         });
       } else {
@@ -1269,17 +1255,15 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
           name: student.name,
           statusText: autoAppliedSameSubject > 0
             ? `حاضر ⚠️ (المطلوب للدفع: ${finalDebt.toLocaleString()} دج فقط)`
-            : `حاضر ⚠️ (مدين: ${finalDebt.toLocaleString()} دج)${hasPrevSameSubjectDebt ? ` + دين سابق (${prevDebtInfo.lastGroupId}): ${prevDebtInfo.lastGroupDebt.toLocaleString()} دج` : ''}`,
+            : `حاضر ⚠️ (مدين: ${finalDebt.toLocaleString()} دج)`,
           details: autoAppliedSameSubject > 0
-            ? `تم خصم فائض ${autoAppliedSameSubject.toLocaleString()} دج من مادة ${targetGroup?.subject || ''} • الباقي ${finalDebt.toLocaleString()} دج${hasPrevSameSubjectDebt ? ` (دين سابق: ${prevDebtInfo.lastGroupDebt.toLocaleString()} دج)` : ''}`
-            : hasPrevSameSubjectDebt
-            ? `دين الفوج الحالي: ${finalDebt.toLocaleString()} دج + دين الفوج السابق (${prevDebtInfo.lastGroupId}): ${prevDebtInfo.lastGroupDebt.toLocaleString()} دج (إجمالي المادة: ${prevDebtInfo.totalSubjectDebt.toLocaleString()} دج)`
+            ? `تم خصم فائض ${autoAppliedSameSubject.toLocaleString()} دج من مادة ${targetGroup?.subject || ''} • الباقي ${finalDebt.toLocaleString()} دج`
             : `أُضيف لقائمة انتظار غير المسددين على اليسار 👈`,
           isWarning: true
         });
       }
 
-      setTimeout(() => setFlashSuccess(null), hasPrevSameSubjectDebt ? 3000 : 2000);
+      setTimeout(() => setFlashSuccess(null), 2000);
     }
   };
 
@@ -3189,30 +3173,8 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                                 {debtor.student.name}
                               </strong>
                               <span style={{ fontSize: '0.74rem', color: '#991b1b', backgroundColor: '#fee2e2', padding: '1px 6px', borderRadius: '4px', fontWeight: 700 }}>
-                                دين الفوج الحالي: {debtor.debt.toLocaleString()} دج
+                                المبلغ المطلوب: {debtor.debt.toLocaleString()} دج
                               </span>
-                              {(() => {
-                                const prevDebt = getStudentPreviousGroupDebts(debtor.student.name, debtor.student.barcode, data, debtor.groupId, debtor.debt);
-                                if (prevDebt.lastGroupDebt > 0) {
-                                  return (
-                                    <span
-                                      style={{
-                                        fontSize: '0.72rem',
-                                        color: '#b91c1c',
-                                        backgroundColor: '#fee2e2',
-                                        border: '1px solid #f87171',
-                                        padding: '1px 6px',
-                                        borderRadius: '4px',
-                                        fontWeight: 800
-                                      }}
-                                      title={`دين الفوج السابق (${prevDebt.lastGroupId}): ${prevDebt.lastGroupDebt.toLocaleString()} دج • إجمالي دين المادة: ${prevDebt.totalSubjectDebt.toLocaleString()} دج`}
-                                    >
-                                      + دين سابق ({prevDebt.lastGroupId}): {prevDebt.lastGroupDebt.toLocaleString()} دج (إجمالي المادة: {prevDebt.totalSubjectDebt.toLocaleString()} دج)
-                                    </span>
-                                  );
-                                }
-                                return null;
-                              })()}
                             </div>
 
                             {/* Badge if paying partial */}
