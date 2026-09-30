@@ -22,6 +22,7 @@ import {
   Layers,
   ChevronDown,
   FolderPlus,
+  FolderOpen,
   Plus,
   Trash2,
   UserPlus,
@@ -41,6 +42,7 @@ import {
 } from 'lucide-react';
 import { playSuccessChime, playWarningAlert } from '../utils/soundUtils';
 import { printSingleThermalReceipt, printBatchThermalReceipts, ThermalReceiptData } from '../utils/printUtils';
+import { openReceiptsFolder } from '../utils/receiptSaveUtils';
 import {
   isSummaryRow,
   formatToYYYYMMDD,
@@ -4784,13 +4786,31 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                   طابور الوصلات المؤجلة للطباعة ({printQueue.length})
                 </h3>
               </div>
-              <button
-                onClick={() => setShowQueueModal(false)}
-                className="m3-btn-text"
-                style={{ borderRadius: '50%', width: '32px', height: '32px', padding: 0 }}
-              >
-                <X size={18} />
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <button
+                  onClick={() => openReceiptsFolder()}
+                  className="m3-btn-outlined"
+                  title="فتح مجلد وصولات PDF على الكمبيوتر"
+                  style={{
+                    fontSize: '0.78rem',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    padding: '4px 10px',
+                    borderRadius: 'var(--md-shape-sm)'
+                  }}
+                >
+                  <FolderOpen size={14} />
+                  <span>مجلد الوصولات (PDF)</span>
+                </button>
+                <button
+                  onClick={() => setShowQueueModal(false)}
+                  className="m3-btn-text"
+                  style={{ borderRadius: '50%', width: '32px', height: '32px', padding: 0 }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
             </div>
 
             {printQueue.length === 0 ? (

@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { getGroupStatus, isGroupActive, isVipGroupId } from '../utils/sessionUtils';
 import { sanitizePrintTitle } from '../utils/printTitleUtils';
+import { saveReceiptPdfToServer } from '../utils/receiptSaveUtils';
 
 interface Props {
   isOpen: boolean;
@@ -309,7 +310,7 @@ export default function MultiGroupStudentEnrollModal({ isOpen, onClose }: Props)
 
     if (receiptFormat === 'thermal') {
       // 80mm Thermal Receipt Template
-      printWindow.document.write(`
+      const thermalDocHtml = `
         <!DOCTYPE html>
         <html dir="rtl" lang="ar">
           <head>
@@ -405,20 +406,30 @@ export default function MultiGroupStudentEnrollModal({ isOpen, onClose }: Props)
 
             <div class="barcode">*${receiptNo}*</div>
             <div class="center" style="font-size: 9px; margin-top: 4px;">شكراً لثقتكم بمؤسستنا - بالتوفيق والنجاح</div>
-
-            <script>
-              window.onload = function() {
-                document.title = ${JSON.stringify(printDocTitle)};
-                window.print();
-                setTimeout(function() { window.close(); }, 500);
-              };
-            </script>
           </body>
         </html>
+      `;
+
+      // Auto-save Thermal PDF to PC
+      saveReceiptPdfToServer({
+        html: thermalDocHtml,
+        filename: `وصل_تسجيل_${studentName}_${receiptNo}`,
+        folderDate: new Date().toISOString().slice(0, 10),
+      });
+
+      printWindow.document.write(`
+        ${thermalDocHtml}
+        <script>
+          window.onload = function() {
+            document.title = ${JSON.stringify(printDocTitle)};
+            window.print();
+            setTimeout(function() { window.close(); }, 500);
+          };
+        </script>
       `);
     } else {
       // Standard A4 Receipt Template
-      printWindow.document.write(`
+      const a4DocHtml = `
         <!DOCTYPE html>
         <html dir="rtl" lang="ar">
           <head>
@@ -533,15 +544,25 @@ export default function MultiGroupStudentEnrollModal({ isOpen, onClose }: Props)
                 <div class="sig-line">${studentName}</div>
               </div>
             </div>
-
-            <script>
-              window.onload = function() {
-                document.title = ${JSON.stringify(printDocTitle)};
-                window.print();
-              };
-            </script>
           </body>
         </html>
+      `;
+
+      // Auto-save A4 Combined Receipt PDF
+      saveReceiptPdfToServer({
+        html: a4DocHtml,
+        filename: `وصل_A4_تسجيل_${studentName}_${receiptNo}`,
+        folderDate: new Date().toISOString().slice(0, 10),
+      });
+
+      printWindow.document.write(`
+        ${a4DocHtml}
+        <script>
+          window.onload = function() {
+            document.title = ${JSON.stringify(printDocTitle)};
+            window.print();
+          };
+        </script>
       `);
     }
     printWindow.document.close();

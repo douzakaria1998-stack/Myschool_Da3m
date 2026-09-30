@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import TopAppBar from './TopAppBar';
 import NavRail from './NavRail';
+import ReceiptSavedNotification from './ReceiptSavedNotification';
 
 export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
   const { theme, lang } = useApp();
@@ -53,6 +54,7 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
           {children}
         </main>
       </div>
+      <ReceiptSavedNotification />
     </div>
   );
 }

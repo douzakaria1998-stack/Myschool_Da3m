@@ -3,9 +3,10 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useApp } from '../context/AppContext';
-import { Sun, Moon, Download, GraduationCap, School, CloudCheck, CloudOff, RefreshCw, Scan, Clock, Trash2 } from 'lucide-react';
+import { Sun, Moon, Download, GraduationCap, School, CloudCheck, CloudOff, RefreshCw, Scan, Clock, Trash2, FolderOpen } from 'lucide-react';
 import HourlyPaymentFilterModal from './HourlyPaymentFilterModal';
 import RecycleBinModal from './RecycleBinModal';
+import { openReceiptsFolder } from '../utils/receiptSaveUtils';
 
 export default function TopAppBar() {
   const {
@@ -289,6 +290,33 @@ export default function TopAppBar() {
         >
           <Download size={14} />
           <span>{effectiveLang === 'ar' ? 'تصدير نسخة' : 'Export'}</span>
+        </button>
+
+        {/* Saved Receipts Folder Button */}
+        <button
+          onClick={() => openReceiptsFolder()}
+          className="m3-btn"
+          title={effectiveLang === 'ar' ? 'فتح مجلد وصولات PDF على الكمبيوتر (سطح المكتب)' : 'Open saved PDF receipts folder'}
+          style={{
+            height: '34px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '6px',
+            padding: '0 11px',
+            borderRadius: 'var(--md-shape-full)',
+            border: '1px solid var(--md-sys-color-outline-variant)',
+            backgroundColor: 'var(--md-sys-color-surface-container-high)',
+            color: 'var(--md-sys-color-on-surface)',
+            cursor: 'pointer',
+            fontSize: '0.8rem',
+            fontWeight: 600,
+            whiteSpace: 'nowrap',
+            flexShrink: 0
+          }}
+        >
+          <FolderOpen size={14} />
+          <span>{effectiveLang === 'ar' ? 'مجلد الوصولات' : 'Receipts'}</span>
         </button>
 
         {/* Language Toggle */}

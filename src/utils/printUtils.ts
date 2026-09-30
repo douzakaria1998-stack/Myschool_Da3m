@@ -1,5 +1,6 @@
 // Thermal 80mm Receipt Printing Utilities for Da3m Center
 import { sanitizePrintTitle } from './printTitleUtils';
+import { saveReceiptPdfToServer, saveBatchReceiptsPdfToServer } from './receiptSaveUtils';
 
 export interface ThermalReceiptData {
   receiptNo: string;
@@ -21,7 +22,7 @@ export interface ThermalReceiptData {
   originalGroup?: string;
 }
 
-function generateReceiptHtml(receipt: ThermalReceiptData): string {
+export function generateReceiptHtml(receipt: ThermalReceiptData): string {
   return `
     <div class="receipt-container">
       <div class="center" style="margin-bottom: 6px;">
@@ -76,45 +77,14 @@ function generateReceiptHtml(receipt: ThermalReceiptData): string {
   `;
 }
 
-/**
- * Print a single 80mm thermal receipt immediately
- */
-export function printSingleThermalReceipt(receipt: ThermalReceiptData) {
-  if (typeof window === 'undefined') return;
-
-  const receiptTitle =
-    sanitizePrintTitle(`${receipt.studentName} - ${receipt.receiptNo || 'وصل حراري'}`) ||
-    `وصل حراري - ${receipt.studentName}`;
-
-  const originalParentTitle = typeof document !== 'undefined' ? document.title : '';
-  if (typeof document !== 'undefined') {
-    document.title = receiptTitle;
-  }
-  const restoreParentTitle = () => {
-    if (typeof document !== 'undefined' && originalParentTitle) {
-      document.title = originalParentTitle;
-    }
-    if (typeof window !== 'undefined') {
-      window.removeEventListener('afterprint', restoreParentTitle);
-    }
-  };
-  if (typeof window !== 'undefined') {
-    window.addEventListener('afterprint', restoreParentTitle, { once: true });
-    setTimeout(restoreParentTitle, 5000);
-  }
-
-  const printWindow = window.open('', '_blank', 'width=400,height=550');
-  if (!printWindow) return;
-  printWindow.document.title = receiptTitle;
-
+export function buildThermalReceiptDocumentHtml(receipt: ThermalReceiptData, title: string): string {
   const receiptHtml = generateReceiptHtml(receipt);
-
-  printWindow.document.write(`
+  return `
     <!DOCTYPE html>
     <html dir="rtl" lang="ar">
       <head>
         <meta charset="utf-8" />
-        <title>${receiptTitle}</title>
+        <title>${title}</title>
         <style>
           @page { size: 80mm auto; margin: 0mm !important; }
           * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -144,26 +114,84 @@ export function printSingleThermalReceipt(receipt: ThermalReceiptData) {
       </head>
       <body>
         ${receiptHtml}
-        <script>
-          window.onload = function() {
-            document.title = ${JSON.stringify(receiptTitle)};
-            window.print();
-            setTimeout(function() { window.close(); }, 600);
-          };
-        </script>
       </body>
     </html>
+  `;
+}
+
+/**
+ * Print a single 80mm thermal receipt immediately and automatically save PDF to PC
+ */
+export function printSingleThermalReceipt(receipt: ThermalReceiptData) {
+  if (typeof window === 'undefined') return;
+
+  const receiptTitle =
+    sanitizePrintTitle(`${receipt.studentName} - ${receipt.receiptNo || 'وصل حراري'}`) ||
+    `وصل حراري - ${receipt.studentName}`;
+
+  // Automatically save PDF copy on user's PC (Desktop/الوصولات/YYYY-MM-DD)
+  const docHtml = buildThermalReceiptDocumentHtml(receipt, receiptTitle);
+  saveReceiptPdfToServer({
+    html: docHtml,
+    filename: `وصل_${receipt.studentName}_${receipt.groupId}_${receipt.receiptNo || 'REC'}`,
+    folderDate: receipt.date ? receipt.date.replace(/[\/\\]/g, '-') : undefined,
+  });
+
+  const originalParentTitle = typeof document !== 'undefined' ? document.title : '';
+  if (typeof document !== 'undefined') {
+    document.title = receiptTitle;
+  }
+  const restoreParentTitle = () => {
+    if (typeof document !== 'undefined' && originalParentTitle) {
+      document.title = originalParentTitle;
+    }
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('afterprint', restoreParentTitle);
+    }
+  };
+  if (typeof window !== 'undefined') {
+    window.addEventListener('afterprint', restoreParentTitle, { once: true });
+    setTimeout(restoreParentTitle, 5000);
+  }
+
+  const printWindow = window.open('', '_blank', 'width=400,height=550');
+  if (!printWindow) return;
+  printWindow.document.title = receiptTitle;
+
+  printWindow.document.write(`
+    ${docHtml}
+    <script>
+      window.onload = function() {
+        document.title = ${JSON.stringify(receiptTitle)};
+        window.print();
+        setTimeout(function() { window.close(); }, 600);
+      };
+    </script>
   `);
   printWindow.document.close();
 }
 
 /**
- * Print batch of thermal receipts sequentially with page-breaks
+ * Print batch of thermal receipts sequentially with page-breaks and save PDFs to PC
  */
 export function printBatchThermalReceipts(receipts: ThermalReceiptData[]) {
   if (typeof window === 'undefined' || receipts.length === 0) return;
 
   const batchTitle = sanitizePrintTitle(`وصولات مؤجلة (${receipts.length})`);
+
+  // Automatically save each receipt in the batch as an individual PDF on PC
+  const batchSaveItems = receipts.map((r) => {
+    const rTitle =
+      sanitizePrintTitle(`${r.studentName} - ${r.receiptNo || 'وصل حراري'}`) ||
+      `وصل حراري - ${r.studentName}`;
+    return {
+      html: buildThermalReceiptDocumentHtml(r, rTitle),
+      filename: `وصل_${r.studentName}_${r.groupId}_${r.receiptNo || 'REC'}`,
+      folderDate: r.date ? r.date.replace(/[\/\\]/g, '-') : undefined,
+    };
+  });
+  saveBatchReceiptsPdfToServer(batchSaveItems);
+
   const originalParentTitle = typeof document !== 'undefined' ? document.title : '';
   if (typeof document !== 'undefined') {
     document.title = batchTitle;

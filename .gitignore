@@ -34,3 +34,7 @@ yarn-error.log*
 
 # scratch files
 /scratch/
+
+# local saved receipts
+/saved_receipts/
+

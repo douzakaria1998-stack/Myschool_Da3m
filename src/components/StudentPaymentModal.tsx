@@ -6,6 +6,7 @@ import { useApp, calcStudentFinancesPure } from '../context/AppContext';
 import { X, Check, Printer, AlertCircle, Receipt, Trash2, RotateCcw, AlertTriangle } from 'lucide-react';
 import { formatToYYYYMMDD } from '../utils/sessionUtils';
 import { sanitizePrintTitle } from '../utils/printTitleUtils';
+import { saveReceiptPdfToServer } from '../utils/receiptSaveUtils';
 
 interface Props {
   groupId: string;
@@ -120,11 +121,13 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
 
     const totalPaid = livePreview.totalReceived;
     const balance = livePreview.debt;
+    const receiptNo = `${group?.groupId || 'REC'}-${(student.rowId || 1).toString().padStart(3, '0')}`;
 
-    printWindow.document.write(`
+    const a4DocHtml = `
       <!DOCTYPE html>
       <html dir="rtl" lang="ar">
         <head>
+          <meta charset="utf-8" />
           <title>${receiptTitle}</title>
           <style>
             body { font-family: 'Cairo', sans-serif; padding: 30px; text-align: right; color: #111; }
@@ -180,15 +183,26 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
             <p>شكراً لثقتكم بمؤسستنا - مع تمنياتنا لجميع التلاميذ بالتفوق والنجاح</p>
             <p>ختم وإمضاء الإدارة</p>
           </div>
-          <script>
-            window.onload = () => {
-              document.title = ${JSON.stringify(receiptTitle)};
-              window.print();
-              window.close();
-            };
-          </script>
         </body>
       </html>
+    `;
+
+    // Auto-save A4 PDF to PC
+    saveReceiptPdfToServer({
+      html: a4DocHtml,
+      filename: `وصل_A4_${student.name}_${group?.groupId || 'فوج'}_${receiptNo}`,
+      folderDate: new Date().toISOString().slice(0, 10),
+    });
+
+    printWindow.document.write(`
+      ${a4DocHtml}
+      <script>
+        window.onload = () => {
+          document.title = ${JSON.stringify(receiptTitle)};
+          window.print();
+          window.close();
+        };
+      </script>
     `);
     printWindow.document.close();
   };
@@ -230,7 +244,7 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
     const printDate = new Date().toLocaleDateString('ar-DZ');
     const printTime = new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' });
 
-    printWindow.document.write(`
+    const thermalDocHtml = `
       <!DOCTYPE html>
       <html dir="rtl" lang="ar">
         <head>
@@ -306,15 +320,26 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
             يرجى الاحتفاظ بهذا الوصل
           </div>
           <div class="cut-line">✄ - - - - - - - - - - - - - - - - - - -</div>
-          <script>
-            window.onload = function() {
-              document.title = ${JSON.stringify(receiptTitle)};
-              window.print();
-              setTimeout(function() { window.close(); }, 500);
-            };
-          </script>
         </body>
       </html>
+    `;
+
+    // Auto-save Thermal Receipt PDF to PC
+    saveReceiptPdfToServer({
+      html: thermalDocHtml,
+      filename: `وصل_${student.name}_${group?.groupId || 'فوج'}_${receiptNo}`,
+      folderDate: new Date().toISOString().slice(0, 10),
+    });
+
+    printWindow.document.write(`
+      ${thermalDocHtml}
+      <script>
+        window.onload = function() {
+          document.title = ${JSON.stringify(receiptTitle)};
+          window.print();
+          setTimeout(function() { window.close(); }, 500);
+        };
+      </script>
     `);
     printWindow.document.close();
   };

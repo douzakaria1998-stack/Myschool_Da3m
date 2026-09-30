@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { Teacher, GroupSheet, TeacherPaymentRecord } from '../types';
 import { sanitizePrintTitle, getArabicMonthYear } from '../utils/printTitleUtils';
+import { saveReceiptPdfToServer } from '../utils/receiptSaveUtils';
 import {
   X,
   Printer,
@@ -105,7 +106,7 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
       })
       .join('');
 
-    printWindow.document.write(`
+    const voucherHtml = `
       <!DOCTYPE html>
       <html dir="rtl" lang="ar">
         <head>
@@ -322,16 +323,27 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
             تم استخراج هذا السند رسمياً من نظام إدارة المركز "دعم" | ${new Date().toLocaleDateString('ar-DZ')}
           </div>
 
-          <script>
-            window.onload = () => {
-              document.title = ${JSON.stringify(voucherTitle)};
-              window.print();
-            };
-          </script>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
+          </body>
+        </html>
+      `;
+
+      // Auto-save Teacher Voucher PDF to PC
+      saveReceiptPdfToServer({
+        html: voucherHtml,
+        filename: `سند_أتعاب_الأستاذ_${teacher.name}_${payment.receiptNo}`,
+        folderDate: new Date().toISOString().slice(0, 10),
+      });
+
+      printWindow.document.write(`
+        ${voucherHtml}
+        <script>
+          window.onload = () => {
+            document.title = ${JSON.stringify(voucherTitle)};
+            window.print();
+          };
+        </script>
+      `);
+      printWindow.document.close();
   };
 
   // Submit payment

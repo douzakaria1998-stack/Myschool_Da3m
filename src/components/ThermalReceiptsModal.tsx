@@ -3,9 +3,10 @@
 import React, { useState, useEffect } from 'react';
 import { GroupSheet, StudentRecord } from '../types';
 import { useApp } from '../context/AppContext';
-import { X, Printer, Receipt, Check, Save, CreditCard, Search } from 'lucide-react';
+import { X, Printer, Receipt, Check, Save, CreditCard, Search, FolderOpen } from 'lucide-react';
 import { getDefaultSessionIndex, isSessionDateToday, isSummaryRow, formatToYYYYMMDD } from '../utils/sessionUtils';
 import { sanitizePrintTitle } from '../utils/printTitleUtils';
+import { saveBatchReceiptsPdfToServer, openReceiptsFolder } from '../utils/receiptSaveUtils';
 
 interface Props {
   group: GroupSheet;
@@ -465,6 +466,37 @@ export default function ThermalReceiptsModal({ group, onClose }: Props) {
       setTimeout(restoreParentTitle, 5000);
     }
 
+    // Automatically save each printed receipt as an individual PDF on PC
+    const batchSaveItems = listToPrint.map((student, idx) => {
+      const receiptHtml = buildReceiptHtml(student, idx, printDateStr, printTimeStr);
+      const studentRecTitle =
+        sanitizePrintTitle(`${student.name} - وصل حراري`) || `وصل حراري - ${student.name}`;
+      const recDocHtml = `
+        <!DOCTYPE html>
+        <html dir="rtl" lang="ar">
+          <head>
+            <meta charset="utf-8" />
+            <title>${studentRecTitle}</title>
+            <style>
+              ${thermalPrintCss}
+            </style>
+          </head>
+          <body>
+            <div class="receipts-container">
+              ${receiptHtml}
+            </div>
+          </body>
+        </html>
+      `;
+      const recNo = `REC-${group.groupId}-${student.rowId.toString().padStart(3, '0')}`;
+      return {
+        html: recDocHtml,
+        filename: `وصل_${student.name}_${group.groupId}_${recNo}`,
+        folderDate: printDateStr.replace(/[\/\\]/g, '-'),
+      };
+    });
+    saveBatchReceiptsPdfToServer(batchSaveItems);
+
     // Single student OR batch mode with explicit page breaks
     if (listToPrint.length === 1 || printMode === 'batch') {
       const printWindow = window.open('', '_blank', 'width=420,height=600');
@@ -664,13 +696,31 @@ export default function ThermalReceiptsModal({ group, onClose }: Props) {
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="m3-btn-text"
-            style={{ borderRadius: '50%', width: '30px', height: '30px', padding: 0 }}
-          >
-            <X size={18} />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <button
+              onClick={() => openReceiptsFolder()}
+              className="m3-btn-outlined"
+              title="فتح مجلد وصولات PDF على الكمبيوتر"
+              style={{
+                fontSize: '0.78rem',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '4px 10px',
+                borderRadius: 'var(--md-shape-sm)'
+              }}
+            >
+              <FolderOpen size={14} />
+              <span>مجلد الوصولات (PDF)</span>
+            </button>
+            <button
+              onClick={onClose}
+              className="m3-btn-text"
+              style={{ borderRadius: '50%', width: '30px', height: '30px', padding: 0 }}
+            >
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         {/* Controls Bar: Select Session & Filter */}
