@@ -171,6 +171,7 @@ export interface CenterData {
   credentials: CenterCredentials;
   paymentTransactions?: any[];
   deletedStudents?: DeletedStudentArchiveItem[];
+  deletedGroups?: string[];
 }
 
 export interface DeletedStudentArchiveItem {

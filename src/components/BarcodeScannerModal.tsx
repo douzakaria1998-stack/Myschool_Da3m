@@ -47,6 +47,7 @@ import {
   isSummaryRow,
   formatToYYYYMMDD,
   isSessionDateToday,
+  isGroupToday,
   detectCurrentActiveGroupAndSession,
   ActiveGroupDetectionResult,
   formatGroupTime,
@@ -154,6 +155,10 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
 
   // Active Groups configuration
   const [activeGroups, setActiveGroups] = useState<{ groupId: string; sessionIndex: number }[]>(() => {
+    if (initialGroupId && data.groupData[initialGroupId]) {
+      const gSheet = data.groupData[initialGroupId];
+      return [{ groupId: initialGroupId, sessionIndex: getDefaultSessionIndex(gSheet, new Date()) }];
+    }
     const initialDetect = detectCurrentActiveGroupAndSession(data.groupData, data.groups, new Date());
     if (initialDetect.matchingGroups.length > 0) {
       return initialDetect.matchingGroups.map((m) => ({
@@ -163,6 +168,12 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     }
     if (initialDetect.activeGroup) {
       return [{ groupId: initialDetect.activeGroup.groupId, sessionIndex: initialDetect.activeSessionIndex }];
+    }
+    if (initialDetect.allTodayGroups && initialDetect.allTodayGroups.length > 0) {
+      return initialDetect.allTodayGroups.slice(0, 2).map((m) => ({
+        groupId: m.group.groupId,
+        sessionIndex: m.sessionIndex
+      }));
     }
     return [];
   });
@@ -224,7 +235,11 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
   // Handlers to manage active groups
   const handleAddActiveGroup = (defaultGid?: string) => {
     const existingIds = new Set(activeGroups.map((g) => g.groupId));
+    const candidateToday = data.groups.find(
+      (g) => !existingIds.has(g.id) && !dismissedGroupIds.includes(g.id) && isGroupToday(g, data.groupData[g.id])
+    );
     const candidate =
+      candidateToday ||
       data.groups.find((g) => !existingIds.has(g.id) && !dismissedGroupIds.includes(g.id)) ||
       data.groups.find((g) => !existingIds.has(g.id)) ||
       data.groups[0];
@@ -1930,7 +1945,10 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
             type="button"
             onClick={() => {
               const existingGids = new Set(activeGroups.map((g) => g.groupId));
-              const available = data.groups.find((g) => !existingGids.has(g.id)) || data.groups[0];
+              const available =
+                data.groups.find((g) => !existingGids.has(g.id) && isGroupToday(g, data.groupData[g.id])) ||
+                data.groups.find((g) => !existingGids.has(g.id)) ||
+                data.groups[0];
               const gid = available?.id || '';
               setStationSelectedGid(gid);
               const gSheet = data.groupData[gid];
@@ -2204,11 +2222,20 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                         className="m3-input"
                         style={{ padding: '3px 6px', fontSize: '0.76rem', fontWeight: 700, width: '100%', height: '28px' }}
                       >
-                        {data.groups.map((g) => (
-                          <option key={g.id} value={g.id}>
-                            فوج {g.id} ({g.subject})
-                          </option>
-                        ))}
+                        {[...data.groups]
+                          .sort((a, b) => {
+                            const aToday = isGroupToday(a, data.groupData[a.id]) ? 1 : 0;
+                            const bToday = isGroupToday(b, data.groupData[b.id]) ? 1 : 0;
+                            return bToday - aToday;
+                          })
+                          .map((g) => {
+                            const hasSessionToday = isGroupToday(g, data.groupData[g.id]);
+                            return (
+                              <option key={g.id} value={g.id}>
+                                {hasSessionToday ? '⭐ ' : ''}فوج {g.id} ({g.subject})
+                              </option>
+                            );
+                          })}
                       </select>
                     </div>
 
@@ -2305,7 +2332,10 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
               type="button"
               onClick={() => {
                 const existingGids = new Set(activeGroups.map((g) => g.groupId));
-                const available = data.groups.find((g) => !existingGids.has(g.id)) || data.groups[0];
+                const available =
+                  data.groups.find((g) => !existingGids.has(g.id) && isGroupToday(g, data.groupData[g.id])) ||
+                  data.groups.find((g) => !existingGids.has(g.id)) ||
+                  data.groups[0];
                 const gid = available?.id || '';
                 setStationSelectedGid(gid);
                 const gSheet = data.groupData[gid];
@@ -4987,14 +5017,21 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                   className="m3-input"
                   style={{ width: '100%', height: '38px', padding: '4px 10px', fontSize: '0.86rem', fontWeight: 800, color: 'var(--md-sys-color-on-surface)', backgroundColor: '#fff' }}
                 >
-                  {data.groups.map((g) => {
-                    const isAlreadyActive = activeGroups.some((ag) => ag.groupId === g.id);
-                    return (
-                      <option key={g.id} value={g.id}>
-                        فوج {g.id} ({g.subject} - الأستاذ: {g.teacherName}) {isAlreadyActive ? '• (مفعل حالياً)' : ''}
-                      </option>
-                    );
-                  })}
+                  {[...data.groups]
+                    .sort((a, b) => {
+                      const aToday = isGroupToday(a, data.groupData[a.id]) ? 1 : 0;
+                      const bToday = isGroupToday(b, data.groupData[b.id]) ? 1 : 0;
+                      return bToday - aToday;
+                    })
+                    .map((g) => {
+                      const isAlreadyActive = activeGroups.some((ag) => ag.groupId === g.id);
+                      const hasSessionToday = isGroupToday(g, data.groupData[g.id]);
+                      return (
+                        <option key={g.id} value={g.id}>
+                          {hasSessionToday ? '⭐ [حصة اليوم 📅] ' : ''}فوج {g.id} ({g.subject} - الأستاذ: {g.teacherName}) {isAlreadyActive ? '• (مفعل حالياً)' : ''}
+                        </option>
+                      );
+                    })}
                 </select>
               </div>
 

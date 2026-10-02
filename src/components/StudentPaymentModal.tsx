@@ -478,21 +478,61 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
           const sessionCount = group?.sessionDates?.length || group?.sessionCount || payments.length || 8;
           return (
             <div style={{ marginBottom: '24px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
                 <label style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--md-sys-color-on-surface)' }}>
-                  دفعات التسديد (المستلم 1 إلى {sessionCount}):
+                  دفعات تسديد الاشتراك (المستلم):
                 </label>
-                <span
-                  style={{
-                    fontSize: '0.75rem',
-                    backgroundColor: 'var(--md-sys-color-surface-container-high)',
-                    color: 'var(--md-sys-color-on-surface-variant)',
-                    padding: '2px 8px',
-                    borderRadius: 'var(--md-shape-sm)'
-                  }}
-                >
-                  حسب حصص الفوج
-                </span>
+                <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  {livePreview.fee > 0 && livePreview.debt > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = Array(sessionCount).fill('');
+                        next[0] = livePreview.fee;
+                        setPayments(next);
+                      }}
+                      className="m3-btn m3-btn-sm"
+                      style={{
+                        padding: '4px 10px',
+                        fontSize: '0.78rem',
+                        fontWeight: 800,
+                        backgroundColor: '#ecfdf5',
+                        color: '#065f46',
+                        border: '1px solid #6ee7b7',
+                        borderRadius: 'var(--md-shape-sm)',
+                        cursor: 'pointer'
+                      }}
+                      title="تسديد كامل الاشتراك الشهري في الدفعة الأولى"
+                    >
+                      ⚡ تسديد كامل الاشتراك ({livePreview.fee.toLocaleString()} دج)
+                    </button>
+                  )}
+                  {payments.filter((p) => Number(p) > 0).length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const total = payments.reduce<number>((sum, p) => sum + (Number(p) || 0), 0);
+                        const next = Array(sessionCount).fill('');
+                        next[0] = total;
+                        setPayments(next);
+                      }}
+                      className="m3-btn m3-btn-sm"
+                      style={{
+                        padding: '4px 10px',
+                        fontSize: '0.78rem',
+                        fontWeight: 800,
+                        backgroundColor: '#eff6ff',
+                        color: '#1e40af',
+                        border: '1px solid #bfdbfe',
+                        borderRadius: 'var(--md-shape-sm)',
+                        cursor: 'pointer'
+                      }}
+                      title="دمج كل المبالغ المفرقة في دفعة واحدة"
+                    >
+                      🔄 دمج في دفعة واحدة ({payments.reduce<number>((sum, p) => sum + (Number(p) || 0), 0).toLocaleString()} دج)
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div
@@ -504,7 +544,6 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
                 }}
               >
                 {Array.from({ length: sessionCount }).map((_, i) => {
-                  const dateStr = group?.sessionDates?.[i];
                   const hasPaid = payments[i] !== '' && Number(payments[i]) > 0;
 
                   return (
@@ -525,72 +564,52 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
                         transition: 'all 0.15s ease'
                       }}
                     >
-                      {/* Label & Date Container - fixed minHeight for 100% uniform alignment */}
+                      {/* Label Container */}
                       <div
                         style={{
                           display: 'flex',
-                          flexDirection: 'column',
-                          justifyContent: 'center',
                           alignItems: 'center',
-                          minHeight: '38px',
+                          justifyContent: 'space-between',
                           marginBottom: '6px',
-                          textAlign: 'center'
+                          padding: '0 2px'
                         }}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', width: '100%' }}>
-                          <span
-                            style={{
-                              fontWeight: 700,
-                              fontSize: '0.82rem',
-                              color: hasPaid ? 'var(--status-present)' : 'var(--md-sys-color-on-surface)',
-                              whiteSpace: 'nowrap'
+                        <span
+                          style={{
+                            fontWeight: 700,
+                            fontSize: '0.82rem',
+                            color: hasPaid ? 'var(--status-present)' : 'var(--md-sys-color-on-surface)',
+                            whiteSpace: 'nowrap'
+                          }}
+                        >
+                          الدفعة {i + 1}
+                        </span>
+                        {hasPaid && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setConfirmRemovePaymentTarget({
+                                type: 'SESSION',
+                                sessionIdx: i,
+                                amount: Number(payments[i]) || 0
+                              });
                             }}
-                          >
-                            دفعة {i + 1}
-                          </span>
-                          {hasPaid && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setConfirmRemovePaymentTarget({
-                                  type: 'SESSION',
-                                  sessionIdx: i,
-                                  amount: Number(payments[i]) || 0
-                                });
-                              }}
-                              className="m3-btn-text"
-                              style={{
-                                color: '#dc2626',
-                                padding: '1px 3px',
-                                height: '18px',
-                                minWidth: '18px',
-                                borderRadius: '4px',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                justifyContent: 'center'
-                              }}
-                              title="حذف هذه الدفعة وإعادتها كغير مسدد"
-                            >
-                              <Trash2 size={12} />
-                            </button>
-                          )}
-                        </div>
-                        {dateStr ? (
-                          <span
+                            className="m3-btn-text"
                             style={{
-                              fontSize: '0.7rem',
-                              color: hasPaid ? 'var(--status-present)' : 'var(--md-sys-color-on-surface-variant)',
-                              direction: 'ltr',
-                              unicodeBidi: 'plaintext',
-                              marginTop: '2px',
-                              whiteSpace: 'nowrap'
+                              color: '#dc2626',
+                              padding: '1px 3px',
+                              height: '18px',
+                              minWidth: '18px',
+                              borderRadius: '4px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center'
                             }}
+                            title="حذف هذه الدفعة وإعادتها كغير مسدد"
                           >
-                            {formatToYYYYMMDD(dateStr)}
-                          </span>
-                        ) : (
-                          <span style={{ fontSize: '0.7rem', color: 'transparent', marginTop: '2px' }}>-</span>
+                            <Trash2 size={12} />
+                          </button>
                         )}
                       </div>
 

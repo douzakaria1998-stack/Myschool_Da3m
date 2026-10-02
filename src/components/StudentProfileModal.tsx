@@ -891,58 +891,7 @@ export default function StudentProfileModal({ student, groupId, onClose }: Props
                 </div>
               </div>
 
-              {/* Action Banner: Apply Existing Credit */}
-              {paymentAccount.availableBalance > 0 && currentStudent.debt > 0 && (
-                <div
-                  style={{
-                    backgroundColor: '#ecfdf5',
-                    border: '1.5px solid #10b981',
-                    borderRadius: '8px',
-                    padding: '10px 14px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '10px',
-                    flexWrap: 'wrap'
-                  }}
-                >
-                  <div>
-                    <strong style={{ fontSize: '0.86rem', color: '#065f46', display: 'block' }}>
-                      💡 يتوفر للتلميذ رصيد فائض بقيمة {paymentAccount.availableBalance.toLocaleString()} دج
-                    </strong>
-                    <span style={{ fontSize: '0.74rem', color: '#047857' }}>
-                      يمكنك تطبيقه لتسديد دين الفوج الحالي {groupId} (المطلوب: {currentStudent.debt.toLocaleString()} دج)
-                    </span>
-                  </div>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const amountToUse = Math.min(paymentAccount.availableBalance, currentStudent.debt);
-                      const ok = applyStudentCredit(student.name, student.barcode, groupId, amountToUse);
-                      if (ok) {
-                        setCreditApplySuccess(`تم تطبيق رصيد بقيمة ${amountToUse.toLocaleString()} دج على الفوج ${groupId} بنجاح ✓`);
-                        setTimeout(() => setCreditApplySuccess(''), 3000);
-                      }
-                    }}
-                    className="m3-btn m3-btn-sm"
-                    style={{
-                      backgroundColor: '#059669',
-                      color: '#fff',
-                      fontWeight: 800,
-                      fontSize: '0.76rem',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      borderRadius: '6px',
-                      padding: '4px 10px'
-                    }}
-                  >
-                    <Coins size={14} />
-                    <span>تطبيق الرصيد ({Math.min(paymentAccount.availableBalance, currentStudent.debt).toLocaleString()} دج)</span>
-                  </button>
-                </div>
-              )}
 
               {/* Recovery Sessions List (Matching Specification Section 9 & 21) */}
               <div

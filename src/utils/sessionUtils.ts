@@ -332,6 +332,13 @@ export function isSessionDateToday(dateStr: string, today: Date = new Date()): b
   const clean = dateStr.trim().replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString());
   if (!clean) return false;
 
+  // Exact normalized standard YYYY/MM/DD comparison
+  const targetFormatted = formatToYYYYMMDD(clean);
+  const todayFormatted = formatToYYYYMMDD(today);
+  if (targetFormatted && todayFormatted && targetFormatted === todayFormatted) {
+    return true;
+  }
+
   const todayDay = today.getDate();
   const todayMonth = today.getMonth() + 1;
   const todayYear = today.getFullYear();
@@ -441,16 +448,29 @@ export function getDefaultSessionIndex(group: GroupSheet, today: Date = new Date
 
 /**
  * Checks whether a group is active today:
- * 1. If group has a scheduled weekday (day1 or day2), it strictly matches if today's day of week matches day1 or day2.
- * 2. If neither day1 nor day2 is set, falls back to checking if any session date matches today's calendar date.
+ * 1. Strict Priority: If the group has configured sessionDates,
+ *    it is active today IF AND ONLY IF today's calendar date matches one of its session dates!
+ *    (e.g., if BAC01's sessions ended in September, it will NOT appear on Saturdays in October).
+ * 2. Fallback: Only if no sessionDates are configured at all,
+ *    falls back to checking if today's weekday name matches day1 or day2.
  */
 export function isGroupToday(
-  group: { day1?: string; day2?: string; id?: string },
+  group: { day1?: string; day2?: string; id?: string; sessionDates?: string[] },
   groupSheet?: GroupSheet,
   today: Date = new Date()
 ): boolean {
   if (!group) return false;
 
+  // 1. Strict Priority: Check configured sessionDates
+  const sessionDates = groupSheet?.sessionDates || group?.sessionDates;
+  if (Array.isArray(sessionDates) && sessionDates.length > 0) {
+    const validDates = sessionDates.filter((d) => typeof d === 'string' && d.trim().length > 0);
+    if (validDates.length > 0) {
+      return validDates.some((d) => isSessionDateToday(d, today));
+    }
+  }
+
+  // 2. Fallback: Only if no sessionDates are configured at all, check day1/day2 weekday names
   const todayDayName = ARABIC_DAYS[today.getDay()];
   const normToday = normalizeArabicText(todayDayName);
 
@@ -460,16 +480,10 @@ export function isGroupToday(
   const normDay1 = normalizeArabicText(groupDay1);
   const normDay2 = normalizeArabicText(groupDay2);
 
-  // If the group has scheduled day(s), it is today's group IF AND ONLY IF today matches day1 or day2!
   if (normDay1 || normDay2) {
     const isDay1Today = normDay1 ? (normDay1.includes(normToday) || normToday.includes(normDay1)) : false;
     const isDay2Today = normDay2 ? (normDay2.includes(normToday) || normToday.includes(normDay2)) : false;
     return isDay1Today || isDay2Today;
-  }
-
-  // Fallback: If neither day1 nor day2 is set, check if any session date matches today
-  if (groupSheet && Array.isArray(groupSheet.sessionDates)) {
-    return groupSheet.sessionDates.some((d) => isSessionDateToday(d, today));
   }
 
   return false;
@@ -875,6 +889,24 @@ export function getNextGroupId(
   }
 
   return candidateId;
+}
+
+/**
+ * Generates the next sequential Teacher ID (e.g. D01, D02, ... D21).
+ */
+export function generateNextTeacherId(teachers: (string | { id?: string })[] = []): string {
+  let maxNum = 0;
+  for (const t of teachers) {
+    if (!t) continue;
+    const rawId = typeof t === 'string' ? t : t.id;
+    if (!rawId) continue;
+    const match = rawId.match(/^D(\d+)$/i) || rawId.match(/(\d+)/);
+    if (match) {
+      const num = parseInt(match[1], 10);
+      if (num > maxNum) maxNum = num;
+    }
+  }
+  return `D${(maxNum + 1).toString().padStart(2, '0')}`;
 }
 
 /**

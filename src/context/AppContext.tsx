@@ -285,262 +285,167 @@ export const calcStudentFinancesPure = (
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 // Non-destructive Two-Way Union Merge:
-// Guarantees newly added students, newly registered groups, payments, and attendance
-// are NEVER erased by a stale or concurrent remote snapshot, while strictly respecting
-// deletedStudents tombstones so deleted students and their payments are NEVER resurrected!
+// Strictly respects deletedGroups and deletedStudents tombstones so deleted groups, students,
+// payments, and attendance modifications are NEVER resurrected by a stale remote snapshot.
 function mergeAttendanceSafely(remote: CenterData, local: CenterData): CenterData {
   if (!remote || !remote.groupData) return local || remote;
   if (!local || !local.groupData) return remote;
 
-  const merged: CenterData = {
-    ...remote,
-    groups: [...(remote.groups || [])],
-    groupData: { ...remote.groupData }
-  };
+  // 1. Authoritative Deleted Groups Tombstones
+  const mergedDeletedGroups = Array.from(
+    new Set([
+      ...(remote.deletedGroups || []).map((g) => g.trim().toUpperCase()),
+      ...(local.deletedGroups || []).map((g) => g.trim().toUpperCase())
+    ])
+  );
+  const isGroupDeleted = (gid: string) => mergedDeletedGroups.includes((gid || '').trim().toUpperCase());
 
-  // 1. Union deletedStudents archive FIRST so tombstones are authoritative
+  // 2. Authoritative Deleted Students Tombstones
   const existingDelIds = new Set<string>();
-  const mergedDeleted: any[] = [];
+  const mergedDeletedStudents: any[] = [];
   [...(remote.deletedStudents || []), ...(local.deletedStudents || [])].forEach((item) => {
-    if (!item) return;
+    if (!item || !item.groupId) return;
+    if (isGroupDeleted(item.groupId)) return;
     const dId = item.id || `${item.groupId}_${item.student?.name}_${item.deletedAt}`;
     if (!existingDelIds.has(dId)) {
       existingDelIds.add(dId);
-      mergedDeleted.push(item);
+      mergedDeletedStudents.push(item);
     }
   });
-  merged.deletedStudents = mergedDeleted;
 
-  // 2. Preserve any local groups that are missing in remote
-  for (const [gid, localGroup] of Object.entries(local.groupData)) {
-    if (!merged.groupData[gid]) {
-      merged.groupData[gid] = { ...localGroup };
+  // Determine timestamp authority
+  const remoteTime = (remote as any)._last_modified_at || (remote as any)._saved_at || 0;
+  const localTime = (local as any)._last_modified_at || 0;
+  const isLocalNewer = localTime > remoteTime;
+
+  // Designate primary (authoritative newer snapshot) and secondary
+  const primary = isLocalNewer ? local : remote;
+  const secondary = isLocalNewer ? remote : local;
+
+  const merged: CenterData = {
+    ...primary,
+    deletedGroups: mergedDeletedGroups,
+    deletedStudents: mergedDeletedStudents,
+    groups: [],
+    groupData: {}
+  };
+
+  // Add groups from primary that are NOT deleted
+  const addedGroupIds = new Set<string>();
+  for (const g of primary.groups || []) {
+    const cleanId = (g.id || '').trim().toUpperCase();
+    if (!cleanId || isGroupDeleted(cleanId) || addedGroupIds.has(cleanId)) continue;
+    addedGroupIds.add(cleanId);
+    merged.groups.push({ ...g, id: cleanId });
+    const sheet = primary.groupData?.[cleanId] || primary.groupData?.[g.id];
+    if (sheet) {
+      merged.groupData[cleanId] = { ...sheet, groupId: cleanId };
     }
   }
-  const remoteGroupIds = new Set(merged.groups.map((g) => g.id));
-  (local.groups || []).forEach((lg) => {
-    if (!remoteGroupIds.has(lg.id)) {
-      merged.groups.push(lg);
-      remoteGroupIds.add(lg.id);
+
+  // Also include primary groupData if not in groups array
+  for (const [gid, gSheet] of Object.entries(primary.groupData || {})) {
+    const cleanId = gid.trim().toUpperCase();
+    if (!cleanId || isGroupDeleted(cleanId) || merged.groupData[cleanId]) continue;
+    merged.groupData[cleanId] = { ...gSheet, groupId: cleanId };
+    if (!addedGroupIds.has(cleanId)) {
+      addedGroupIds.add(cleanId);
+      merged.groups.push({
+        id: cleanId,
+        teacherId: '',
+        teacherName: gSheet.teacherName || '',
+        subject: gSheet.subject || '',
+        day1: gSheet.day1 || '',
+        time1: gSheet.time1 || '',
+        type: gSheet.type || '4-2500',
+        isVip: Boolean(gSheet.isVip)
+      });
     }
-  });
+  }
 
-  // 3. Safely merge student lists and details across all groups
-  for (const [gid, localGroup] of Object.entries(local.groupData)) {
-    const remoteGroup = merged.groupData[gid];
-    if (!remoteGroup || !remoteGroup.students || !localGroup.students) continue;
+  // Preserve any genuinely new group from secondary that is NOT deleted and NOT in primary
+  for (const g of secondary.groups || []) {
+    const cleanId = (g.id || '').trim().toUpperCase();
+    if (!cleanId || isGroupDeleted(cleanId) || addedGroupIds.has(cleanId)) continue;
+    addedGroupIds.add(cleanId);
+    merged.groups.push({ ...g, id: cleanId });
+    const sSheet = secondary.groupData?.[cleanId] || secondary.groupData?.[g.id];
+    if (sSheet) {
+      merged.groupData[cleanId] = { ...sSheet, groupId: cleanId };
+    }
+  }
 
-    // Build tombstone index for this group using unique student barcode (and fallback to name only if barcode is missing)
-    const groupDeleted = mergedDeleted.filter((d) => d.groupId === gid);
+  // Now, merge students per group
+  for (const [gid, targetGroup] of Object.entries(merged.groupData)) {
+    if (!targetGroup) continue;
+
+    // Tombstone index for this group
+    const groupDelItems = mergedDeletedStudents.filter((d) => (d.groupId || '').trim().toUpperCase() === gid);
     const delBarcodes = new Set<string>(
-      groupDeleted
-        .map((d) => (d.student?.barcode || '').trim().toUpperCase())
-        .filter(Boolean)
+      groupDelItems.map((d) => (d.student?.barcode || '').trim().toUpperCase()).filter(Boolean)
     );
     const delNames = new Set<string>(
-      groupDeleted
-        .filter((d) => !d.student?.barcode)
-        .map((d) => normalizeArabicName(d.student?.name || ''))
-        .filter(Boolean)
+      groupDelItems.map((d) => normalizeArabicName(d.student?.name || '')).filter(Boolean)
     );
 
-    // CRITICAL: Never tombstone by rowId! rowId is a dynamic table index, not a student identity!
-    const isStudentTombstoned = (s: StudentRecord) => {
+    const isStudentDeleted = (s: StudentRecord) => {
       if (!s) return false;
       const bc = (s.barcode || '').trim().toUpperCase();
+      const nm = normalizeArabicName(s.name || '');
       if (bc && delBarcodes.has(bc)) return true;
-      if (!bc) {
-        const sNorm = normalizeArabicName(s.name || '');
-        if (sNorm && delNames.has(sNorm)) return true;
-      }
+      if (nm && delNames.has(nm)) return true;
       return false;
     };
 
-    const matchedLocalBarcodes = new Set<string>();
-    const matchedLocalNames = new Set<string>();
-    let hasDifferences = false;
+    // Filter out any tombstoned students from primary's group
+    let currentStudents = (targetGroup.students || []).filter((s) => !isStudentDeleted(s));
 
-    const mergedStudents: StudentRecord[] = [];
-    const seenMergedNames = new Set<string>();
-    const seenMergedBarcodes = new Set<string>();
+    // Check secondary group for any genuinely new students that don't exist in primary
+    const secondaryGroup = secondary.groupData?.[gid];
+    if (secondaryGroup && Array.isArray(secondaryGroup.students)) {
+      const existingBarcodes = new Set(
+        currentStudents.map((s) => (s.barcode || '').trim().toUpperCase()).filter(Boolean)
+      );
+      const existingNames = new Set(
+        currentStudents.map((s) => normalizeArabicName(s.name || '')).filter(Boolean)
+      );
 
-    remoteGroup.students.forEach((rStudent) => {
-      if (!rStudent || !rStudent.name || isSummaryRow(rStudent, gid)) return;
-      // If student was deleted/tombstoned in this group, do NOT resurrect!
-      if (isStudentTombstoned(rStudent)) {
-        hasDifferences = true;
-        return;
-      }
+      let maxRowId = currentStudents.reduce((max, s) => Math.max(max, s.rowId || 0), 0);
 
-      const rBarcode = (rStudent.barcode || '').trim().toUpperCase();
-      const rNormName = normalizeArabicName(rStudent.name || '');
-
-      // Prevent duplicate entries if remote group already contains duplicates
-      if (rNormName && seenMergedNames.has(rNormName)) return;
-      if (rBarcode && seenMergedBarcodes.has(rBarcode)) return;
-
-      // Match students by unique barcode OR exact normalized Arabic name (NEVER by rowId!)
-      const lStudent = localGroup.students.find((s) => {
-        if (!s || !s.name) return false;
-        const lBarcode = (s.barcode || '').trim().toUpperCase();
-        const lNormName = normalizeArabicName(s.name || '');
-        if (rBarcode && lBarcode && rBarcode === lBarcode) return true;
-        if (rNormName && lNormName && rNormName === lNormName) return true;
-        return false;
-      });
-
-      if (!lStudent) {
-        if (rNormName) seenMergedNames.add(rNormName);
-        if (rBarcode) seenMergedBarcodes.add(rBarcode);
-        mergedStudents.push(rStudent);
-        return;
-      }
-
-      if (lStudent.barcode) matchedLocalBarcodes.add(lStudent.barcode.trim().toUpperCase());
-      if (lStudent.name) matchedLocalNames.add(normalizeArabicName(lStudent.name));
-      if (rBarcode) matchedLocalBarcodes.add(rBarcode);
-      if (rNormName) matchedLocalNames.add(rNormName);
-
-      let studentModified = false;
-
-      // Merge attendance: keep marked attendance ('P', 'M', 'ح', 'م')
-      const newAttendance = [...(rStudent.attendance || [])];
-      (lStudent.attendance || []).forEach((lStatus, idx) => {
-        const cleanL = (lStatus || '').trim().toUpperCase();
-        const cleanR = (newAttendance[idx] || '').trim().toUpperCase();
-        if ((cleanL === 'P' || cleanL === 'M' || cleanL === 'ح' || cleanL === 'م') && !cleanR) {
-          while (newAttendance.length <= idx) newAttendance.push('');
-          newAttendance[idx] = cleanL;
-          studentModified = true;
+      secondaryGroup.students.forEach((s) => {
+        if (!s || !s.name || isSummaryRow(s, gid) || isStudentDeleted(s)) return;
+        const bc = (s.barcode || '').trim().toUpperCase();
+        const nm = normalizeArabicName(s.name || '');
+        const alreadyExists = (bc && existingBarcodes.has(bc)) || (nm && existingNames.has(nm));
+        if (!alreadyExists) {
+          maxRowId++;
+          const newStudent = { ...s, rowId: s.rowId > maxRowId ? s.rowId : maxRowId };
+          currentStudents.push(newStudent);
+          if (bc) existingBarcodes.add(bc);
+          if (nm) existingNames.add(nm);
         }
-      });
-
-      // Merge payments: keep highest payment recorded for each session
-      const maxSessions = Math.max(rStudent.payments?.length || 0, lStudent.payments?.length || 0, 4);
-      const newPayments: (number | string)[] = [];
-      for (let sIdx = 0; sIdx < maxSessions; sIdx++) {
-        const rPay = rStudent.payments ? rStudent.payments[sIdx] : '';
-        const lPay = lStudent.payments ? lStudent.payments[sIdx] : '';
-        const rNum = Number(rPay) || 0;
-        const lNum = Number(lPay) || 0;
-        if (lNum > rNum) {
-          newPayments.push(lNum);
-          studentModified = true;
-        } else if (rNum > 0) {
-          newPayments.push(rNum);
-        } else if (lPay !== '' && lPay !== undefined && lPay !== null) {
-          newPayments.push(lPay);
-        } else {
-          newPayments.push(rPay ?? '');
-        }
-      }
-
-      // Preserve phone, barcode, discount, and student name if updated locally
-      const phone = lStudent.phone?.trim() || rStudent.phone?.trim() || '';
-      const barcode = rStudent.barcode?.trim() || lStudent.barcode?.trim() || '';
-      const discount = (lStudent.discount !== undefined && lStudent.discount !== '1') ? lStudent.discount : (rStudent.discount || '1');
-      const name = lStudent.name?.trim() || rStudent.name?.trim();
-
-      if (
-        phone !== rStudent.phone ||
-        barcode !== rStudent.barcode ||
-        discount !== rStudent.discount ||
-        name !== rStudent.name
-      ) {
-        studentModified = true;
-      }
-
-      if (studentModified) {
-        hasDifferences = true;
-        const updatedStudentRaw: StudentRecord = {
-          ...rStudent,
-          name,
-          phone,
-          barcode,
-          discount,
-          attendance: newAttendance,
-          payments: newPayments
-        };
-        mergedStudents.push(
-          calcStudentFinancesPure(
-            updatedStudentRaw,
-            remoteGroup.type || '4-2500',
-            merged.pricingTiers || local.pricingTiers,
-            remoteGroup
-          )
-        );
-      } else {
-        mergedStudents.push(rStudent);
-      }
-      if (rNormName) seenMergedNames.add(rNormName);
-      if (barcode) seenMergedBarcodes.add(barcode.toUpperCase());
-    });
-
-    // Append any local student that does NOT exist in remote (guarantee new enrollments are preserved)
-    // BUT ignore any student that was tombstoned or already merged!
-    const localOnlyStudents: StudentRecord[] = [];
-    localGroup.students.forEach((lStudent) => {
-      if (!lStudent || !lStudent.name || isSummaryRow(lStudent, gid)) return;
-      if (isStudentTombstoned(lStudent)) {
-        hasDifferences = true;
-        return;
-      }
-      const lBarcode = (lStudent.barcode || '').trim().toUpperCase();
-      const lNorm = normalizeArabicName(lStudent.name);
-      const isMatched =
-        (lBarcode && matchedLocalBarcodes.has(lBarcode)) ||
-        (lNorm && matchedLocalNames.has(lNorm)) ||
-        (lNorm && seenMergedNames.has(lNorm)) ||
-        (lBarcode && seenMergedBarcodes.has(lBarcode));
-      if (!isMatched) {
-        if (lNorm && !seenMergedNames.has(lNorm)) {
-          seenMergedNames.add(lNorm);
-          if (lBarcode) seenMergedBarcodes.add(lBarcode);
-          localOnlyStudents.push(lStudent);
-        }
-      }
-    });
-
-    if (localOnlyStudents.length > 0) {
-      hasDifferences = true;
-      const existingMaxRowId = mergedStudents.reduce((max, s) => Math.max(max, s.rowId || 0), 0);
-      let nextRow = existingMaxRowId + 1;
-      localOnlyStudents.forEach((st) => {
-        const studentRowId = st.rowId > existingMaxRowId ? st.rowId : nextRow++;
-        const calcSt = calcStudentFinancesPure(
-          { ...st, rowId: studentRowId },
-          remoteGroup.type || localGroup.type || '4-2500',
-          merged.pricingTiers || local.pricingTiers,
-          remoteGroup
-        );
-        mergedStudents.push(calcSt);
       });
     }
 
-    if (hasDifferences) {
-      merged.groupData[gid] = {
-        ...remoteGroup,
-        students: mergedStudents
-      };
-    }
+    targetGroup.students = currentStudents;
   }
 
-  // 4. Union paymentTransactions, strictly excluding transactions belonging to tombstoned/deleted students
+  // 4. Union paymentTransactions, strictly excluding transactions belonging to tombstoned/deleted students or deleted groups
   const existingTxIds = new Set<string>();
   const mergedTransactions: any[] = [];
-  [...(remote.paymentTransactions || []), ...(local.paymentTransactions || [])].forEach((tx) => {
-    if (!tx) return;
+  [...(primary.paymentTransactions || []), ...(secondary.paymentTransactions || [])].forEach((tx) => {
+    if (!tx || !tx.groupId) return;
+    if (isGroupDeleted(tx.groupId)) return;
+
     // Check if this tx belongs to a student who was tombstoned/deleted in this group
-    const isDeleted = mergedDeleted.some((d) => {
-      if (d.groupId !== tx.groupId) return false;
+    const isDeleted = mergedDeletedStudents.some((d) => {
+      if ((d.groupId || '').trim().toUpperCase() !== tx.groupId.trim().toUpperCase()) return false;
       const dBarcode = (d.student?.barcode || '').trim().toUpperCase();
       const txBarcode = (tx.studentBarcode || '').trim().toUpperCase();
       if (dBarcode && txBarcode && dBarcode === txBarcode) return true;
-      if (!dBarcode && !txBarcode) {
-        const dNorm = normalizeArabicName(d.student?.name || '');
-        const txNorm = normalizeArabicName(tx.studentName || '');
-        if (dNorm && txNorm && dNorm === txNorm) return true;
-      }
+      const dNorm = normalizeArabicName(d.student?.name || '');
+      const txNorm = normalizeArabicName(tx.studentName || '');
+      if (dNorm && txNorm && dNorm === txNorm) return true;
       return false;
     });
     if (isDeleted) return;
@@ -560,6 +465,7 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
   let changed = false;
   const newGroupData: Record<string, GroupSheet> = {};
   const idMap: Record<string, string> = {};
+  const deletedGroupSet = new Set((centerData.deletedGroups || []).map((g) => g.trim().toUpperCase()));
 
   // Build global 1-to-1 bijection of student names to unique barcodes
   const existingBarcodeByNameMap = new Map<string, string>();
@@ -653,25 +559,34 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
         }
         target.attendance = mergedAtt;
 
-        // 2. Merge payments: keep highest payment per session
+        // 2. Merge payments: keep highest payment per session, or consolidate if per-session 625 was used
         const curPay = target.payments || [];
         const newPay = st.payments || [];
-        const maxPayLen = Math.max(curPay.length, newPay.length, 4);
-        const mergedPay: (number | string)[] = [];
-        for (let i = 0; i < maxPayLen; i++) {
-          const p1 = Number(curPay[i]) || 0;
-          const p2 = Number(newPay[i]) || 0;
-          if (p2 > p1) {
-            mergedPay.push(p2);
-          } else if (p1 > 0) {
-            mergedPay.push(p1);
-          } else if (curPay[i] !== '' && curPay[i] !== undefined && curPay[i] !== null) {
-            mergedPay.push(curPay[i]);
-          } else {
-            mergedPay.push(newPay[i] ?? '');
+        const cTot = curPay.reduce<number>((sum, x) => sum + (Number(x) || 0), 0);
+        const nTot = newPay.reduce<number>((sum, x) => sum + (Number(x) || 0), 0);
+        const has625 = curPay.some((x) => Number(x) === 625) || newPay.some((x) => Number(x) === 625);
+
+        if (has625) {
+          const bestTot = Math.max(cTot, nTot);
+          target.payments = [bestTot > 0 ? bestTot : '', '', '', ''];
+        } else {
+          const maxPayLen = Math.max(curPay.length, newPay.length, 4);
+          const mergedPay: (number | string)[] = [];
+          for (let i = 0; i < maxPayLen; i++) {
+            const p1 = Number(curPay[i]) || 0;
+            const p2 = Number(newPay[i]) || 0;
+            if (p2 > p1) {
+              mergedPay.push(p2);
+            } else if (p1 > 0) {
+              mergedPay.push(p1);
+            } else if (curPay[i] !== '' && curPay[i] !== undefined && curPay[i] !== null) {
+              mergedPay.push(curPay[i]);
+            } else {
+              mergedPay.push(newPay[i] ?? '');
+            }
           }
+          target.payments = mergedPay;
         }
-        target.payments = mergedPay;
 
         // 3. Keep barcode if target didn't have one
         if ((!target.barcode || !target.barcode.trim()) && cleanBarcode) {
@@ -785,6 +700,26 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
       while (payments.length < 4) payments.push('');
       if ((s.attendance || []).length !== 4) changed = true;
 
+      // Consolidate per-session payment fragmentation (e.g. 625 per session) into single cycle payment
+      const pNum = payments.map((x) => (x === '' || isNaN(Number(x)) ? 0 : Number(x)));
+      if (pNum.some((x) => x === 625)) {
+        const groupFee = gSheet.studentFee || (targetType.includes('10000') ? 10000 : 2500);
+        if (pNum[0] === groupFee) {
+          payments = [groupFee, '', '', ''];
+          changed = true;
+        } else {
+          const nonZero = pNum.filter((x) => x > 0);
+          const total = pNum.reduce((a, b) => a + b, 0);
+          if (total >= groupFee) {
+            payments = [groupFee, '', '', ''];
+            changed = true;
+          } else if (total > 0 && (nonZero.length > 1 || pNum[0] === 0)) {
+            payments = [total, '', '', ''];
+            changed = true;
+          }
+        }
+      }
+
       let barcode = s.barcode?.trim();
       if (barcode && barcode.startsWith('STU-627')) {
         barcode = 'STU-27' + barcode.slice(7);
@@ -841,32 +776,16 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
       return calculated;
     });
 
-    const seedGroup = (initialSeedData.groupData as Record<string, GroupSheet>)?.[finalGid];
-    if (cleanStudents.length === 0 && seedGroup && seedGroup.students && seedGroup.students.length > 0) {
-      finalStudents = seedGroup.students.map((st) =>
-        calcStudentFinancesPure(
-          st,
-          targetType,
-          centerData.pricingTiers || (initialSeedData as unknown as CenterData).pricingTiers,
-          {
-            ...gSheet,
-            groupId: finalGid,
-            isVip: isVipGroup,
-            sessionCount: 4
-          }
-        )
-      );
-      if (seedGroup.sessionDates && seedGroup.sessionDates.length > 0) {
-        normalizedDates = seedGroup.sessionDates.slice(0, 4);
-      }
-      changed = true;
-    }
-
     // Clean up any legacy manual status: 'active' so groups default to dynamic session-based status ('auto')
     let finalStatus = gSheet.status;
     if (finalStatus === 'active') {
       finalStatus = undefined;
       changed = true;
+    }
+
+    if (deletedGroupSet.has(finalGid)) {
+      changed = true;
+      continue;
     }
 
     newGroupData[finalGid] = {
@@ -881,40 +800,16 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
     };
   }
 
-  for (const [seedGid, seedSheet] of Object.entries((initialSeedData.groupData as Record<string, GroupSheet>) || {})) {
-    if (!newGroupData[seedGid] && seedSheet.students && seedSheet.students.length > 0) {
-      const isVipGroup = seedGid.startsWith('BACV') || seedGid.includes('VIP') || Boolean(seedSheet.isVip);
-      const targetType = isVipGroup ? '4-10000' : (seedSheet.type || '4-2500');
-      const calcStudents = seedSheet.students.map((st) =>
-        calcStudentFinancesPure(
-          st,
-          targetType,
-          centerData.pricingTiers || (initialSeedData as unknown as CenterData).pricingTiers,
-          {
-            ...seedSheet,
-            groupId: seedGid,
-            isVip: isVipGroup,
-            sessionCount: 4
-          }
-        )
-      );
-      newGroupData[seedGid] = {
-        ...seedSheet,
-        groupId: seedGid,
-        isVip: isVipGroup,
-        type: targetType,
-        students: calcStudents
-      };
-      changed = true;
-    }
-  }
-
   // Deduplicate and sanitize groups array
   // Rule: It's normal to have BAC01 and BACV01, but never two BAC01 or two BACV01!
   const seenIds = new Set<string>();
   const cleanGroups: GroupMeta[] = [];
   for (const g of centerData.groups || []) {
     let cleanId = (idMap[g.id] || g.id).trim().toUpperCase();
+    if (deletedGroupSet.has(cleanId)) {
+      changed = true;
+      continue;
+    }
     const groupLevel = (g as any).level || getGroupLevelFromId(cleanId);
     const isGroupVip = isVipGroupId(cleanId) || cleanId.includes('VIP') || Boolean(g.isVip);
     if (cleanId.includes('-') || cleanId.includes('_') || !isValidGroupId(cleanId).isValid) {
@@ -943,22 +838,17 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
 
   for (const gid of Object.keys(newGroupData)) {
     if (!seenIds.has(gid)) {
-      const seedMeta = (initialSeedData.groups || []).find((g) => g.id === gid);
       const sheet = newGroupData[gid];
-      if (seedMeta) {
-        cleanGroups.push(seedMeta);
-      } else {
-        cleanGroups.push({
-          id: gid,
-          teacherId: '',
-          teacherName: sheet.teacherName || '',
-          subject: sheet.subject || '',
-          day1: sheet.day1 || '',
-          time1: sheet.time1 || '',
-          type: sheet.type || '4-2500',
-          isVip: sheet.isVip || false
-        });
-      }
+      cleanGroups.push({
+        id: gid,
+        teacherId: '',
+        teacherName: sheet.teacherName || '',
+        subject: sheet.subject || '',
+        day1: sheet.day1 || '',
+        time1: sheet.time1 || '',
+        type: sheet.type || '4-2500',
+        isVip: sheet.isVip || false
+      });
       seenIds.add(gid);
       changed = true;
     }
@@ -1066,10 +956,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const lastLocalEditTimeRef = useRef<number>(
     typeof window !== 'undefined' ? Number(localStorage.getItem(LAST_LOCAL_EDIT_KEY)) || 0 : 0
   );
+  const syncChannelRef = useRef<any>(null);
+  const lastSavedTimeRef = useRef<number>(
+    typeof window !== 'undefined' ? Number(localStorage.getItem('da3m_last_saved_time')) || 0 : 0
+  );
+  const relationalSyncTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isSyncingRelationalRef = useRef<boolean>(false);
 
   // Sync relational tables (groups, teachers, students) in background for Supabase Table Editor
   const syncRelationalTables = async (centerData: CenterData) => {
+    if (isSyncingRelationalRef.current) return;
     try {
+      isSyncingRelationalRef.current = true;
       // 1. Teachers
       const teachersToInsert = (centerData.teachers || []).map((t) => ({
         id: t.id,
@@ -1104,6 +1002,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       });
       if (groupsToInsert.length > 0) {
         await supabase.from('groups').upsert(groupsToInsert);
+      }
+
+      // Purge deleted groups and their students from relational tables
+      if (centerData.deletedGroups && centerData.deletedGroups.length > 0) {
+        try {
+          await supabase.from('groups').delete().in('id', centerData.deletedGroups);
+          await supabase.from('students').delete().in('group_id', centerData.deletedGroups);
+        } catch {
+          // ignore if column or schema not yet updated
+        }
       }
 
       // 3. Students (Consolidated by unique student with multiple groups & balance)
@@ -1226,7 +1134,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // Cloud save to Supabase with serialization and latest-snapshot guarantee
+  const scheduleRelationalSync = useCallback((centerData: CenterData) => {
+    if (relationalSyncTimerRef.current) clearTimeout(relationalSyncTimerRef.current);
+    // Debounce relational tables sync by 5 minutes to prevent heavy egress/IOPS churn
+    relationalSyncTimerRef.current = setTimeout(() => {
+      syncRelationalTables(centerData).catch((e) => console.warn(e));
+    }, 5 * 60 * 1000);
+  }, []);
+
+  // Cloud save to Supabase with serialization, deduplication, and low-egress broadcast
   const saveToCloud = useCallback(async (dataSnapshot?: CenterData) => {
     if (isSavingRef.current) {
       hasPendingChangesRef.current = true;
@@ -1236,19 +1152,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    const targetData = dataSnapshot || dataRef.current;
+    const targetLastModified =
+      (targetData as any)?._last_modified_at || (dataRef.current as any)?._last_modified_at || 0;
+
+    // EGRESS GUARD: Avoid redundant cloud saves if this exact state was already saved
+    if (!dataSnapshot && lastSavedTimeRef.current && targetLastModified <= lastSavedTimeRef.current) {
+      hasPendingChangesRef.current = false;
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem(UNSYNCED_CHANGES_KEY);
+      }
+      setCloudSyncStatus('synced');
+      return;
+    }
+
     try {
       setCloudSyncStatus('syncing');
       isSavingRef.current = true;
 
-      const targetData = dataSnapshot || dataRef.current;
       const now = Date.now();
+      const rawDeleted = targetData.deletedStudents || dataRef.current.deletedStudents || [];
+      // Keep most recent 100 deleted items to prevent JSON bloat and save bandwidth
+      const trimmedDeleted = rawDeleted.slice(0, 100);
+
       const dataToSave = {
         ...targetData,
         paymentTransactions: targetData.paymentTransactions || dataRef.current.paymentTransactions || [],
-        deletedStudents: targetData.deletedStudents || dataRef.current.deletedStudents || [],
+        deletedStudents: trimmedDeleted,
+        deletedGroups: targetData.deletedGroups || dataRef.current.deletedGroups || [],
         _client_id: clientIdRef.current,
         _saved_at: now,
-        _last_modified_at: (targetData as any)._last_modified_at || (dataRef.current as any)._last_modified_at || now
+        _last_modified_at: targetLastModified || now
       };
 
       const { error } = await supabase
@@ -1267,15 +1201,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           localStorage.setItem(UNSYNCED_CHANGES_KEY, 'true');
         }
       } else {
-        // SUCCESS! Clear pending flags
+        // SUCCESS! Clear pending flags and update saved state
         hasPendingChangesRef.current = false;
+        lastSavedTimeRef.current = dataToSave._last_modified_at;
         if (typeof window !== 'undefined') {
           localStorage.removeItem(UNSYNCED_CHANGES_KEY);
+          localStorage.setItem('da3m_last_saved_time', String(lastSavedTimeRef.current));
         }
         setCloudSyncStatus('synced');
         setLastSyncedAt(new Date());
-        // Sync relational tables in background so Table Editor always shows live rows
-        syncRelationalTables(targetData).catch((e) => console.warn(e));
+
+        // Broadcast lightweight ping (~75 bytes) to other tabs/devices instead of streaming 750 KB!
+        if (syncChannelRef.current) {
+          syncChannelRef.current.send({
+            type: 'broadcast',
+            event: 'data_changed',
+            payload: {
+              clientId: clientIdRef.current,
+              savedAt: now,
+              lastModifiedAt: dataToSave._last_modified_at
+            }
+          });
+        }
+
+        // Gently schedule relational tables sync in the background
+        scheduleRelationalSync(targetData);
       }
     } catch (err) {
       console.error('Failed to sync to Supabase (offline or network error):', err);
@@ -1286,15 +1236,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     } finally {
       isSavingRef.current = false;
-      // If user made edits while the network request was in flight, schedule save of latest data immediately
+      // If user made edits while the network request was in flight, schedule save of latest data
       if (hasPendingChangesRef.current) {
         if (cloudSyncTimerRef.current) clearTimeout(cloudSyncTimerRef.current);
         cloudSyncTimerRef.current = setTimeout(() => {
           saveToCloud();
-        }, 200);
+        }, 1500);
       }
     }
-  }, []);
+  }, [scheduleRelationalSync]);
 
   // Load from localStorage immediately, then fetch latest from Supabase
   useEffect(() => {
@@ -1350,12 +1300,63 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setIsLoading(false);
     }
 
-    // Fetch latest from Supabase cloud
-    const fetchCloudData = async () => {
+    // 1. Smart cloud fetch: Check updated_at first to save ~750 KB on every page load
+    const fetchCloudData = async (forceFullFetch = false) => {
       try {
         const hasLocalUnsynced =
           typeof window !== 'undefined' && localStorage.getItem(UNSYNCED_CHANGES_KEY) === 'true';
 
+        // Check metadata first (~50 bytes egress)
+        const { data: metaRow, error: metaError } = await supabase
+          .from('center_data')
+          .select('updated_at')
+          .eq('id', 'main')
+          .maybeSingle();
+
+        if (!isMounted) return;
+
+        if (metaError) {
+          console.warn('Supabase fetch error, running offline:', metaError);
+          setCloudSyncStatus('offline');
+          return;
+        }
+
+        if (!metaRow) {
+          // Supabase is empty, initialize it with current data
+          const { cleaned } = sanitizeData(initialSeedData as unknown as CenterData);
+          saveToCloud(cleaned);
+          return;
+        }
+
+        const remoteUpdatedAt = metaRow.updated_at ? new Date(metaRow.updated_at).getTime() : 0;
+        const localLastModified =
+          (dataRef.current as any)?._last_modified_at ||
+          lastLocalEditTimeRef.current ||
+          0;
+
+        // If local has unsynced changes or is newer than cloud, NEVER OVERWRITE!
+        // Instead, push local data to the cloud so offline changes are saved!
+        if (hasLocalUnsynced || hasPendingChangesRef.current || localLastModified > remoteUpdatedAt) {
+          console.log('Preserving local offline data and syncing to Supabase cloud...');
+          setCloudSyncStatus('syncing');
+          saveToCloud(dataRef.current);
+          return;
+        }
+
+        const hasValidLocalData =
+          dataRef.current &&
+          dataRef.current.groups &&
+          dataRef.current.groups.length > 0;
+
+        // If local data exists and is already up-to-date with cloud, SKIP DOWNLOADING 750 KB BLOB!
+        if (!forceFullFetch && hasValidLocalData && localLastModified >= remoteUpdatedAt) {
+          lastSavedTimeRef.current = remoteUpdatedAt;
+          setLastSyncedAt(new Date(metaRow.updated_at));
+          setCloudSyncStatus('synced');
+          return;
+        }
+
+        // Full fetch only when cloud has newer data or forced
         const { data: remoteRow, error } = await supabase
           .from('center_data')
           .select('data, updated_at')
@@ -1364,49 +1365,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         if (!isMounted) return;
 
-        if (error) {
-          console.warn('Supabase fetch error, running offline:', error);
-          setCloudSyncStatus('offline');
+        if (error || !remoteRow || !remoteRow.data) {
+          if (error) console.warn('Supabase fetch full data error:', error);
           return;
         }
 
-        if (remoteRow && remoteRow.data) {
-          const remoteData = remoteRow.data as any;
-          const remoteLastModified =
-            remoteData._last_modified_at ||
-            remoteData._saved_at ||
-            (remoteRow.updated_at ? new Date(remoteRow.updated_at).getTime() : 0);
-
-          const localLastModified =
-            (dataRef.current as any)?._last_modified_at ||
-            lastLocalEditTimeRef.current ||
-            0;
-
-          // CRITICAL: If local has unsynced changes or is newer than cloud, NEVER OVERWRITE!
-          // Instead, push local data to the cloud so offline changes are saved!
-          if (hasLocalUnsynced || hasPendingChangesRef.current || localLastModified > remoteLastModified) {
-            console.log('Preserving local offline data and syncing to Supabase cloud...');
-            setCloudSyncStatus('syncing');
-            saveToCloud(dataRef.current);
-            return;
-          }
-
-          // Smart Attendance Merge: Even if remote seems newer, never drop local attendance marked 'P' or 'M'
-          const mergedRemote = mergeAttendanceSafely(remoteData, dataRef.current);
-          const { cleaned } = sanitizeData(mergedRemote);
-          dataRef.current = cleaned;
-          setData(cleaned);
-          try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(cleaned));
-            localStorage.removeItem(UNSYNCED_CHANGES_KEY);
-          } catch (e) {}
-          setLastSyncedAt(new Date(remoteRow.updated_at || Date.now()));
-          setCloudSyncStatus('synced');
-        } else {
-          // Supabase is empty, initialize it with current data
-          const { cleaned } = sanitizeData(initialSeedData as unknown as CenterData);
-          saveToCloud(cleaned);
-        }
+        const remoteData = remoteRow.data as any;
+        const mergedRemote = mergeAttendanceSafely(remoteData, dataRef.current);
+        const { cleaned } = sanitizeData(mergedRemote);
+        dataRef.current = cleaned;
+        setData(cleaned);
+        const finalModified = (cleaned as any)?._last_modified_at || remoteUpdatedAt;
+        lastSavedTimeRef.current = finalModified;
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(cleaned));
+          localStorage.removeItem(UNSYNCED_CHANGES_KEY);
+          localStorage.setItem('da3m_last_saved_time', String(finalModified));
+        } catch (e) {}
+        setLastSyncedAt(new Date(remoteRow.updated_at || Date.now()));
+        setCloudSyncStatus('synced');
       } catch (err) {
         console.warn('Network error reaching Supabase:', err);
         if (isMounted) setCloudSyncStatus('offline');
@@ -1415,47 +1392,45 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     fetchCloudData();
 
-    // Realtime subscription for multi-device synchronization
-    const channel = supabase
-      .channel('center_data_realtime')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'center_data', filter: 'id=eq.main' },
-        (payload) => {
-          if (payload.new && (payload.new as any).data) {
-            const incoming = (payload.new as any).data as any;
+    // 2. High-Efficiency Realtime Channel: Uses Broadcast instead of postgres_changes
+    // Broadcast transmits only ~75 bytes per sync instead of full 750 KB row payloads!
+    const syncChannel = supabase.channel('center_data_sync_v1', {
+      config: {
+        broadcast: { self: false }
+      }
+    });
 
-            // 1. Prevent echo: never overwrite our own changes with our own echo
-            if (incoming?._client_id && incoming._client_id === clientIdRef.current) {
-              return;
-            }
-
-            // 2. Prevent race conditions: don't overwrite if we are currently saving or have pending local edits or unsynced changes
-            const hasLocalUnsynced =
-              typeof window !== 'undefined' && localStorage.getItem(UNSYNCED_CHANGES_KEY) === 'true';
-
-            if (
-              isSavingRef.current ||
-              hasPendingChangesRef.current ||
-              hasLocalUnsynced ||
-              Date.now() - lastLocalEditTimeRef.current < 5000
-            ) {
-              return;
-            }
-
-            const merged = mergeAttendanceSafely(incoming as CenterData, dataRef.current);
-            const { cleaned } = sanitizeData(merged);
-            dataRef.current = cleaned;
-            setData(cleaned);
-            try {
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(cleaned));
-            } catch (e) {}
-            setLastSyncedAt(new Date((payload.new as any).updated_at || Date.now()));
-            setCloudSyncStatus('synced');
-          }
+    syncChannel
+      .on('broadcast', { event: 'data_changed' }, async ({ payload }) => {
+        if (!payload || payload.clientId === clientIdRef.current) {
+          return; // Skip own updates and empty messages
         }
-      )
+
+        const hasLocalUnsynced =
+          typeof window !== 'undefined' && localStorage.getItem(UNSYNCED_CHANGES_KEY) === 'true';
+
+        // Prevent race condition: do not overwrite if local has unsaved changes or recent edits
+        if (
+          isSavingRef.current ||
+          hasPendingChangesRef.current ||
+          hasLocalUnsynced ||
+          Date.now() - lastLocalEditTimeRef.current < 5000
+        ) {
+          return;
+        }
+
+        const remoteTime = payload.lastModifiedAt || payload.savedAt || 0;
+        const localTime = (dataRef.current as any)?._last_modified_at || 0;
+
+        // Fetch cloud data only if remote change is actually newer than our local state
+        if (remoteTime > localTime) {
+          console.log('Remote change detected via lightweight broadcast. Syncing...');
+          await fetchCloudData(true);
+        }
+      })
       .subscribe();
+
+    syncChannelRef.current = syncChannel;
 
     // 3. Online/Offline & Auto-Sync listeners
     const handleOnline = () => {
@@ -1472,7 +1447,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
-    // 4. Cross-tab synchronization via localStorage storage event
+    // 4. Cross-tab synchronization via localStorage storage event (0 network egress!)
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === STORAGE_KEY && e.newValue) {
         try {
@@ -1489,24 +1464,40 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
     window.addEventListener('storage', handleStorageChange);
 
-    // Heartbeat auto-sync every 8 seconds when pending changes exist
+    // 5. Check for cloud changes when tab regains focus (micro-check ~50 bytes)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        const hasLocalUnsynced =
+          typeof window !== 'undefined' && localStorage.getItem(UNSYNCED_CHANGES_KEY) === 'true';
+        if (!hasLocalUnsynced && !isSavingRef.current) {
+          fetchCloudData(false);
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // 6. Gentle periodic auto-sync (every 60s instead of 8s) ONLY when offline changes exist
     const heartbeatTimer = setInterval(() => {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return;
       const hasUnsynced =
         (typeof window !== 'undefined' && localStorage.getItem(UNSYNCED_CHANGES_KEY) === 'true') ||
         hasPendingChangesRef.current;
       if (hasUnsynced && !isSavingRef.current) {
         saveToCloud(dataRef.current);
       }
-    }, 8000);
+    }, 60000);
 
     return () => {
       isMounted = false;
       if (cloudSyncTimerRef.current) clearTimeout(cloudSyncTimerRef.current);
+      if (relationalSyncTimerRef.current) clearTimeout(relationalSyncTimerRef.current);
       clearInterval(heartbeatTimer);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
       window.removeEventListener('storage', handleStorageChange);
-      supabase.removeChannel(channel);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      supabase.removeChannel(syncChannel);
+      syncChannelRef.current = null;
     };
   }, [saveToCloud]);
 
@@ -1517,6 +1508,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       ...newData,
       paymentTransactions: newData.paymentTransactions || dataRef.current.paymentTransactions || [],
       deletedStudents: newData.deletedStudents || dataRef.current.deletedStudents || [],
+      deletedGroups: newData.deletedGroups || dataRef.current.deletedGroups || [],
       _last_modified_at: now,
       _client_id: clientIdRef.current
     } as any;
@@ -1538,14 +1530,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       console.error('Failed to persist data:', e);
     }
 
-    // 4. Debounced cloud sync (600ms)
+    // 4. Debounced cloud sync (2500ms) - batches rapid typing and clicks into a single network save
     if (cloudSyncTimerRef.current) {
       clearTimeout(cloudSyncTimerRef.current);
     }
     setCloudSyncStatus('syncing');
     cloudSyncTimerRef.current = setTimeout(() => {
       saveToCloud(dataRef.current);
-    }, 600);
+    }, 2500);
   };
 
   // Manual one-click sync
@@ -1554,6 +1546,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       clearTimeout(cloudSyncTimerRef.current);
     }
     await saveToCloud(dataRef.current);
+    // User explicitly clicked sync, update relational tables as well
+    await syncRelationalTables(dataRef.current);
   };
 
   const toggleTheme = () => {
@@ -1973,7 +1967,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     };
     persistData(updatedData);
-    saveToCloud(updatedData);
 
     // Only record transaction if payment actually increased!
     if (newP > oldP && studentBefore) {
@@ -2025,7 +2018,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     };
     persistData(updatedData);
-    saveToCloud(updatedData);
 
     const student = group.students.find((s) => s.rowId === rowId);
     if (student) {
@@ -2112,7 +2104,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     };
     persistData(updatedData);
-    saveToCloud(updatedData);
   };
 
   // Batch update payments for multiple students for a specific session/day
@@ -2170,7 +2161,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     };
     persistData(updatedData);
-    saveToCloud(updatedData);
 
     // ONLY record transactions for genuine positive payment increments
     increments.forEach((inc) => {
@@ -2252,7 +2242,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
 
     persistData(updatedData);
-    saveToCloud(updatedData);
   };
 
   // Update discount
@@ -2353,7 +2342,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     };
     persistData(updatedData);
-    saveToCloud(dataRef.current);
     return calculatedStudent;
   };
 
@@ -2461,7 +2449,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       groupData: updatedGroupData
     };
     persistData(updatedData);
-    saveToCloud(dataRef.current);
 
     return results;
   };
@@ -2612,7 +2599,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       groupData: updatedGroupData
     };
     persistData(updatedData);
-    saveToCloud(updatedData);
 
     results.forEach((r) => {
       if (r.paidNow > 0) {
@@ -2687,7 +2673,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     };
     persistData(updatedData);
-    saveToCloud(updatedData);
   };
 
   // Delete student globally across all groups or specified groups
@@ -2761,7 +2746,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         groupData: newGroupData
       };
       persistData(updatedData);
-      saveToCloud(updatedData);
     }
   };
 
@@ -2783,7 +2767,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const updatedDeleted = archive.filter((a) => a.id !== archiveId);
       const updatedData: CenterData = { ...currentData, deletedStudents: updatedDeleted };
       persistData(updatedData);
-      saveToCloud(updatedData);
       return true;
     }
 
@@ -2808,7 +2791,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     };
     persistData(updatedData);
-    saveToCloud(updatedData);
     return true;
   };
 
@@ -2817,7 +2799,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const currentData = dataRef.current;
     const updatedData: CenterData = { ...currentData, deletedStudents: [] };
     persistData(updatedData);
-    saveToCloud(updatedData);
   };
 
   // Transfer student from one group to another permanently
@@ -2899,29 +2880,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       ['P', 'A', 'M', 'C', 'ح', 'غ', 'م'].includes(st)
     ).length;
 
-    // Calculate fee for completed sessions in old group
-    let feeForOld = completedCountInOld * fromPerSessionPrice;
-    if (originalStudent.discount === '0') {
-      feeForOld = 0;
-    } else if (originalStudent.discount === '0.8') {
-      feeForOld = Math.round(completedCountInOld * fromPerSessionPrice * 0.8);
-    }
-
-    // Original student total received
-    const oldTotalReceived = (originalStudent.payments || []).reduce<number>((sum, p) => {
-      const val = typeof p === 'number' ? p : parseFloat(String(p));
-      return sum + (isNaN(val) ? 0 : val);
-    }, 0) || originalStudent.totalReceived || 0;
-
-    // Calculate surplus payment credit to transfer to new group
-    const creditToTransfer = Math.max(0, oldTotalReceived - feeForOld);
-    const keptPaymentInOld = oldTotalReceived - creditToTransfer;
-
-    // Adjust old group student's payments array to reflect kept payment
-    const newOldPayments: (number | string)[] = Array(fromSessionCount).fill('');
-    if (keptPaymentInOld > 0) {
-      newOldPayments[0] = keptPaymentInOld;
-    }
+    // KEEP 100% OF PAYMENTS IN THE OLD GROUP!
+    // As per user specification: "make sure that the payment of the groups not mearge with each other, if the student has extra session, don'ttake his money from the old group to the new group"
+    const newOldPayments: (number | string)[] = [...(originalStudent.payments || [])];
+    while (newOldPayments.length < fromSessionCount) newOldPayments.push('');
 
     const updatedOldStudent = calculateStudentFinances(
       {
@@ -2963,12 +2925,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       while (newAttendance.length < toSessionCount) newAttendance.push('');
       newAttendance[startSessionIdx] = 'N';
 
+      // Keep existing payments in toGroup without transferring anything from old group
       const newPayments = [...(existingInTo.payments || [])];
       while (newPayments.length < toSessionCount) newPayments.push('');
-      if (creditToTransfer > 0) {
-        const curP = Number(newPayments[startSessionIdx]) || 0;
-        newPayments[startSessionIdx] = curP + creditToTransfer;
-      }
 
       const updatedStudent = calculateStudentFinances(
         { ...existingInTo, attendance: newAttendance, payments: newPayments },
@@ -2990,10 +2949,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const initialAttendance: AttendanceStatus[] = Array(toSessionCount).fill('');
       initialAttendance[startSessionIdx] = 'N';
 
+      // Start with 0 payments in new group - payments never merge across groups
       const initialPayments: (number | string)[] = Array(toSessionCount).fill('');
-      if (creditToTransfer > 0) {
-        initialPayments[startSessionIdx] = creditToTransfer;
-      }
 
       const newStudent = calculateStudentFinances(
         {
@@ -3005,7 +2962,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           attendance: initialAttendance,
           payments: initialPayments,
           fee: 0,
-          totalReceived: creditToTransfer,
+          totalReceived: 0,
           teacherPay: 0,
           schoolEarn: 0,
           debt: 0,
@@ -3040,103 +2997,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
 
     persistData(updatedData);
-    saveToCloud(updatedData);
-
-    if (creditToTransfer > 0) {
-      recordPaymentTransaction({
-        groupId: toGroupId,
-        groupSubject: toGroup.subject,
-        teacherName: toGroup.teacherName,
-        studentRowId: existingInTo?.rowId || 0,
-        studentName: originalStudent.name,
-        studentPhone: originalStudent.phone,
-        studentBarcode: originalStudent.barcode,
-        sessionIndex: startSessionIdx,
-        amount: creditToTransfer,
-        source: 'scanner',
-        notes: `تحويل رصيد متبقي (${creditToTransfer} دج) من فوج ${fromGroupId}`
-      });
-    }
 
     return true;
   };
 
-  // Apply available student credit/balance to reduce debt or pay for a group
+  // Apply available student credit/balance - disabled for strict group payment isolation
   const applyStudentCredit = (
-    studentName: string,
-    barcode: string | undefined,
-    targetGroupId: string,
-    amountToApply: number
+    _studentName: string,
+    _barcode: string | undefined,
+    _targetGroupId: string,
+    _amountToApply: number
   ): boolean => {
-    if (amountToApply <= 0) return false;
-    const currentData = dataRef.current;
-    const targetGroup = currentData.groupData[targetGroupId];
-    if (!targetGroup) return false;
-
-    const normName = normalizeArabicName(studentName);
-    const barcodeUpper = (barcode || '').trim().toUpperCase();
-
-    const student = targetGroup.students.find(
-      (s) =>
-        (barcodeUpper && s.barcode && s.barcode.trim().toUpperCase() === barcodeUpper) ||
-        (s.name && normalizeArabicName(s.name) === normName)
-    );
-    if (!student) return false;
-
-    const sessionCount = targetGroup.sessionDates?.length || targetGroup.sessionCount || 4;
-    const newPayments = [...(student.payments || [])];
-    while (newPayments.length < sessionCount) newPayments.push('');
-
-    let applied = false;
-    for (let i = 0; i < sessionCount; i++) {
-      const curVal = Number(newPayments[i]) || 0;
-      if (curVal === 0) {
-        newPayments[i] = amountToApply;
-        applied = true;
-        break;
-      }
-    }
-    if (!applied) {
-      const cur0 = Number(newPayments[0]) || 0;
-      newPayments[0] = cur0 + amountToApply;
-    }
-
-    const updatedStudents = targetGroup.students.map((s) => {
-      if (s.rowId !== student.rowId) return s;
-      return calculateStudentFinances(
-        { ...s, payments: newPayments },
-        targetGroup.type,
-        currentData.pricingTiers,
-        targetGroup
-      );
-    });
-
-    const updatedData: CenterData = {
-      ...currentData,
-      groupData: {
-        ...currentData.groupData,
-        [targetGroupId]: { ...targetGroup, students: updatedStudents }
-      }
-    };
-
-    persistData(updatedData);
-    saveToCloud(updatedData);
-
-    recordPaymentTransaction({
-      groupId: targetGroupId,
-      groupSubject: targetGroup.subject,
-      teacherName: targetGroup.teacherName,
-      studentRowId: student.rowId,
-      studentName: student.name,
-      studentPhone: student.phone,
-      studentBarcode: student.barcode,
-      sessionIndex: 0,
-      amount: amountToApply,
-      source: 'multi_group',
-      notes: `[استخدام رصيد التلميذ] تم تطبيق رصيد بقيمة ${amountToApply} دج لصالح الفوج ${targetGroupId}`
-    });
-
-    return true;
+    // Financial isolation: Group payments and balances never merge or transfer to other groups
+    return false;
   };
 
   // Update student arbitrary fields
@@ -3205,11 +3078,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       students: []
     };
 
+    const currentData = dataRef.current || data;
+    const updatedDeletedGroups = (currentData.deletedGroups || []).filter(
+      (g) => g.trim().toUpperCase() !== cleanId
+    );
+
     const updatedData: CenterData = {
-      ...data,
-      groups: [...data.groups, { ...groupMeta, id: cleanId, level: groupLevel, sessionCount, sessionDates }],
+      ...currentData,
+      deletedGroups: updatedDeletedGroups,
+      groups: [...currentData.groups, { ...groupMeta, id: cleanId, level: groupLevel, sessionCount, sessionDates }],
       groupData: {
-        ...data.groupData,
+        ...currentData.groupData,
         [cleanId]: newGroupSheet
       }
     };
@@ -3340,8 +3219,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       students: newStudents
     };
 
+    const updatedDeletedGroups = (data.deletedGroups || []).filter(
+      (g) => g.trim().toUpperCase() !== cleanNewId
+    );
+
     const updatedData: CenterData = {
       ...data,
+      deletedGroups: updatedDeletedGroups,
       groups: [...data.groups, newGroupMeta],
       groupData: {
         ...data.groupData,
@@ -3464,7 +3348,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
     updatedGroup.students = recalculatedStudents;
 
-    const updatedGroupsMeta = data.groups.map((g) => {
+    const currentData = dataRef.current || data;
+    const updatedGroupsMeta = currentData.groups.map((g) => {
       if (g.id === groupId) {
         const next: GroupMeta = {
           ...g,
@@ -3480,29 +3365,65 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
 
     persistData({
-      ...data,
+      ...currentData,
       groups: updatedGroupsMeta,
       groupData: {
-        ...data.groupData,
+        ...currentData.groupData,
         [groupId]: updatedGroup
       }
     });
   };
 
-  // Delete group
+  // Delete group permanently with tombstone tracking so it never returns
   const deleteGroup = (groupId: string) => {
-    const updatedGroups = data.groups.filter((g) => g.id !== groupId);
-    const updatedGroupData = { ...data.groupData };
+    const cleanId = (groupId || '').trim().toUpperCase();
+    if (!cleanId) return;
+
+    const currentData = dataRef.current;
+    const updatedDeletedGroups = Array.from(
+      new Set([...(currentData.deletedGroups || []), cleanId])
+    );
+    const updatedGroups = (currentData.groups || []).filter(
+      (g) => (g.id || '').trim().toUpperCase() !== cleanId
+    );
+    const updatedGroupData = { ...currentData.groupData };
+    delete updatedGroupData[cleanId];
     delete updatedGroupData[groupId];
 
-    const nextSelected = selectedGroup === groupId ? (updatedGroups[0]?.id || '') : selectedGroup;
+    // Purge any orphan records referencing this deleted group
+    const updatedDeletedStudents = (currentData.deletedStudents || []).filter(
+      (d) => (d.groupId || '').trim().toUpperCase() !== cleanId
+    );
+    const updatedTransactions = (currentData.paymentTransactions || []).filter(
+      (tx) => (tx.groupId || '').trim().toUpperCase() !== cleanId
+    );
+
+    const nextSelected =
+      selectedGroup.trim().toUpperCase() === cleanId
+        ? (updatedGroups[0]?.id || '')
+        : selectedGroup;
     setSelectedGroup(nextSelected);
 
-    persistData({
-      ...data,
+    const updatedData: CenterData = {
+      ...currentData,
+      deletedGroups: updatedDeletedGroups,
       groups: updatedGroups,
-      groupData: updatedGroupData
-    });
+      groupData: updatedGroupData,
+      deletedStudents: updatedDeletedStudents,
+      paymentTransactions: updatedTransactions
+    };
+
+    persistData(updatedData);
+
+    // Explicitly delete from Supabase relational tables immediately
+    (async () => {
+      try {
+        await supabase.from('groups').delete().eq('id', cleanId);
+        await supabase.from('students').delete().eq('group_id', cleanId);
+      } catch (e) {
+        console.warn('Supabase group delete error:', e);
+      }
+    })();
   };
 
   // Rename an existing group (e.g. rename BACV06 to BACV10)
@@ -3537,13 +3458,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         : g
     );
 
+    const updatedDeletedGroups = Array.from(
+      new Set([
+        ...(data.deletedGroups || []).filter((g) => g.trim().toUpperCase() !== cleanNew),
+        cleanOld
+      ])
+    );
+
     const updatedData: CenterData = {
       ...data,
+      deletedGroups: updatedDeletedGroups,
       groups: newGroups,
       groupData: newGroupData
     };
 
     persistData(updatedData);
+
+    (async () => {
+      try {
+        await supabase.from('groups').delete().eq('id', cleanOld);
+        await supabase.from('students').delete().eq('group_id', cleanOld);
+      } catch {
+        // ignore
+      }
+    })();
 
     if (selectedGroup.toUpperCase() === cleanOld) {
       setSelectedGroup(cleanNew);
@@ -3554,9 +3492,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Add teacher
   const addTeacher = (teacher: Teacher) => {
+    const currentData = dataRef.current || data;
     const updatedData: CenterData = {
-      ...data,
-      teachers: [...data.teachers, teacher]
+      ...currentData,
+      teachers: [...currentData.teachers, teacher]
     };
     persistData(updatedData);
   };
@@ -3620,7 +3559,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const updatedData = { ...data, teachers: updatedTeachers };
     persistData(updatedData);
-    saveToCloud(updatedData);
     return newPayment;
   };
 
@@ -3641,7 +3579,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const updatedData = { ...data, teachers: updatedTeachers };
     persistData(updatedData);
-    saveToCloud(updatedData);
   };
 
   // Update pricing tier

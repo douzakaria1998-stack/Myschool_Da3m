@@ -90,8 +90,9 @@ export default function ChangeStudentGroupModal({
     );
   }, [student.payments, student.totalReceived]);
 
-  const creditToTransfer = Math.max(0, oldTotalReceived - feeForCompletedInOld);
-  const keptPaymentInOld = oldTotalReceived - creditToTransfer;
+  // Business rule: groups are strictly isolated financially. No money is moved between groups.
+  const creditToTransfer = 0;
+  const keptPaymentInOld = oldTotalReceived;
 
   // New group finances
   const toSessionCount = targetGroupSheet?.sessionDates?.length || targetGroupSheet?.sessionCount || 4;
@@ -115,7 +116,7 @@ export default function ChangeStudentGroupModal({
     expectedFeeInNew = Math.round(applicableSessionsInNew * toPerSessionPrice * 0.8);
   }
 
-  const expectedDebtInNew = Math.max(0, expectedFeeInNew - creditToTransfer);
+  const expectedDebtInNew = expectedFeeInNew;
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -322,23 +323,19 @@ export default function ChangeStudentGroupModal({
               <div>• <strong>المستحق عن الحضور السابق:</strong> {feeForCompletedInOld.toLocaleString()} دج | <strong>المسدد في الفوج السابق:</strong> {oldTotalReceived.toLocaleString()} دج.</div>
             </div>
 
-            {/* Grid 2: Credit Transfer */}
+            {/* Grid 2: Financial Isolation Notice */}
             <div
               style={{
-                backgroundColor: creditToTransfer > 0 ? '#ecfdf5' : '#f8fafc',
-                border: `1px solid ${creditToTransfer > 0 ? '#6ee7b7' : '#e2e8f0'}`,
+                backgroundColor: '#eff6ff',
+                border: '1px solid #bfdbfe',
                 borderRadius: '6px',
                 padding: '8px 10px',
                 fontSize: '0.78rem',
-                color: creditToTransfer > 0 ? '#065f46' : '#64748b',
+                color: '#1e40af',
                 fontWeight: 700
               }}
             >
-              {creditToTransfer > 0 ? (
-                <span>✓ سيتم تحويل رصيد متبقي قدره <strong>{creditToTransfer.toLocaleString()} دج</strong> إلى الفوج الجديد تلقائياً.</span>
-              ) : (
-                <span>• لا يوجد رصيد زائد لتحويله (المبلغ المسدد يغطي الحصص السابقة التي حضرها التلميذ فقط).</span>
-              )}
+              <span>🔒 <strong>استقلال مالي تام:</strong> مدفوعات الفوج السابق ({oldTotalReceived.toLocaleString()} دج) تبقى محفوظة بالكامل في الفوج السابق ولا تُنقل إلى الفوج الجديد. الفوج الجديد يبدأ بحساب مالي مستقل.</span>
             </div>
 
             {/* Grid 3: New Group Expectations */}
@@ -356,7 +353,7 @@ export default function ChangeStudentGroupModal({
               <div>• <strong>الفوج الجديد ({targetGroupId}):</strong> سيبدأ من الحصة {targetSessionIdx + 1} (تُسجل كـ <strong>N</strong>).</div>
               <div>• <strong>عدد الحصص المستحقة:</strong> {applicableSessionsInNew} حصص (بقيمة {expectedFeeInNew.toLocaleString()} دج).</div>
               <div style={{ marginTop: '2px', fontWeight: 800, color: expectedDebtInNew > 0 ? '#b91c1c' : '#15803d' }}>
-                • <strong>صافي الدين في الفوج الجديد:</strong> {expectedDebtInNew.toLocaleString()} دج
+                • <strong>صافي المطلوب في الفوج الجديد:</strong> {expectedDebtInNew.toLocaleString()} دج
               </div>
             </div>
           </div>
@@ -375,7 +372,7 @@ export default function ChangeStudentGroupModal({
           >
             <ShieldAlert size={18} color="#d97706" style={{ flexShrink: 0, marginTop: '2px' }} />
             <div style={{ fontSize: '0.78rem', color: '#92400e', lineHeight: 1.5, fontWeight: 700 }}>
-              تغيير الفوج سيحافظ على سجل الحضور والمدفوعات السابق للتلميذ. الحصص المتبقية في الفوج القديم ستُسجل كـ <strong>CH</strong>، وأول حصة في الفوج الجديد ستُسجل كـ <strong>N</strong>.
+              تغيير الفوج يحافظ على سجل الحضور والمدفوعات السابق للتلميذ داخل الفوج القديم دون تداخل. الحسابات المالية لكل فوج مستقلة تماماً. الحصص المتبقية في الفوج القديم ستُسجل كـ <strong>CH</strong>، وأول حصة في الفوج الجديد ستُسجل كـ <strong>N</strong>.
             </div>
           </div>
         </div>

@@ -2,10 +2,11 @@
 
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { X, FolderPlus, Coins, Sparkles, Calendar, GraduationCap } from 'lucide-react';
+import { X, FolderPlus, Coins, Sparkles, Calendar, GraduationCap, UserPlus, CheckCircle } from 'lucide-react';
 import { GroupMeta, EducationalLevel } from '../types';
 import {
   getNextGroupId,
+  generateNextTeacherId,
   isValidGroupId,
   getSuggestedGroupIds,
   getUpcomingSessionDate,
@@ -18,12 +19,14 @@ interface Props {
 }
 
 export default function AddGroupModal({ onClose }: Props) {
-  const { addGroup, data } = useApp();
+  const { addGroup, data, addTeacher } = useApp();
 
   const [level, setLevel] = useState<EducationalLevel>('BAC');
   const [isVip, setIsVip] = useState(false);
   const [groupId, setGroupId] = useState(() => getNextGroupId(false, data.groups, 'BAC'));
   const [teacherName, setTeacherName] = useState('');
+  const [isCustomTeacher, setIsCustomTeacher] = useState(false);
+  const [teacherSaveSuccess, setTeacherSaveSuccess] = useState(false);
   const [subject, setSubject] = useState('رياضيات');
   const [day1, setDay1] = useState('السبت');
   const [time1, setTime1] = useState('08:00');
@@ -53,6 +56,28 @@ export default function AddGroupModal({ onClose }: Props) {
     setStartDate(formatToYYYYMMDD(getUpcomingSessionDate(newDay, new Date(), false)));
   };
 
+  const handleQuickSaveTeacher = () => {
+    const cleanName = teacherName.trim();
+    if (!cleanName) return;
+    const exists = data.teachers.some(
+      (t) => t.name.trim().toLowerCase() === cleanName.toLowerCase()
+    );
+    if (exists) {
+      setTeacherSaveSuccess(true);
+      return;
+    }
+
+    const nextId = generateNextTeacherId(data.teachers);
+    addTeacher({
+      id: nextId,
+      name: cleanName,
+      subject: subject.trim() || 'مادة تعليمية',
+      paidAmount: 0,
+      paymentHistory: []
+    });
+    setTeacherSaveSuccess(true);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const cleanId = groupId.trim().toUpperCase();
@@ -72,14 +97,31 @@ export default function AddGroupModal({ onClose }: Props) {
       return;
     }
 
-    const selectedTeacher = data.teachers.find((t) => t.name === teacherName);
+    const cleanTeacherName = teacherName.trim();
+    const selectedTeacher = data.teachers.find(
+      (t) => t.name.trim().toLowerCase() === cleanTeacherName.toLowerCase()
+    );
+
+    let effectiveTeacherId = selectedTeacher?.id || '';
+
+    // If teacher is new, automatically save to teachers list
+    if (cleanTeacherName && !selectedTeacher) {
+      effectiveTeacherId = generateNextTeacherId(data.teachers);
+      addTeacher({
+        id: effectiveTeacherId,
+        name: cleanTeacherName,
+        subject: subject.trim() || 'مادة تعليمية',
+        paidAmount: 0,
+        paymentHistory: []
+      });
+    }
 
     const newGroup: GroupMeta = {
-      id: groupId.trim().toUpperCase(),
+      id: cleanId,
       level,
-      teacherId: selectedTeacher?.id || '',
-      teacherName: teacherName || selectedTeacher?.name || 'أستاذ المادة',
-      subject,
+      teacherId: effectiveTeacherId,
+      teacherName: cleanTeacherName || 'أستاذ المادة',
+      subject: subject.trim() || 'مادة تعليمية',
       day1,
       time1,
       day2: day2 || undefined,
@@ -201,27 +243,129 @@ export default function AddGroupModal({ onClose }: Props) {
             </span>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '12px' }}>
             <div>
-              <label style={{ display: 'block', fontWeight: 600, fontSize: '0.85rem', marginBottom: '6px' }}>
-                الأستاذ
-              </label>
-              <select
-                value={teacherName}
-                onChange={(e) => {
-                  setTeacherName(e.target.value);
-                  const found = data.teachers.find((t) => t.name === e.target.value);
-                  if (found && found.subject) setSubject(found.subject);
-                }}
-                className="m3-input"
-              >
-                <option value="">اختر الأستاذ</option>
-                {data.teachers.map((t) => (
-                  <option key={t.id} value={t.name}>
-                    {t.name} ({t.subject})
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                <label style={{ fontWeight: 600, fontSize: '0.85rem' }}>
+                  الأستاذ <span style={{ color: 'var(--md-sys-color-error)' }}>*</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCustomTeacher((prev) => !prev);
+                    setTeacherSaveSuccess(false);
+                  }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--md-sys-color-primary)',
+                    fontSize: '0.74rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    backgroundColor: 'var(--md-sys-color-surface-container-high)'
+                  }}
+                  title="التبديل بين الاختيار من القائمة أو كتابة اسم أستاذ جديد"
+                >
+                  {isCustomTeacher ? '📋 اختيار من القائمة' : '✏️ كتابة اسم أستاذ جديد'}
+                </button>
+              </div>
+
+              {!isCustomTeacher ? (
+                <select
+                  value={teacherName}
+                  onChange={(e) => {
+                    if (e.target.value === '__NEW__') {
+                      setIsCustomTeacher(true);
+                      setTeacherName('');
+                      setTeacherSaveSuccess(false);
+                      return;
+                    }
+                    setTeacherName(e.target.value);
+                    const found = data.teachers.find((t) => t.name === e.target.value);
+                    if (found && found.subject) setSubject(found.subject);
+                  }}
+                  className="m3-input"
+                  style={{ width: '100%', height: '38px', fontWeight: 600 }}
+                >
+                  <option value="">اختر الأستاذ</option>
+                  {data.teachers.map((t) => (
+                    <option key={t.id} value={t.name}>
+                      {t.name} ({t.subject})
+                    </option>
+                  ))}
+                  <option value="__NEW__" style={{ fontWeight: 800, color: 'var(--md-sys-color-primary)' }}>
+                    ➕ كتابة اسم أستاذ جديد وإضافته للقائمة...
                   </option>
-                ))}
-              </select>
+                </select>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <input
+                      type="text"
+                      list="teachers-datalist-add"
+                      value={teacherName}
+                      onChange={(e) => {
+                        setTeacherName(e.target.value);
+                        setTeacherSaveSuccess(false);
+                        const found = data.teachers.find(
+                          (t) => t.name.trim().toLowerCase() === e.target.value.trim().toLowerCase()
+                        );
+                        if (found && found.subject) setSubject(found.subject);
+                      }}
+                      placeholder="اكتب اسم الأستاذ هنا..."
+                      className="m3-input"
+                      style={{ flex: 1, fontWeight: 700, height: '38px' }}
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      onClick={handleQuickSaveTeacher}
+                      disabled={!teacherName.trim() || data.teachers.some((t) => t.name.trim().toLowerCase() === teacherName.trim().toLowerCase())}
+                      title="حفظ هذا الأستاذ في قائمة الأساتذة الدائمة فوراً"
+                      className="m3-btn m3-btn-primary"
+                      style={{
+                        fontSize: '0.74rem',
+                        padding: '0 10px',
+                        whiteSpace: 'nowrap',
+                        height: '38px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        opacity: (!teacherName.trim() || data.teachers.some((t) => t.name.trim().toLowerCase() === teacherName.trim().toLowerCase())) ? 0.6 : 1
+                      }}
+                    >
+                      <UserPlus size={14} />
+                      حفظ للقائمة
+                    </button>
+                  </div>
+
+                  <datalist id="teachers-datalist-add">
+                    {data.teachers.map((t) => (
+                      <option key={t.id} value={t.name}>
+                        {t.subject}
+                      </option>
+                    ))}
+                  </datalist>
+
+                  {teacherSaveSuccess && (
+                    <div style={{ fontSize: '0.73rem', color: '#16a34a', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <CheckCircle size={13} />
+                      تم حفظ الأستاذ في قائمة الأساتذة بنجاح!
+                    </div>
+                  )}
+
+                  {!teacherSaveSuccess && teacherName.trim() && !data.teachers.some((t) => t.name.trim().toLowerCase() === teacherName.trim().toLowerCase()) && (
+                    <div style={{ fontSize: '0.72rem', color: 'var(--md-sys-color-primary)', fontWeight: 600 }}>
+                      💡 سيتم حفظ هذا الأستاذ تلقائياً في قائمة الأساتذة عند إنشاء الفوج.
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             <div>

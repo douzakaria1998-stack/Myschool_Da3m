@@ -172,7 +172,7 @@ export default function GroupSessionPaymentsModal({ group, initialSessionIdx, on
     handlePaymentChange(rowId, sIdx, amount === '' ? '' : String(amount));
   };
 
-  // Batch action: fill session fee for all students marked present 'P'
+  // Batch action: fill full subscription fee in installment 1 for all students marked present 'P'
   const handleBatchPayPresent = () => {
     if (typeof selectedSessionIdx !== 'number') return;
     const sIdx = selectedSessionIdx;
@@ -182,14 +182,12 @@ export default function GroupSessionPaymentsModal({ group, initialSessionIdx, on
       realStudents.forEach((student) => {
         const att = student.attendance[sIdx];
         if (att === 'P' || att === 'ح') {
-          const currentVal = updated[student.rowId]?.[sIdx];
-          const curAmt = currentVal === '' ? 0 : Number(currentVal) || 0;
-          if (curAmt === 0) {
+          const curArr = updated[student.rowId] || [];
+          const curTot = curArr.reduce<number>((sum, x) => sum + (Number(x) || 0), 0);
+          if (curTot === 0) {
             const studentFee = student.fee || totalGroupFee;
-            const perSession = Math.round(studentFee / sessionCount);
-            const arr = [...(updated[student.rowId] || [])];
-            while (arr.length < sessionCount) arr.push('');
-            arr[sIdx] = perSession;
+            const arr = Array(sessionCount).fill('');
+            arr[0] = studentFee;
             updated[student.rowId] = arr;
           }
         }
@@ -594,10 +592,10 @@ export default function GroupSessionPaymentsModal({ group, initialSessionIdx, on
                   borderRadius: 'var(--md-shape-full)',
                   cursor: 'pointer'
                 }}
-                title={`تسجيل تسعيرة الحصة لكل تلميذ حاضر في الحصة ${selectedSessionIdx + 1}`}
+                title={`تسجيل تسديد الاشتراك الكامل لكل تلميذ حاضر لم يسدد بعد`}
               >
                 <Sparkles size={14} color="#059669" />
-                <span>تسديد الحصة لجميع الحاضرين ({standardSessionPrice} دج) ⚡</span>
+                <span>تسديد الاشتراك الكامل للحاضرين ({totalGroupFee.toLocaleString()} دج) ⚡</span>
               </button>
 
               <button
@@ -729,7 +727,11 @@ export default function GroupSessionPaymentsModal({ group, initialSessionIdx, on
                             {/* Quick Presets */}
                             <button
                               type="button"
-                              onClick={() => setStudentSessionAmount(student.rowId, sIdx, studentSessionFee)}
+                              onClick={() => {
+                                const arr = Array(sessionCount).fill('');
+                                arr[0] = studentFee;
+                                setPaymentsState((prev) => ({ ...prev, [student.rowId]: arr }));
+                              }}
                               style={{
                                 padding: '3px 8px',
                                 fontSize: '0.7rem',
@@ -740,27 +742,9 @@ export default function GroupSessionPaymentsModal({ group, initialSessionIdx, on
                                 color: '#065f46',
                                 cursor: 'pointer'
                               }}
-                              title={`تسديد كامل حصة هذا التلميذ (${studentSessionFee} دج)`}
+                              title={`تسديد كامل الاشتراك الشهري (${studentFee} دج)`}
                             >
-                              كامل ({studentSessionFee})
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => setStudentSessionAmount(student.rowId, sIdx, Math.round(studentSessionFee / 2))}
-                              style={{
-                                padding: '3px 8px',
-                                fontSize: '0.7rem',
-                                fontWeight: 700,
-                                borderRadius: 'var(--md-shape-sm)',
-                                border: '1px solid #cbd5e1',
-                                backgroundColor: 'var(--md-sys-color-surface-container)',
-                                color: 'var(--md-sys-color-on-surface)',
-                                cursor: 'pointer'
-                              }}
-                              title={`تسديد نصف حصة (${Math.round(studentSessionFee / 2)} دج)`}
-                            >
-                              نصف ({Math.round(studentSessionFee / 2)})
+                              كامل ({studentFee})
                             </button>
 
                             <button
