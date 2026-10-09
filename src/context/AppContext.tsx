@@ -1194,7 +1194,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         });
 
       if (error) {
-        console.error('Supabase cloud sync error:', error);
+        const errorMsg = (error as any)?.message || JSON.stringify(error);
+        console.error('Supabase cloud sync error:', errorMsg, error);
         setCloudSyncStatus('offline');
         hasPendingChangesRef.current = true;
         if (typeof window !== 'undefined') {
@@ -1316,7 +1317,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (!isMounted) return;
 
         if (metaError) {
-          console.warn('Supabase fetch error, running offline:', metaError);
+          const detail = (metaError as any)?.message || JSON.stringify(metaError);
+          console.warn('Supabase fetch error, running offline:', detail, metaError);
           setCloudSyncStatus('offline');
           return;
         }
@@ -1366,7 +1368,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (!isMounted) return;
 
         if (error || !remoteRow || !remoteRow.data) {
-          if (error) console.warn('Supabase fetch full data error:', error);
+          if (error) {
+            const detail = (error as any)?.message || JSON.stringify(error);
+            console.warn('Supabase fetch full data error:', detail, error);
+          }
           return;
         }
 

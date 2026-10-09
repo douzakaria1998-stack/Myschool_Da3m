@@ -61,6 +61,7 @@ import Link from 'next/link';
 import { getBarcodeCandidates, normalizeArabicName, normalizeScannedBarcode } from '../utils/barcodeUtils';
 import { recordScanToLog, getScanLog } from '../utils/scanLogger';
 import AddGroupModal from './AddGroupModal';
+import CompactGroupSearchSelect from './CompactGroupSearchSelect';
 
 export interface PendingCoverRequest {
   id: string;
@@ -1882,80 +1883,12 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
   // ==========================================
   const renderCodebarSection = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-      {/* Cloud Sync & Offline Status Indicator Banner */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: '8px',
-          padding: '6px 12px',
-          borderRadius: '8px',
-          backgroundColor:
-            cloudSyncStatus === 'synced'
-              ? '#f0fdf4'
-              : cloudSyncStatus === 'syncing'
-              ? '#eff6ff'
-              : '#fffbeb',
-          border:
-            cloudSyncStatus === 'synced'
-              ? '1px solid #bbf7d0'
-              : cloudSyncStatus === 'syncing'
-              ? '1px solid #bfdbfe'
-              : '1px solid #fde68a',
-          fontSize: '0.75rem',
-          fontWeight: 700
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          {cloudSyncStatus === 'synced' && (
-            <>
-              <CheckCircle2 size={15} color="#16a34a" />
-              <span style={{ color: '#15803d' }}>
-                متصل بالسحابة (مزامنة فورية نشطة) {lastSyncedAt ? `• آخر حفظ: ${lastSyncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}
-              </span>
-            </>
-          )}
-          {cloudSyncStatus === 'syncing' && (
-            <>
-              <RefreshCw size={15} className="animate-spin" color="#2563eb" />
-              <span style={{ color: '#1d4ed8' }}>جاري حفظ التغييرات في السحابة...</span>
-            </>
-          )}
-          {cloudSyncStatus === 'offline' && (
-            <>
-              <AlertTriangle size={15} color="#d97706" />
-              <span style={{ color: '#b45309' }}>
-                وضع أوفلاين (غير متصل) - المسح والحضور محفوظ محلياً بأمان تام وسيُرفع فور توفر الإنترنت
-              </span>
-            </>
-          )}
-          {cloudSyncStatus === 'error' && (
-            <>
-              <AlertTriangle size={15} color="#dc2626" />
-              <span style={{ color: '#b91c1c' }}>تعذر الاتصال بالسحابة - الحضور محفوظ محلياً</span>
-            </>
-          )}
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          {/* Button 1: Add/Activate Group in Station */}
+      {/* Restoring dismissed groups button (only visible if any are dismissed) */}
+      {isMounted && dismissedGroupIds.length > 0 && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <button
             type="button"
-            onClick={() => {
-              const existingGids = new Set(activeGroups.map((g) => g.groupId));
-              const available =
-                data.groups.find((g) => !existingGids.has(g.id) && isGroupToday(g, data.groupData[g.id])) ||
-                data.groups.find((g) => !existingGids.has(g.id)) ||
-                data.groups[0];
-              const gid = available?.id || '';
-              setStationSelectedGid(gid);
-              const gSheet = data.groupData[gid];
-              setStationSelectedSessionIdx(gSheet ? getDefaultSessionIndex(gSheet, new Date()) : 0);
-              setStationIsCovering(false);
-              setShowAddStationGroupModal(true);
-            }}
+            onClick={handleRestoreDismissedGroups}
             className="m3-btn-text"
             style={{
               fontSize: '0.72rem',
@@ -1963,112 +1896,20 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
               padding: '2px 8px',
               borderRadius: '4px',
               backgroundColor: '#eff6ff',
-              border: '1px solid #bfdbfe',
+              border: '1px dashed #93c5fd',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
               gap: '4px',
               color: '#1d4ed8'
             }}
-            title="إضافة أو تفعيل فوج في محطة المسح"
-          >
-            <Plus size={13} />
-            <span>+ إضافة فوج للمحطة</span>
-          </button>
-
-          {/* Button 2: Create Brand New Group */}
-          <button
-            type="button"
-            onClick={() => setIsAddGroupModalOpen(true)}
-            className="m3-btn-text"
-            style={{
-              fontSize: '0.72rem',
-              fontWeight: 800,
-              padding: '2px 8px',
-              borderRadius: '4px',
-              backgroundColor: '#f0fdf4',
-              border: '1px solid #bbf7d0',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-              color: '#15803d'
-            }}
-            title="إنشاء فوج دراسي جديد في المركز"
-          >
-            <FolderPlus size={13} />
-            <span>+ إنشاء فوج جديد</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => syncNow()}
-            className="m3-btn-text"
-            style={{
-              fontSize: '0.72rem',
-              fontWeight: 800,
-              padding: '2px 8px',
-              borderRadius: '4px',
-              backgroundColor: 'rgba(0,0,0,0.05)',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px'
-            }}
-            title="مزامنة فورية مع السحابة"
-          >
-            <RefreshCw size={12} />
-            <span>مزامنة الآن</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleRecoverFromScanLog}
-            className="m3-btn-text"
-            style={{
-              fontSize: '0.72rem',
-              fontWeight: 800,
-              padding: '2px 8px',
-              borderRadius: '4px',
-              backgroundColor: 'rgba(0,0,0,0.05)',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-              color: '#334155'
-            }}
-            title="فحص السجل المحلي واستعادة أي حضور مسجل لم يُحفظ في الفوج"
+            title="إعادة إظهار جميع الأفواج التي تم حذفها اليوم في المحطة"
           >
             <RotateCcw size={12} />
-            <span>استعادة من السجل المحلي</span>
+            <span>إعادة إظهار الأفواج المحذوفة ({dismissedGroupIds.length})</span>
           </button>
-
-          {isMounted && dismissedGroupIds.length > 0 && (
-            <button
-              type="button"
-              onClick={handleRestoreDismissedGroups}
-              className="m3-btn-text"
-              style={{
-                fontSize: '0.72rem',
-                fontWeight: 800,
-                padding: '2px 8px',
-                borderRadius: '4px',
-                backgroundColor: '#eff6ff',
-                border: '1px dashed #93c5fd',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                color: '#1d4ed8'
-              }}
-              title="إعادة إظهار جميع الأفواج التي تم حذفها اليوم في المحطة"
-            >
-              <RotateCcw size={12} />
-              <span>إعادة إظهار الأفواج المحذوفة ({dismissedGroupIds.length})</span>
-            </button>
-          )}
         </div>
-      </div>
+      )}
       {/* Active Group Cards Container */}
       <div
         style={{
@@ -2216,27 +2057,12 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                       <span style={{ fontSize: '0.66rem', fontWeight: 700, color: 'var(--md-sys-color-on-surface-variant)', display: 'block' }}>
                         الفوج:
                       </span>
-                      <select
-                        value={ag.groupId}
-                        onChange={(e) => handleUpdateActiveGroup(idx, e.target.value)}
-                        className="m3-input"
-                        style={{ padding: '3px 6px', fontSize: '0.76rem', fontWeight: 700, width: '100%', height: '28px' }}
-                      >
-                        {[...data.groups]
-                          .sort((a, b) => {
-                            const aToday = isGroupToday(a, data.groupData[a.id]) ? 1 : 0;
-                            const bToday = isGroupToday(b, data.groupData[b.id]) ? 1 : 0;
-                            return bToday - aToday;
-                          })
-                          .map((g) => {
-                            const hasSessionToday = isGroupToday(g, data.groupData[g.id]);
-                            return (
-                              <option key={g.id} value={g.id}>
-                                {hasSessionToday ? '⭐ ' : ''}فوج {g.id} ({g.subject})
-                              </option>
-                            );
-                          })}
-                      </select>
+                      <CompactGroupSearchSelect
+                        selectedGroupId={ag.groupId}
+                        onSelectGroup={(newGid) => handleUpdateActiveGroup(idx, newGid)}
+                        groups={data.groups}
+                        groupData={data.groupData}
+                      />
                     </div>
 
                     <div>
@@ -5006,33 +4832,17 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                 <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, marginBottom: '4px', color: '#334155' }}>
                   الفوج المطلوب:
                 </label>
-                <select
-                  value={stationSelectedGid}
-                  onChange={(e) => {
-                    const newGid = e.target.value;
+                <CompactGroupSearchSelect
+                  selectedGroupId={stationSelectedGid}
+                  onSelectGroup={(newGid) => {
                     setStationSelectedGid(newGid);
                     const gSheet = data.groupData[newGid];
                     setStationSelectedSessionIdx(gSheet ? getDefaultSessionIndex(gSheet, new Date()) : 0);
                   }}
-                  className="m3-input"
-                  style={{ width: '100%', height: '38px', padding: '4px 10px', fontSize: '0.86rem', fontWeight: 800, color: 'var(--md-sys-color-on-surface)', backgroundColor: '#fff' }}
-                >
-                  {[...data.groups]
-                    .sort((a, b) => {
-                      const aToday = isGroupToday(a, data.groupData[a.id]) ? 1 : 0;
-                      const bToday = isGroupToday(b, data.groupData[b.id]) ? 1 : 0;
-                      return bToday - aToday;
-                    })
-                    .map((g) => {
-                      const isAlreadyActive = activeGroups.some((ag) => ag.groupId === g.id);
-                      const hasSessionToday = isGroupToday(g, data.groupData[g.id]);
-                      return (
-                        <option key={g.id} value={g.id}>
-                          {hasSessionToday ? '⭐ [حصة اليوم 📅] ' : ''}فوج {g.id} ({g.subject} - الأستاذ: {g.teacherName}) {isAlreadyActive ? '• (مفعل حالياً)' : ''}
-                        </option>
-                      );
-                    })}
-                </select>
+                  groups={data.groups}
+                  groupData={data.groupData}
+                  height="38px"
+                />
               </div>
 
               <div>
