@@ -1437,7 +1437,206 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     syncChannelRef.current = syncChannel;
 
-    // 3. Online/Offline & Auto-Sync listeners
+    // 3. Real-Time Multi-Device Database Subscription for 'groups' table (INSERT, UPDATE, DELETE)
+    const handleRemoteGroupEvent = (
+      eventType: 'INSERT' | 'UPDATE' | 'DELETE',
+      newGroupRow: any,
+      oldGroupRow?: any
+    ) => {
+      const gid = ((newGroupRow?.id || oldGroupRow?.id) || '').trim().toUpperCase();
+      if (!gid) return;
+
+      const current = dataRef.current;
+
+      if (eventType === 'INSERT') {
+        const exists = (current.groups || []).some((g) => g.id.trim().toUpperCase() === gid);
+        if (exists && current.groupData?.[gid]) return;
+
+        const level = newGroupRow.level || getGroupLevelFromId(gid);
+        const sessionCount = newGroupRow.session_count || 4;
+        const sessionDates = Array.isArray(newGroupRow.session_dates) && newGroupRow.session_dates.length > 0
+          ? newGroupRow.session_dates
+          : generateSessionDates(newGroupRow.day1 || 'السبت', sessionCount);
+
+        const newMeta: GroupMeta = {
+          id: gid,
+          teacherId: newGroupRow.teacher_id || '',
+          teacherName: newGroupRow.teacher_name || current.groupData?.[gid]?.teacherName || '',
+          subject: newGroupRow.subject || '',
+          day1: newGroupRow.day1 || 'السبت',
+          time1: newGroupRow.time1 || '',
+          day2: newGroupRow.day2 || undefined,
+          time2: newGroupRow.time2 || undefined,
+          type: newGroupRow.type || '4-2500',
+          isVip: Boolean(newGroupRow.is_vip),
+          sessionCount,
+          sessionDates,
+          studentFee: newGroupRow.student_fee || undefined,
+          teacherPayPerStudent: newGroupRow.teacher_rate || undefined,
+          status: newGroupRow.status || undefined
+        };
+
+        const newSheet: GroupSheet = {
+          groupId: gid,
+          level,
+          teacherName: newMeta.teacherName,
+          subject: newMeta.subject,
+          day1: newMeta.day1,
+          time1: newMeta.time1,
+          day2: newMeta.day2,
+          time2: newMeta.time2,
+          sessionDates,
+          sessionCount,
+          isVip: newMeta.isVip,
+          type: newMeta.type,
+          studentFee: newMeta.studentFee,
+          teacherPayPerStudent: newMeta.teacherPayPerStudent,
+          status: newMeta.status,
+          students: current.groupData?.[gid]?.students || []
+        };
+
+        const updatedDeleted = (current.deletedGroups || []).filter(
+          (g) => g.trim().toUpperCase() !== gid
+        );
+
+        const updatedData: CenterData = {
+          ...current,
+          deletedGroups: updatedDeleted,
+          groups: [...(current.groups || []).filter((g) => g.id.trim().toUpperCase() !== gid), newMeta],
+          groupData: {
+            ...current.groupData,
+            [gid]: newSheet
+          }
+        };
+
+        dataRef.current = updatedData;
+        setData(updatedData);
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedData));
+        } catch (e) {}
+      } else if (eventType === 'UPDATE') {
+        const existingMeta = (current.groups || []).find((g) => g.id.trim().toUpperCase() === gid);
+        const existingSheet = current.groupData?.[gid];
+        if (!existingMeta && !existingSheet) return;
+
+        const updatedMeta: GroupMeta = {
+          ...(existingMeta || { id: gid }),
+          teacherId: newGroupRow.teacher_id !== undefined ? newGroupRow.teacher_id : existingMeta?.teacherId,
+          teacherName: newGroupRow.teacher_name || existingMeta?.teacherName || '',
+          subject: newGroupRow.subject || existingMeta?.subject || '',
+          day1: newGroupRow.day1 || existingMeta?.day1 || 'السبت',
+          time1: newGroupRow.time1 || existingMeta?.time1 || '',
+          day2: newGroupRow.day2 !== undefined ? newGroupRow.day2 : existingMeta?.day2,
+          time2: newGroupRow.time2 !== undefined ? newGroupRow.time2 : existingMeta?.time2,
+          type: newGroupRow.type || existingMeta?.type || '4-2500',
+          isVip: newGroupRow.is_vip !== undefined ? Boolean(newGroupRow.is_vip) : Boolean(existingMeta?.isVip),
+          sessionCount: newGroupRow.session_count || existingMeta?.sessionCount || 4,
+          sessionDates: newGroupRow.session_dates || existingMeta?.sessionDates || [],
+          studentFee: newGroupRow.student_fee !== undefined ? newGroupRow.student_fee : existingMeta?.studentFee,
+          teacherPayPerStudent: newGroupRow.teacher_rate !== undefined ? newGroupRow.teacher_rate : existingMeta?.teacherPayPerStudent,
+          status: newGroupRow.status !== undefined ? newGroupRow.status : existingMeta?.status
+        };
+
+        const updatedSheet: GroupSheet = {
+          ...(existingSheet || { groupId: gid, students: [] }),
+          teacherName: updatedMeta.teacherName,
+          subject: updatedMeta.subject,
+          day1: updatedMeta.day1,
+          time1: updatedMeta.time1,
+          day2: updatedMeta.day2,
+          time2: updatedMeta.time2,
+          type: updatedMeta.type,
+          isVip: updatedMeta.isVip,
+          sessionCount: updatedMeta.sessionCount,
+          sessionDates: updatedMeta.sessionDates || [],
+          studentFee: updatedMeta.studentFee,
+          teacherPayPerStudent: updatedMeta.teacherPayPerStudent,
+          status: updatedMeta.status
+        };
+
+        const updatedData: CenterData = {
+          ...current,
+          groups: (current.groups || []).map((g) => (g.id.trim().toUpperCase() === gid ? updatedMeta : g)),
+          groupData: {
+            ...current.groupData,
+            [gid]: updatedSheet
+          }
+        };
+
+        dataRef.current = updatedData;
+        setData(updatedData);
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedData));
+        } catch (e) {}
+      } else if (eventType === 'DELETE') {
+        const updatedDeleted = Array.from(new Set([...(current.deletedGroups || []), gid]));
+        const updatedGroups = (current.groups || []).filter((g) => g.id.trim().toUpperCase() !== gid);
+        const updatedGroupData = { ...current.groupData };
+        delete updatedGroupData[gid];
+
+        const updatedData: CenterData = {
+          ...current,
+          deletedGroups: updatedDeleted,
+          groups: updatedGroups,
+          groupData: updatedGroupData
+        };
+
+        dataRef.current = updatedData;
+        setData(updatedData);
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedData));
+        } catch (e) {}
+      }
+    };
+
+    // Supabase Postgres Realtime Subscription for 'groups' table
+    const groupsDbChannel = supabase
+      .channel('public_groups_realtime_v1')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'groups' },
+        (payload) => {
+          handleRemoteGroupEvent('INSERT', payload.new);
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'groups' },
+        (payload) => {
+          handleRemoteGroupEvent('UPDATE', payload.new);
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'groups' },
+        (payload) => {
+          handleRemoteGroupEvent('DELETE', payload.new, payload.old);
+        }
+      )
+      .subscribe();
+
+    // Multi-Device SSE Realtime Stream (ensures instant sync across all laptops connected via local network)
+    let sseSource: EventSource | null = null;
+    try {
+      if (typeof window !== 'undefined') {
+        sseSource = new EventSource('/api/realtime/groups');
+        sseSource.addEventListener('group_change', (e: MessageEvent) => {
+          try {
+            const data = JSON.parse(e.data);
+            if (data && data.originClientId !== clientIdRef.current) {
+              const row = data.groupMeta || { id: data.groupId };
+              handleRemoteGroupEvent(data.eventType, row, { id: data.groupId });
+            }
+          } catch (err) {
+            console.error('SSE group_change parse error:', err);
+          }
+        });
+      }
+    } catch (e) {
+      console.warn('SSE connection could not be established:', e);
+    }
+
+    // 4. Online/Offline & Auto-Sync listeners
     const handleOnline = () => {
       console.log('Internet reconnected. Syncing pending data to Supabase...');
       setCloudSyncStatus('syncing');
@@ -1452,7 +1651,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
-    // 4. Cross-tab synchronization via localStorage storage event (0 network egress!)
+    // 5. Cross-tab synchronization via localStorage storage event (0 network egress!)
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === STORAGE_KEY && e.newValue) {
         try {
@@ -1469,7 +1668,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
     window.addEventListener('storage', handleStorageChange);
 
-    // 5. Check for cloud changes when tab regains focus (micro-check ~50 bytes)
+    // 6. Check for cloud changes when tab regains focus (micro-check ~50 bytes)
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         const hasLocalUnsynced =
@@ -1481,7 +1680,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    // 6. Gentle periodic auto-sync (every 60s instead of 8s) ONLY when offline changes exist
+    // 7. Gentle periodic auto-sync (every 60s instead of 8s) ONLY when offline changes exist
     const heartbeatTimer = setInterval(() => {
       if (typeof navigator !== 'undefined' && !navigator.onLine) return;
       const hasUnsynced =
@@ -1502,6 +1701,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener('storage', handleStorageChange);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       supabase.removeChannel(syncChannel);
+      supabase.removeChannel(groupsDbChannel);
+      if (sseSource) sseSource.close();
       syncChannelRef.current = null;
     };
   }, [saveToCloud]);
@@ -3088,16 +3289,32 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       (g) => g.trim().toUpperCase() !== cleanId
     );
 
+    const finalGroupMeta: GroupMeta = { ...groupMeta, id: cleanId, level: groupLevel, sessionCount, sessionDates };
     const updatedData: CenterData = {
       ...currentData,
       deletedGroups: updatedDeletedGroups,
-      groups: [...currentData.groups, { ...groupMeta, id: cleanId, level: groupLevel, sessionCount, sessionDates }],
+      groups: [...currentData.groups, finalGroupMeta],
       groupData: {
         ...currentData.groupData,
         [cleanId]: newGroupSheet
       }
     };
     persistData(updatedData);
+
+    // Multi-Device Real-Time Sync: Instantly broadcast INSERT event to all connected laptops & write to database
+    try {
+      fetch('/api/groups/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          eventType: 'INSERT',
+          groupId: cleanId,
+          group: finalGroupMeta,
+          groupSheet: newGroupSheet,
+          originClientId: clientIdRef.current
+        })
+      }).catch((e) => console.warn('Failed to broadcast group INSERT:', e));
+    } catch {}
   };
 
   // Renew / Rollover finished group to a new cycle with new ID and carry over selected students
@@ -3377,6 +3594,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         [groupId]: updatedGroup
       }
     });
+
+    // Multi-Device Real-Time Sync: Instantly broadcast UPDATE event to all connected laptops & write to database
+    try {
+      fetch('/api/groups/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          eventType: 'UPDATE',
+          groupId,
+          group: updatedGroupsMeta.find((g) => g.id.trim().toUpperCase() === groupId.trim().toUpperCase()),
+          groupSheet: updatedGroup,
+          originClientId: clientIdRef.current
+        })
+      }).catch((e) => console.warn('Failed to broadcast group UPDATE:', e));
+    } catch {}
   };
 
   // Delete group permanently with tombstone tracking so it never returns
@@ -3419,6 +3651,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
 
     persistData(updatedData);
+
+    // Multi-Device Real-Time Sync: Instantly broadcast DELETE event to all connected laptops & delete from database
+    try {
+      fetch('/api/groups/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          eventType: 'DELETE',
+          groupId: cleanId,
+          originClientId: clientIdRef.current
+        })
+      }).catch((e) => console.warn('Failed to broadcast group DELETE:', e));
+    } catch {}
 
     // Explicitly delete from Supabase relational tables immediately
     (async () => {

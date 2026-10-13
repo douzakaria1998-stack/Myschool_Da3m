@@ -3,7 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useApp } from '../context/AppContext';
-import { Sun, Moon, Download, GraduationCap, School, CloudCheck, CloudOff, RefreshCw, Scan, Clock, Trash2, FolderOpen } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { Sun, Moon, Download, GraduationCap, School, CloudCheck, CloudOff, RefreshCw, Scan, Clock, Trash2, FolderOpen, LogIn, LogOut, Shield, Globe, User as UserIcon } from 'lucide-react';
 import HourlyPaymentFilterModal from './HourlyPaymentFilterModal';
 import RecycleBinModal from './RecycleBinModal';
 import { openReceiptsFolder } from '../utils/receiptSaveUtils';
@@ -21,6 +22,7 @@ export default function TopAppBar() {
     lastSyncedAt,
     syncNow
   } = useApp();
+  const { user, isSuperAdmin, isAdmin, isAuthenticated, logout } = useAuth();
 
   const [isMounted, setIsMounted] = useState(false);
   const [isManualSyncing, setIsManualSyncing] = useState(false);
@@ -104,48 +106,46 @@ export default function TopAppBar() {
         </div>
       </div>
 
-      {/* Action Buttons */}
+      {/* Action Buttons - Icon Only */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0, flexWrap: 'nowrap' }}>
         {/* Hourly Income / Payments Filter Button */}
         <button
           onClick={() => setIsHourlyFilterOpen(true)}
           className="m3-btn"
-          title={effectiveLang === 'ar' ? 'تصفية المداخيل حسب الساعات واليوم' : 'Hourly Income & Payments Filter'}
+          title={effectiveLang === 'ar' ? 'مداخيل الساعات واليوم' : 'Hourly Income & Payments'}
           style={{
-            height: '34px',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '6px',
-            padding: '0 11px',
+            width: '36px',
+            height: '36px',
+            padding: 0,
             borderRadius: 'var(--md-shape-full)',
             border: effectiveTheme === 'dark' ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #6ee7b7',
             backgroundColor: effectiveTheme === 'dark' ? 'rgba(16, 185, 129, 0.15)' : '#ecfdf5',
             color: effectiveTheme === 'dark' ? '#6ee7b7' : '#065f46',
             cursor: 'pointer',
-            fontSize: '0.8rem',
-            fontWeight: 700,
-            whiteSpace: 'nowrap',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
             flexShrink: 0
           }}
         >
-          <Clock size={14} />
-          <span>{effectiveLang === 'ar' ? 'مداخيل الساعات' : 'Hourly Income'}</span>
+          <Clock size={16} />
         </button>
 
         {/* Recycle Bin / Restored Students */}
         <button
           onClick={() => setIsRecycleBinOpen(true)}
           className="m3-btn"
-          title={effectiveLang === 'ar' ? 'سلة المحذوفات واسترجاع الطلبة المحذوفين' : 'Recycle Bin & Restored Students'}
+          title={
+            effectiveLang === 'ar'
+              ? `سلة المحذوفات واسترجاع الطلبة المحذوفين (${deletedCount})`
+              : `Recycle Bin & Restored Students (${deletedCount})`
+          }
           style={{
-            height: '34px',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '6px',
-            padding: '0 11px',
+            width: '36px',
+            height: '36px',
+            padding: 0,
             borderRadius: 'var(--md-shape-full)',
+            position: 'relative',
             border: deletedCount > 0
               ? (effectiveTheme === 'dark' ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid #f87171')
               : '1px solid var(--md-sys-color-outline-variant)',
@@ -156,17 +156,36 @@ export default function TopAppBar() {
               ? (effectiveTheme === 'dark' ? '#f87171' : '#b91c1c')
               : 'var(--md-sys-color-on-surface)',
             cursor: 'pointer',
-            fontSize: '0.8rem',
-            fontWeight: 700,
-            whiteSpace: 'nowrap',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
             flexShrink: 0
           }}
         >
-          <Trash2 size={14} />
-          <span>
-            {effectiveLang === 'ar' ? 'سلة المحذوفات' : 'Recycle Bin'}
-            {deletedCount > 0 ? ` (${deletedCount})` : ''}
-          </span>
+          <Trash2 size={16} />
+          {deletedCount > 0 && (
+            <span
+              style={{
+                position: 'absolute',
+                top: '-3px',
+                right: '-3px',
+                backgroundColor: '#ef4444',
+                color: '#ffffff',
+                fontSize: '0.62rem',
+                fontWeight: 800,
+                borderRadius: 'var(--md-shape-full)',
+                minWidth: '16px',
+                height: '16px',
+                padding: '0 3px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                lineHeight: 1
+              }}
+            >
+              {deletedCount > 99 ? '99+' : deletedCount}
+            </span>
+          )}
         </button>
 
         {/* Cloud Sync Status & Manual Sync Button */}
@@ -184,12 +203,9 @@ export default function TopAppBar() {
               : (effectiveLang === 'ar' ? 'غير متصل بالسحابة (محلي) - اضغط لإعادة المحاولة' : 'Cloud offline - Click to retry')
           }
           style={{
-            height: '34px',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '6px',
-            padding: '0 11px',
+            width: '36px',
+            height: '36px',
+            padding: 0,
             borderRadius: 'var(--md-shape-full)',
             border: cloudSyncStatus === 'error'
               ? '1px solid #ef4444'
@@ -211,28 +227,19 @@ export default function TopAppBar() {
               ? (effectiveTheme === 'dark' ? '#fcd34d' : '#92400e')
               : 'var(--md-sys-color-on-surface)',
             cursor: isSyncing ? 'default' : 'pointer',
-            fontSize: '0.8rem',
-            fontWeight: 600,
-            whiteSpace: 'nowrap',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
             flexShrink: 0,
             transition: 'all 0.2s ease'
           }}
         >
           {isSyncing ? (
-            <>
-              <RefreshCw size={14} className="animate-spin" />
-              <span>{effectiveLang === 'ar' ? 'جاري الحفظ...' : 'Syncing...'}</span>
-            </>
+            <RefreshCw size={16} className="animate-spin" />
           ) : cloudSyncStatus === 'synced' ? (
-            <>
-              <CloudCheck size={15} style={{ color: '#16a34a' }} />
-              <span>{effectiveLang === 'ar' ? 'سحابي متزامن' : 'Synced'}</span>
-            </>
+            <CloudCheck size={18} style={{ color: '#16a34a' }} />
           ) : (
-            <>
-              <CloudOff size={14} style={{ color: cloudSyncStatus === 'error' ? '#ef4444' : '#d97706' }} />
-              <span>{cloudSyncStatus === 'error' ? (effectiveLang === 'ar' ? 'خطأ مزامنة' : 'Sync Error') : (effectiveLang === 'ar' ? 'وضع محلي' : 'Offline')}</span>
-            </>
+            <CloudOff size={16} style={{ color: cloudSyncStatus === 'error' ? '#ef4444' : '#d97706' }} />
           )}
         </button>
 
@@ -240,110 +247,168 @@ export default function TopAppBar() {
         <Link
           href="/scanner"
           className="m3-btn"
-          title={lang === 'ar' ? 'الانتقال إلى محطة مسح الباركود' : 'Go to Barcode Scanner Station'}
+          title={lang === 'ar' ? 'قارئ الباركود ومحطة المسح السريع' : 'Barcode Scanner'}
           style={{
-            height: '34px',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '6px',
+            width: '36px',
+            height: '36px',
+            padding: 0,
+            borderRadius: 'var(--md-shape-full)',
             background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
             color: '#ffffff',
-            fontWeight: 700,
             boxShadow: '0 2px 6px rgba(79, 70, 229, 0.3)',
             border: 'none',
             cursor: 'pointer',
-            padding: '0 12px',
-            borderRadius: 'var(--md-shape-full)',
             textDecoration: 'none',
-            fontSize: '0.8rem',
-            whiteSpace: 'nowrap',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
             flexShrink: 0
           }}
         >
-          <Scan size={14} />
-          <span>{lang === 'ar' ? 'قارئ الباركود' : 'Barcode Scan'}</span>
+          <Scan size={16} />
         </Link>
 
         {/* Quick Export Backup */}
         <button
           onClick={exportDataJson}
           className="m3-btn"
-          title="تصدير نسخة احتياطية (JSON)"
+          title={effectiveLang === 'ar' ? 'تصدير نسخة احتياطية (JSON)' : 'Export Backup (JSON)'}
           style={{
-            height: '34px',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '6px',
-            padding: '0 11px',
+            width: '36px',
+            height: '36px',
+            padding: 0,
             borderRadius: 'var(--md-shape-full)',
             border: '1px solid var(--md-sys-color-outline-variant)',
             backgroundColor: 'var(--md-sys-color-surface-container-high)',
             color: 'var(--md-sys-color-on-surface)',
             cursor: 'pointer',
-            fontSize: '0.8rem',
-            fontWeight: 600,
-            whiteSpace: 'nowrap',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
             flexShrink: 0
           }}
         >
-          <Download size={14} />
-          <span>{effectiveLang === 'ar' ? 'تصدير نسخة' : 'Export'}</span>
+          <Download size={16} />
         </button>
 
         {/* Saved Receipts Folder Button */}
         <button
           onClick={() => openReceiptsFolder()}
           className="m3-btn"
-          title={effectiveLang === 'ar' ? 'فتح مجلد وصولات PDF على الكمبيوتر (سطح المكتب)' : 'Open saved PDF receipts folder'}
+          title={effectiveLang === 'ar' ? 'فتح مجلد وصولات PDF على الكمبيوتر' : 'Open Saved Receipts Folder'}
           style={{
-            height: '34px',
+            width: '36px',
+            height: '36px',
+            padding: 0,
+            borderRadius: 'var(--md-shape-full)',
+            border: '1px solid var(--md-sys-color-outline-variant)',
+            backgroundColor: 'var(--md-sys-color-surface-container-high)',
+            color: 'var(--md-sys-color-on-surface)',
+            cursor: 'pointer',
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: '6px',
-            padding: '0 11px',
-            borderRadius: 'var(--md-shape-full)',
-            border: '1px solid var(--md-sys-color-outline-variant)',
-            backgroundColor: 'var(--md-sys-color-surface-container-high)',
-            color: 'var(--md-sys-color-on-surface)',
-            cursor: 'pointer',
-            fontSize: '0.8rem',
-            fontWeight: 600,
-            whiteSpace: 'nowrap',
             flexShrink: 0
           }}
         >
-          <FolderOpen size={14} />
-          <span>{effectiveLang === 'ar' ? 'مجلد الوصولات' : 'Receipts'}</span>
+          <FolderOpen size={16} />
         </button>
 
-        {/* Language Toggle */}
+        {/* Language Toggle Button */}
         <button
           onClick={toggleLang}
           className="m3-btn"
-          title="تبديل اللغة"
+          title={effectiveLang === 'ar' ? 'تبديل اللغة (English)' : 'تبديل اللغة (العربية)'}
           style={{
-            height: '34px',
-            minWidth: '36px',
-            padding: '0 8px',
+            width: '36px',
+            height: '36px',
+            padding: 0,
             borderRadius: 'var(--md-shape-full)',
             border: '1px solid var(--md-sys-color-outline-variant)',
             backgroundColor: 'var(--md-sys-color-surface-container-high)',
             color: 'var(--md-sys-color-on-surface)',
             cursor: 'pointer',
-            fontWeight: 700,
-            fontSize: '0.8rem',
-            whiteSpace: 'nowrap',
-            flexShrink: 0,
             display: 'inline-flex',
             alignItems: 'center',
-            justifyContent: 'center'
+            justifyContent: 'center',
+            flexShrink: 0
           }}
         >
-          {effectiveLang === 'ar' ? 'EN' : 'عربي'}
+          <Globe size={16} />
         </button>
+
+        {/* User Auth Status & Action */}
+        {isAuthenticated && user ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Link
+              href={isSuperAdmin ? '/admin/users' : '/admin'}
+              title={`المستخدم الحالي: ${user.name || user.username} (${isSuperAdmin ? 'Super Admin' : 'Admin'})`}
+              style={{
+                width: '36px',
+                height: '36px',
+                padding: 0,
+                borderRadius: 'var(--md-shape-full)',
+                textDecoration: 'none',
+                backgroundColor: isSuperAdmin
+                  ? 'rgba(147, 51, 234, 0.15)'
+                  : 'rgba(59, 130, 246, 0.15)',
+                color: isSuperAdmin ? '#9333ea' : '#2563eb',
+                border: isSuperAdmin
+                  ? '1px solid rgba(147, 51, 234, 0.35)'
+                  : '1px solid rgba(59, 130, 246, 0.35)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}
+            >
+              <Shield size={16} />
+            </Link>
+
+            <button
+              onClick={() => logout()}
+              title="تسجيل الخروج"
+              className="m3-btn"
+              style={{
+                width: '36px',
+                height: '36px',
+                padding: 0,
+                borderRadius: 'var(--md-shape-full)',
+                border: '1px solid var(--md-sys-color-outline-variant)',
+                backgroundColor: 'var(--md-sys-color-surface-container-high)',
+                color: '#ef4444',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}
+            >
+              <LogOut size={16} />
+            </button>
+          </div>
+        ) : (
+          <Link
+            href="/login"
+            className="m3-btn"
+            title="تسجيل الدخول"
+            style={{
+              width: '36px',
+              height: '36px',
+              padding: 0,
+              borderRadius: 'var(--md-shape-full)',
+              backgroundColor: 'var(--md-sys-color-primary)',
+              color: 'var(--md-sys-color-on-primary)',
+              textDecoration: 'none',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0
+            }}
+          >
+            <LogIn size={16} />
+          </Link>
+        )}
 
         {/* Theme Toggle */}
         <button
@@ -351,8 +416,8 @@ export default function TopAppBar() {
           className="m3-btn"
           title={effectiveTheme === 'light' ? 'الوضع الليلي' : 'الوضع النهاري'}
           style={{
-            width: '34px',
-            height: '34px',
+            width: '36px',
+            height: '36px',
             padding: 0,
             borderRadius: 'var(--md-shape-full)',
             border: '1px solid var(--md-sys-color-outline-variant)',

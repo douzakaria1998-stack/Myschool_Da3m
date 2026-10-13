@@ -13,12 +13,15 @@ import {
   IdCard,
   Printer,
   Settings,
-  Sparkles
+  Sparkles,
+  ShieldCheck
 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 export default function NavRail() {
   const pathname = usePathname();
   const { lang, data, selectedGroup } = useApp();
+  const { isSuperAdmin } = useAuth();
 
   const navItems = [
     {
@@ -76,7 +79,18 @@ export default function NavRail() {
       icon: Settings,
       labelAr: 'الإعدادات',
       labelEn: 'Settings'
-    }
+    },
+    ...(isSuperAdmin
+      ? [
+          {
+            basePath: '/admin/users',
+            href: '/admin/users',
+            icon: ShieldCheck,
+            labelAr: 'المسؤولين',
+            labelEn: 'Admins'
+          }
+        ]
+      : [])
   ];
 
   const isRtl = lang === 'ar';

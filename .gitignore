@@ -38,3 +38,5 @@ yarn-error.log*
 # local saved receipts
 /saved_receipts/
 
+# temporary auth sessions
+src/data/sessionsStore.json

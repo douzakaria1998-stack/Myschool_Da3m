@@ -1,0 +1,33 @@
+{
+  "users": [
+    {
+      "id": "usr_superadmin_1791907347007",
+      "username": "superadmin",
+      "passwordHash": "98364d0c467a6eda87cb3dbf73cdc0c56dc7abadc1c11537b364ed7d531471d951fa406388550430567af66c6c518f4b4db6f719b9c2042d64b4f82e5d4ebcef",
+      "salt": "8ddfd7c27cabc23e0b978ee36c7aa6ed",
+      "name": "المسؤول الرئيسي (Super Admin)",
+      "role": "super_admin",
+      "permissions": [
+        "all"
+      ],
+      "createdAt": "2026-10-13T16:02:27.007Z"
+    },
+    {
+      "id": "usr_admin_1791907347007",
+      "username": "admin1",
+      "passwordHash": "12351aaaaf6ee1c0cb5da2b51ece77bce8658e77622a39b45b36ceb87e367fd07b6bbd8a30ef88296babf5151c62c7948e49bf6c9493022d91d36c88975ebd4c",
+      "salt": "5133488447db7b6e40b336874828b9e3",
+      "name": "مسؤول النظام (Admin)",
+      "role": "admin",
+      "permissions": [
+        "manage_groups",
+        "manage_students",
+        "manage_attendance",
+        "manage_teachers",
+        "manage_finances"
+      ],
+      "createdAt": "2026-10-13T16:02:27.007Z"
+    }
+  ],
+  "migratedAt": "2026-10-13T16:21:47.829Z"
+}

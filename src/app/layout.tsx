@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { AppProvider } from '../context/AppContext';
+import { AuthProvider } from '../context/AuthContext';
 import LayoutWrapper from '../components/LayoutWrapper';
 
 export const metadata: Metadata = {
@@ -20,9 +21,11 @@ export default function RootLayout({
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </head>
       <body suppressHydrationWarning>
-        <AppProvider>
-          <LayoutWrapper>{children}</LayoutWrapper>
-        </AppProvider>
+        <AuthProvider>
+          <AppProvider>
+            <LayoutWrapper>{children}</LayoutWrapper>
+          </AppProvider>
+        </AuthProvider>
       </body>
     </html>
   );
