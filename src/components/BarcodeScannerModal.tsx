@@ -61,6 +61,7 @@ import Link from 'next/link';
 import { getBarcodeCandidates, normalizeArabicName, normalizeScannedBarcode } from '../utils/barcodeUtils';
 import { recordScanToLog, getScanLog } from '../utils/scanLogger';
 import AddGroupModal from './AddGroupModal';
+import AddStudentModal from './AddStudentModal';
 import CompactGroupSearchSelect from './CompactGroupSearchSelect';
 
 export interface PendingCoverRequest {
@@ -226,6 +227,28 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     }>
   >([]);
   const [debtorCustomAmounts, setDebtorCustomAmounts] = useState<Record<string, string>>({});
+
+  // Quick Action Modals from Active Group Cards (+ تلميذ, تحضير يدوي, تعويض)
+  const [quickAddStudentGroupId, setQuickAddStudentGroupId] = useState<string | null>(null);
+  const [quickManualAttendanceTarget, setQuickManualAttendanceTarget] = useState<{
+    groupId: string;
+    sessionIndex: number;
+  } | null>(null);
+  const [quickCoveringTarget, setQuickCoveringTarget] = useState<{
+    groupId: string;
+    sessionIndex: number;
+  } | null>(null);
+
+  // States for Quick Manual Attendance Modal
+  const [manualAttendanceSearch, setManualAttendanceSearch] = useState('');
+  const [manualAttendanceFilter, setManualAttendanceFilter] = useState<'all' | 'unmarked' | 'present' | 'debt'>('all');
+  const [manualSearchCenterWide, setManualSearchCenterWide] = useState(false);
+  const [manualAttendanceToast, setManualAttendanceToast] = useState<{ name: string; isDebt: boolean } | null>(null);
+
+  // States for Quick Covering Modal
+  const [quickCoveringSearchQuery, setQuickCoveringSearchQuery] = useState('');
+  const [quickCoveringPayAmount, setQuickCoveringPayAmount] = useState('');
+  const [quickCoveringToast, setQuickCoveringToast] = useState<string | null>(null);
 
   // Primary active group helper
   const primaryActive = activeGroups[0] || null;
@@ -2092,9 +2115,119 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                       justifyContent: 'space-between',
                       borderTop: '1px dashed var(--md-sys-color-outline-variant)',
                       paddingTop: '5px',
-                      gap: '4px'
+                      gap: '4px',
+                      flexWrap: 'wrap'
                     }}
                   >
+                    {/* Action buttons (End Session, + Student, Manual Attendance, Covering) */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '3px', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEndSessionTarget({ groupId: ag.groupId, sessionIndex: ag.sessionIndex });
+                          setShowEndSessionConfirm(true);
+                        }}
+                        className="m3-btn m3-btn-sm"
+                        style={{
+                          backgroundColor: '#fee2e2',
+                          color: '#b91c1c',
+                          border: '1px solid #fca5a5',
+                          fontWeight: 800,
+                          fontSize: '0.68rem',
+                          padding: '2px 6px',
+                          borderRadius: '5px',
+                          height: '24px'
+                        }}
+                        title="إنهاء الحصة وتثبيت الغياب لمن لم يحضر"
+                      >
+                        إنهاء الحصة (A)
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setQuickAddStudentGroupId(ag.groupId)}
+                        className="m3-btn m3-btn-sm"
+                        style={{
+                          backgroundColor: '#e0f2fe',
+                          color: '#0369a1',
+                          border: '1px solid #bae6fd',
+                          fontWeight: 800,
+                          fontSize: '0.68rem',
+                          padding: '2px 6px',
+                          borderRadius: '5px',
+                          height: '24px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '3px',
+                          cursor: 'pointer'
+                        }}
+                        title={`إضافة تلميذ جديد لفوج ${ag.groupId} مباشرة`}
+                      >
+                        <UserPlus size={11} />
+                        <span>+ تلميذ</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setManualAttendanceSearch('');
+                          setManualAttendanceFilter('all');
+                          setManualSearchCenterWide(false);
+                          setManualAttendanceToast(null);
+                          setQuickManualAttendanceTarget({ groupId: ag.groupId, sessionIndex: ag.sessionIndex });
+                        }}
+                        className="m3-btn m3-btn-sm"
+                        style={{
+                          backgroundColor: '#ecfdf5',
+                          color: '#047857',
+                          border: '1px solid #a7f3d0',
+                          fontWeight: 800,
+                          fontSize: '0.68rem',
+                          padding: '2px 6px',
+                          borderRadius: '5px',
+                          height: '24px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '3px',
+                          cursor: 'pointer'
+                        }}
+                        title={`تسجيل حضور يدوي لتلميذ بدون بطاقة بالاسم في فوج ${ag.groupId}`}
+                      >
+                        <UserCheck size={11} />
+                        <span>تحضير يدوي</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setQuickCoveringSearchQuery('');
+                          setQuickCoveringPayAmount('');
+                          setQuickCoveringToast(null);
+                          setQuickCoveringTarget({ groupId: ag.groupId, sessionIndex: ag.sessionIndex });
+                        }}
+                        className="m3-btn m3-btn-sm"
+                        style={{
+                          backgroundColor: '#fef3c7',
+                          color: '#b45309',
+                          border: '1px solid #fde68a',
+                          fontWeight: 800,
+                          fontSize: '0.68rem',
+                          padding: '2px 6px',
+                          borderRadius: '5px',
+                          height: '24px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '3px',
+                          cursor: 'pointer'
+                        }}
+                        title={`تسجيل حصة تعويض لتلميذ من فوج آخر في فوج ${ag.groupId}`}
+                      >
+                        <ArrowLeftRight size={11} />
+                        <span>تعويض</span>
+                      </button>
+                    </div>
+
+                    {/* Attendance count indicators */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <span
                         style={{
@@ -2127,27 +2260,6 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                         </span>
                       )}
                     </div>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEndSessionTarget({ groupId: ag.groupId, sessionIndex: ag.sessionIndex });
-                        setShowEndSessionConfirm(true);
-                      }}
-                      className="m3-btn m3-btn-sm"
-                      style={{
-                        backgroundColor: '#fee2e2',
-                        color: '#b91c1c',
-                        border: '1px solid #fca5a5',
-                        fontWeight: 800,
-                        fontSize: '0.68rem',
-                        padding: '2px 6px',
-                        borderRadius: '5px',
-                        height: '24px'
-                      }}
-                    >
-                      إنهاء الحصة (A)
-                    </button>
                   </div>
                 </div>
               );
@@ -4934,8 +5046,847 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
           }}
         />
       )}
+
+      {/* ========================================================================= */}
+      {/* QUICK MODAL 1: ADD STUDENT TO SPECIFIC GROUP                              */}
+      {/* ========================================================================= */}
+      {quickAddStudentGroupId && (
+        <AddStudentModal
+          groupId={quickAddStudentGroupId}
+          onClose={() => setQuickAddStudentGroupId(null)}
+        />
+      )}
+
+      {/* ========================================================================= */}
+      {/* QUICK MODAL 2: MANUAL ATTENDANCE (WITHOUT CARD)                           */}
+      {/* ========================================================================= */}
+      {quickManualAttendanceTarget && (() => {
+        const targetGid = quickManualAttendanceTarget.groupId;
+        const targetSessionIdx = quickManualAttendanceTarget.sessionIndex;
+        const targetGroupSheet = data.groupData[targetGid];
+        const targetMeta = data.groups.find((g) => g.id === targetGid);
+        const groupStudents = (targetGroupSheet?.students || []).filter(
+          (s) => !isSummaryRow(s, targetGid) && s.name && s.name.trim()
+        );
+
+        // Gather candidates
+        let candidates: Array<{ student: StudentRecord; homeGid: string; isCurrentGroup: boolean }> = [];
+        if (manualSearchCenterWide) {
+          Object.keys(data.groupData).forEach((gid) => {
+            const gSheet = data.groupData[gid];
+            if (gSheet && gSheet.students) {
+              gSheet.students.forEach((s) => {
+                if (!isSummaryRow(s, gid) && s.name && s.name.trim()) {
+                  candidates.push({
+                    student: s,
+                    homeGid: gid,
+                    isCurrentGroup: gid === targetGid
+                  });
+                }
+              });
+            }
+          });
+        } else {
+          candidates = groupStudents.map((s) => ({
+            student: s,
+            homeGid: targetGid,
+            isCurrentGroup: true
+          }));
+        }
+
+        // Search filter
+        const query = manualAttendanceSearch.trim();
+        const normQuery = normalizeArabicName(query);
+        let list = candidates;
+        if (query) {
+          list = list.filter(({ student }) => {
+            const normName = normalizeArabicName(student.name);
+            const phoneMatch = student.phone && student.phone.includes(query);
+            const barcodeMatch = student.barcode && student.barcode.toLowerCase().includes(query.toLowerCase());
+            return normName.includes(normQuery) || phoneMatch || barcodeMatch;
+          });
+        }
+
+        // Tab filter for current group
+        if (!manualSearchCenterWide) {
+          if (manualAttendanceFilter === 'unmarked') {
+            list = list.filter(({ student }) => {
+              const att = student.attendance?.[targetSessionIdx];
+              return att !== 'P' && att !== 'ح' && att !== 'C' && att !== 'M' && att !== 'م';
+            });
+          } else if (manualAttendanceFilter === 'present') {
+            list = list.filter(({ student }) => {
+              const att = student.attendance?.[targetSessionIdx];
+              return att === 'P' || att === 'ح';
+            });
+          } else if (manualAttendanceFilter === 'debt') {
+            list = list.filter(({ student }) => student.debt > 0);
+          }
+        }
+
+        const presentCount = groupStudents.filter((s) => s.attendance?.[targetSessionIdx] === 'P' || s.attendance?.[targetSessionIdx] === 'ح').length;
+        const debtCount = groupStudents.filter((s) => s.debt > 0).length;
+        const unmarkedCount = groupStudents.length - presentCount;
+
+        return (
+          <div
+            className="m3-dialog-backdrop"
+            style={{ zIndex: 125, backgroundColor: 'rgba(0,0,0,0.65)' }}
+            onClick={() => setQuickManualAttendanceTarget(null)}
+          >
+            <div
+              className="m3-dialog"
+              style={{
+                maxWidth: '640px',
+                width: '95%',
+                maxHeight: '90vh',
+                display: 'flex',
+                flexDirection: 'column',
+                padding: 0,
+                overflow: 'hidden'
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div
+                style={{
+                  padding: '14px 20px',
+                  backgroundColor: 'var(--md-sys-color-surface-container)',
+                  borderBottom: '1px solid var(--md-sys-color-outline-variant)',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div
+                    style={{
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '50%',
+                      backgroundColor: '#ecfdf5',
+                      color: '#059669',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                  >
+                    <UserCheck size={20} />
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800 }}>
+                      تسجيل حضور تلميذ بدون بطاقة (يدوياً)
+                    </h3>
+                    <p style={{ margin: '2px 0 0', fontSize: '0.78rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
+                      فوج <strong style={{ color: 'var(--md-sys-color-primary)' }}>{targetGid}</strong> • الحصة <strong>{targetSessionIdx + 1}</strong> • {targetGroupSheet?.subject || targetMeta?.subject || ''}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setQuickManualAttendanceTarget(null)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--md-sys-color-on-surface-variant)', padding: '6px' }}
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              {/* Toast message if action taken */}
+              {manualAttendanceToast && (
+                <div
+                  style={{
+                    padding: '8px 16px',
+                    backgroundColor: manualAttendanceToast.isDebt ? '#fef3c7' : '#ecfdf5',
+                    color: manualAttendanceToast.isDebt ? '#92400e' : '#065f46',
+                    borderBottom: `1px solid ${manualAttendanceToast.isDebt ? '#fde68a' : '#a7f3d0'}`,
+                    fontSize: '0.82rem',
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px'
+                  }}
+                >
+                  {manualAttendanceToast.isDebt ? <AlertTriangle size={16} /> : <CheckCircle2 size={16} />}
+                  <span>
+                    {manualAttendanceToast.isDebt
+                      ? `تم تسجيل حضور "${manualAttendanceToast.name}" بنجاح، وتوجيهه لقائمة الانتظار على اليسار لتسوية الدين المستحق!`
+                      : `تم تسجيل حضور "${manualAttendanceToast.name}" بنجاح (مسدد بالكامل ✓)`}
+                  </span>
+                </div>
+              )}
+
+              {/* Search & Filter Toolbar */}
+              <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--md-sys-color-outline-variant)', backgroundColor: 'var(--md-sys-color-surface-container-lowest)' }}>
+                <div style={{ position: 'relative', marginBottom: '10px' }}>
+                  <input
+                    type="text"
+                    value={manualAttendanceSearch}
+                    onChange={(e) => setManualAttendanceSearch(e.target.value)}
+                    placeholder="ابحث بالاسم، اللقب، رقم الهاتف، أو الباركود..."
+                    className="m3-input"
+                    style={{ width: '100%', height: '36px', paddingRight: '32px', fontSize: '0.85rem' }}
+                    autoFocus
+                  />
+                  <Search
+                    size={16}
+                    style={{ position: 'absolute', right: '10px', top: '10px', color: 'var(--md-sys-color-outline)' }}
+                  />
+                  {manualAttendanceSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setManualAttendanceSearch('')}
+                      style={{ position: 'absolute', left: '10px', top: '8px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--md-sys-color-outline)' }}
+                    >
+                      <X size={16} />
+                    </button>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+                  {!manualSearchCenterWide ? (
+                    <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={() => setManualAttendanceFilter('all')}
+                        className="m3-chip"
+                        style={{
+                          fontSize: '0.74rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          backgroundColor: manualAttendanceFilter === 'all' ? 'var(--md-sys-color-primary-container)' : 'transparent',
+                          color: manualAttendanceFilter === 'all' ? 'var(--md-sys-color-on-primary-container)' : 'var(--md-sys-color-on-surface)'
+                        }}
+                      >
+                        الكل ({groupStudents.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setManualAttendanceFilter('unmarked')}
+                        className="m3-chip"
+                        style={{
+                          fontSize: '0.74rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          backgroundColor: manualAttendanceFilter === 'unmarked' ? '#e0f2fe' : 'transparent',
+                          color: manualAttendanceFilter === 'unmarked' ? '#0369a1' : 'var(--md-sys-color-on-surface)'
+                        }}
+                      >
+                        لم يسجلوا بعد ({unmarkedCount})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setManualAttendanceFilter('present')}
+                        className="m3-chip"
+                        style={{
+                          fontSize: '0.74rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          backgroundColor: manualAttendanceFilter === 'present' ? '#f0fdf4' : 'transparent',
+                          color: manualAttendanceFilter === 'present' ? '#166534' : 'var(--md-sys-color-on-surface)'
+                        }}
+                      >
+                        حاضرون ({presentCount})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setManualAttendanceFilter('debt')}
+                        className="m3-chip"
+                        style={{
+                          fontSize: '0.74rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          backgroundColor: manualAttendanceFilter === 'debt' ? '#fee2e2' : 'transparent',
+                          color: manualAttendanceFilter === 'debt' ? '#991b1b' : 'var(--md-sys-color-on-surface)'
+                        }}
+                      >
+                        عليهم دين ({debtCount})
+                      </button>
+                    </div>
+                  ) : (
+                    <span style={{ fontSize: '0.76rem', color: 'var(--md-sys-color-primary)', fontWeight: 800 }}>
+                      عرض نتائج البحث في جميع أفواج المركز
+                    </span>
+                  )}
+
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={manualSearchCenterWide}
+                      onChange={(e) => setManualSearchCenterWide(e.target.checked)}
+                      style={{ cursor: 'pointer' }}
+                    />
+                    <span>البحث في كل المركز 🌐</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Student List */}
+              <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {list.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--md-sys-color-outline)' }}>
+                    <UserX size={36} style={{ margin: '0 auto 8px', opacity: 0.5 }} />
+                    <p style={{ margin: 0, fontWeight: 700 }}>لم يتم العثور على أي تلميذ مطابق</p>
+                    <p style={{ margin: '4px 0 12px', fontSize: '0.78rem' }}>
+                      {!manualSearchCenterWide ? 'جرب تفعيل "البحث في كل المركز 🌐" أو إضافة التلميذ للفوج' : 'تأكد من كتابة الاسم بالشكل الصحيح'}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuickManualAttendanceTarget(null);
+                        setQuickAddStudentGroupId(targetGid);
+                      }}
+                      className="m3-btn m3-btn-tonal m3-btn-sm"
+                      style={{ fontWeight: 800 }}
+                    >
+                      <UserPlus size={14} style={{ marginLeft: '4px' }} />
+                      <span>+ إضافة تلميذ جديد لفوج {targetGid}</span>
+                    </button>
+                  </div>
+                ) : (
+                  list.map(({ student, homeGid, isCurrentGroup }) => {
+                    const isPresent = isCurrentGroup && (student.attendance?.[targetSessionIdx] === 'P' || student.attendance?.[targetSessionIdx] === 'ح');
+                    const isAbsent = isCurrentGroup && (student.attendance?.[targetSessionIdx] === 'A' || student.attendance?.[targetSessionIdx] === 'غ');
+                    const isCovering = isCurrentGroup && (student.attendance?.[targetSessionIdx] === 'C' || student.attendance?.[targetSessionIdx] === 'M' || student.attendance?.[targetSessionIdx] === 'م');
+                    const hasDebt = student.debt > 0;
+                    const isFree = student.discount === '0';
+
+                    return (
+                      <div
+                        key={`${homeGid}-${student.rowId}`}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '10px 14px',
+                          borderRadius: 'var(--md-shape-sm)',
+                          backgroundColor: isPresent ? '#f0fdf4' : 'var(--md-sys-color-surface-container-lowest)',
+                          border: isPresent ? '1.5px solid #86efac' : '1px solid var(--md-sys-color-outline-variant)',
+                          gap: '12px'
+                        }}
+                      >
+                        {/* Student Details */}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 800, fontSize: '0.92rem', color: 'var(--md-sys-color-on-surface)' }}>
+                              {student.name}
+                            </span>
+                            {!isCurrentGroup && (
+                              <span
+                                className="m3-chip"
+                                style={{ fontSize: '0.7rem', padding: '1px 6px', backgroundColor: '#e0e7ff', color: '#3730a3', fontWeight: 800 }}
+                              >
+                                فوج {homeGid}
+                              </span>
+                            )}
+                            {isPresent && (
+                              <span
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '3px',
+                                  fontSize: '0.72rem',
+                                  fontWeight: 800,
+                                  color: '#166534',
+                                  backgroundColor: '#dcfce7',
+                                  padding: '1px 6px',
+                                  borderRadius: '4px'
+                                }}
+                              >
+                                <Check size={12} />
+                                حاضر (الحصة {targetSessionIdx + 1})
+                              </span>
+                            )}
+                            {isAbsent && (
+                              <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#b91c1c', backgroundColor: '#fee2e2', padding: '1px 6px', borderRadius: '4px' }}>
+                                مسجل غائب
+                              </span>
+                            )}
+                            {isCovering && (
+                              <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#b45309', backgroundColor: '#fef3c7', padding: '1px 6px', borderRadius: '4px' }}>
+                                حصة تعويض
+                              </span>
+                            )}
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '3px', fontSize: '0.74rem', color: 'var(--md-sys-color-on-surface-variant)', flexWrap: 'wrap' }}>
+                            {student.phone && <span>📞 {student.phone}</span>}
+                            {student.barcode && <span>💳 {student.barcode}</span>}
+                            {isFree ? (
+                              <span style={{ color: '#2563eb', fontWeight: 700 }}>معفى 100%</span>
+                            ) : hasDebt ? (
+                              <span style={{ color: '#dc2626', fontWeight: 800 }}>⚠️ دين: {student.debt.toLocaleString()} دج</span>
+                            ) : (
+                              <span style={{ color: '#16a34a', fontWeight: 700 }}>✓ مسدد</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Action buttons */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          {isCurrentGroup ? (
+                            isPresent ? (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span style={{ fontSize: '0.78rem', color: '#166534', fontWeight: 800 }}>
+                                  ✓ مسجل حاضر
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    updateAttendance(targetGid, student.rowId, targetSessionIdx, '');
+                                    playWarningAlert();
+                                    setManualAttendanceToast(null);
+                                  }}
+                                  className="m3-btn m3-btn-text m3-btn-sm"
+                                  style={{ color: 'var(--md-sys-color-error)', fontSize: '0.7rem', padding: '2px 6px' }}
+                                  title="إلغاء الحضور"
+                                >
+                                  إلغاء
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  proceedToPaymentCheck(student, targetGid, targetSessionIdx, false);
+                                  const effectiveDebt = student.debt > 0 || (student.totalReceived || 0) === 0;
+                                  setManualAttendanceToast({
+                                    name: student.name,
+                                    isDebt: effectiveDebt && student.discount !== '0'
+                                  });
+                                }}
+                                className="m3-btn m3-btn-primary m3-btn-sm"
+                                style={{ fontWeight: 800, fontSize: '0.78rem', padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                              >
+                                <Check size={14} />
+                                <span>تسجيل حاضر</span>
+                              </button>
+                            )
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                recordCoverAttendance(targetGid, homeGid, student.rowId, targetSessionIdx, 0, undefined, {
+                                  name: student.name,
+                                  barcode: student.barcode
+                                });
+                                recordScanToLog({
+                                  groupId: targetGid,
+                                  sessionIndex: targetSessionIdx,
+                                  studentRowId: student.rowId,
+                                  studentName: student.name,
+                                  barcode: student.barcode || '',
+                                  dateStr: new Date().toISOString().split('T')[0],
+                                  timeStr: new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' }),
+                                  status: 'M',
+                                  isCover: true
+                                });
+                                playSuccessChime();
+                                setRecentScans((prev) => [
+                                  {
+                                    id: `${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+                                    studentName: student.name,
+                                    groupId: targetGid,
+                                    sessionIndex: targetSessionIdx,
+                                    status: 'C',
+                                    time: new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' })
+                                  },
+                                  ...prev.slice(0, 9)
+                                ]);
+                                setManualAttendanceToast({
+                                  name: student.name,
+                                  isDebt: false
+                                });
+                              }}
+                              className="m3-btn m3-btn-tonal m3-btn-sm"
+                              style={{ fontWeight: 800, fontSize: '0.74rem', padding: '4px 10px' }}
+                            >
+                              <ArrowLeftRight size={13} style={{ marginLeft: '4px' }} />
+                              <span>تعويض في {targetGid}</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Footer */}
+              <div
+                style={{
+                  padding: '12px 16px',
+                  borderTop: '1px solid var(--md-sys-color-outline-variant)',
+                  backgroundColor: 'var(--md-sys-color-surface-container)',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center'
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuickManualAttendanceTarget(null);
+                    setQuickAddStudentGroupId(targetGid);
+                  }}
+                  className="m3-btn m3-btn-text"
+                  style={{ fontSize: '0.78rem', color: 'var(--md-sys-color-primary)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                >
+                  <UserPlus size={14} />
+                  <span>+ إضافة تلميذ جديد لهذا الفوج</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setQuickManualAttendanceTarget(null)}
+                  className="m3-btn m3-btn-tonal"
+                  style={{ fontWeight: 700 }}
+                >
+                  إغلاق
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ========================================================================= */}
+      {/* QUICK MODAL 3: QUICK COVERING (حصة تعويض)                                 */}
+      {/* ========================================================================= */}
+      {quickCoveringTarget && (() => {
+        const targetGid = quickCoveringTarget.groupId;
+        const targetSessionIdx = quickCoveringTarget.sessionIndex;
+        const targetGroupSheet = data.groupData[targetGid];
+        const targetSubject = targetGroupSheet?.subject || '';
+
+        // Gather all students from other groups of the same subject (or all other groups)
+        const candidates: Array<{
+          student: StudentRecord;
+          homeGid: string;
+          homeSubject: string;
+          teacherName: string;
+          missedSessions: number[];
+        }> = [];
+
+        Object.keys(data.groupData).forEach((gid) => {
+          if (gid === targetGid) return;
+          const gSheet = data.groupData[gid];
+          if (!gSheet || !gSheet.students) return;
+          const gMeta = data.groups.find((g) => g.id === gid);
+          const teacher = gMeta?.teacherName || gSheet.teacherName || '';
+          const subj = gMeta?.subject || gSheet.subject || '';
+
+          gSheet.students.forEach((s) => {
+            if (isSummaryRow(s, gid) || !s.name || !s.name.trim()) return;
+            const missed: number[] = [];
+            if (Array.isArray(s.attendance)) {
+              s.attendance.forEach((att, sIdx) => {
+                if (att === 'A' || att === 'غ') {
+                  missed.push(sIdx + 1);
+                }
+              });
+            }
+            candidates.push({
+              student: s,
+              homeGid: gid,
+              homeSubject: subj,
+              teacherName: teacher,
+              missedSessions: missed
+            });
+          });
+        });
+
+        // Search query filter
+        const query = quickCoveringSearchQuery.trim();
+        const normQuery = normalizeArabicName(query);
+        let list = candidates;
+        if (query) {
+          list = list.filter((c) => {
+            const normName = normalizeArabicName(c.student.name);
+            const phoneMatch = c.student.phone && c.student.phone.includes(query);
+            const gidMatch = c.homeGid.toLowerCase().includes(query.toLowerCase());
+            return normName.includes(normQuery) || phoneMatch || gidMatch;
+          });
+        } else {
+          // If no query, prioritize students from same subject who missed sessions
+          list = list
+            .filter((c) => normalizeSubjectName(c.homeSubject) === normalizeSubjectName(targetSubject))
+            .sort((a, b) => b.missedSessions.length - a.missedSessions.length)
+            .slice(0, 30);
+        }
+
+        return (
+          <div
+            className="m3-dialog-backdrop"
+            style={{ zIndex: 125, backgroundColor: 'rgba(0,0,0,0.65)' }}
+            onClick={() => setQuickCoveringTarget(null)}
+          >
+            <div
+              className="m3-dialog"
+              style={{
+                maxWidth: '640px',
+                width: '95%',
+                maxHeight: '90vh',
+                display: 'flex',
+                flexDirection: 'column',
+                padding: 0,
+                overflow: 'hidden'
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div
+                style={{
+                  padding: '14px 20px',
+                  backgroundColor: 'var(--md-sys-color-surface-container)',
+                  borderBottom: '1px solid var(--md-sys-color-outline-variant)',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div
+                    style={{
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '50%',
+                      backgroundColor: '#fef3c7',
+                      color: '#b45309',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                  >
+                    <ArrowLeftRight size={20} />
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800 }}>
+                      تسجيل حصة تعويض (Covering Session)
+                    </h3>
+                    <p style={{ margin: '2px 0 0', fontSize: '0.78rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
+                      الفوج المستهدف: <strong style={{ color: 'var(--md-sys-color-primary)' }}>{targetGid}</strong> • الحصة <strong>{targetSessionIdx + 1}</strong> • مادة <strong>{targetSubject}</strong>
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setQuickCoveringTarget(null)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--md-sys-color-on-surface-variant)', padding: '6px' }}
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              {/* Toast message if action taken */}
+              {quickCoveringToast && (
+                <div
+                  style={{
+                    padding: '8px 16px',
+                    backgroundColor: '#ecfdf5',
+                    color: '#065f46',
+                    borderBottom: '1px solid #a7f3d0',
+                    fontSize: '0.82rem',
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px'
+                  }}
+                >
+                  <CheckCircle2 size={16} />
+                  <span>{quickCoveringToast}</span>
+                </div>
+              )}
+
+              {/* Search input & amount input */}
+              <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--md-sys-color-outline-variant)', backgroundColor: 'var(--md-sys-color-surface-container-lowest)' }}>
+                <div style={{ position: 'relative', marginBottom: '8px' }}>
+                  <input
+                    type="text"
+                    value={quickCoveringSearchQuery}
+                    onChange={(e) => setQuickCoveringSearchQuery(e.target.value)}
+                    placeholder="ابحث باسم التلميذ من أي فوج آخر لتسجيله كتعويض..."
+                    className="m3-input"
+                    style={{ width: '100%', height: '36px', paddingRight: '32px', fontSize: '0.85rem' }}
+                    autoFocus
+                  />
+                  <Search
+                    size={16}
+                    style={{ position: 'absolute', right: '10px', top: '10px', color: 'var(--md-sys-color-outline)' }}
+                  />
+                  {quickCoveringSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setQuickCoveringSearchQuery('')}
+                      style={{ position: 'absolute', left: '10px', top: '8px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--md-sys-color-outline)' }}
+                    >
+                      <X size={16} />
+                    </button>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '0.74rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
+                    💡 يتم ترشيح التلاميذ الغائبين في أفواج مادة <strong>"{targetSubject}"</strong> تلقائياً
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontSize: '0.74rem', fontWeight: 700 }}>مبلغ الدفع للتعويض (اختياري):</span>
+                    <input
+                      type="number"
+                      value={quickCoveringPayAmount}
+                      onChange={(e) => setQuickCoveringPayAmount(e.target.value)}
+                      placeholder="0 دج"
+                      className="m3-input"
+                      style={{ width: '80px', height: '28px', fontSize: '0.76rem', padding: '2px 6px', textAlign: 'center' }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Candidate Students List */}
+              <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {list.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--md-sys-color-outline)' }}>
+                    <Search size={36} style={{ margin: '0 auto 8px', opacity: 0.5 }} />
+                    <p style={{ margin: 0, fontWeight: 700 }}>لا توجد اقتراحات مطابقة</p>
+                    <p style={{ margin: '4px 0 0', fontSize: '0.78rem' }}>اكتب اسم التلميذ في خانة البحث أعلاه</p>
+                  </div>
+                ) : (
+                  list.map(({ student, homeGid, homeSubject, teacherName, missedSessions }) => {
+                    const payNum = parseFloat(quickCoveringPayAmount) || 0;
+                    return (
+                      <div
+                        key={`${homeGid}-${student.rowId}`}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '10px 14px',
+                          borderRadius: 'var(--md-shape-sm)',
+                          backgroundColor: 'var(--md-sys-color-surface-container-lowest)',
+                          border: '1px solid var(--md-sys-color-outline-variant)',
+                          gap: '12px'
+                        }}
+                      >
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 800, fontSize: '0.92rem', color: 'var(--md-sys-color-on-surface)' }}>
+                              {student.name}
+                            </span>
+                            <span
+                              className="m3-chip"
+                              style={{ fontSize: '0.7rem', padding: '1px 6px', backgroundColor: '#e0e7ff', color: '#3730a3', fontWeight: 800 }}
+                            >
+                              فوج {homeGid} ({homeSubject})
+                            </span>
+                            {missedSessions.length > 0 && (
+                              <span
+                                style={{
+                                  fontSize: '0.7rem',
+                                  padding: '1px 6px',
+                                  borderRadius: '4px',
+                                  backgroundColor: '#fee2e2',
+                                  color: '#b91c1c',
+                                  fontWeight: 800
+                                }}
+                              >
+                                غائب في الحصة: {missedSessions.join(', ')}
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '3px', fontSize: '0.74rem', color: 'var(--md-sys-color-on-surface-variant)', flexWrap: 'wrap' }}>
+                            <span>الأستاذ: {teacherName || 'غير محدد'}</span>
+                            {student.phone && <span>📞 {student.phone}</span>}
+                            {student.debt > 0 ? (
+                              <span style={{ color: '#dc2626', fontWeight: 700 }}>دين بفوزه: {student.debt.toLocaleString()} دج</span>
+                            ) : (
+                              <span style={{ color: '#16a34a', fontWeight: 700 }}>مسدد بفوزه ✓</span>
+                            )}
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            recordCoverAttendance(targetGid, homeGid, student.rowId, targetSessionIdx, payNum, undefined, {
+                              name: student.name,
+                              barcode: student.barcode
+                            });
+                            recordScanToLog({
+                              groupId: targetGid,
+                              sessionIndex: targetSessionIdx,
+                              studentRowId: student.rowId,
+                              studentName: student.name,
+                              barcode: student.barcode || '',
+                              dateStr: new Date().toISOString().split('T')[0],
+                              timeStr: new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' }),
+                              status: 'M',
+                              isCover: true
+                            });
+                            playSuccessChime();
+                            setRecentScans((prev) => [
+                              {
+                                id: `${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+                                studentName: student.name,
+                                groupId: targetGid,
+                                sessionIndex: targetSessionIdx,
+                                status: 'C',
+                                time: new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' })
+                              },
+                              ...prev.slice(0, 9)
+                            ]);
+                            setQuickCoveringToast(`تم تسجيل حصة تعويض للتلميذ "${student.name}" بنجاح في فوج ${targetGid} ✓`);
+                            setTimeout(() => setQuickCoveringToast(null), 4000);
+                          }}
+                          className="m3-btn m3-btn-sm"
+                          style={{
+                            backgroundColor: '#fef3c7',
+                            color: '#b45309',
+                            border: '1px solid #fde68a',
+                            fontWeight: 800,
+                            fontSize: '0.74rem',
+                            padding: '5px 12px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          <ArrowLeftRight size={13} />
+                          <span>تسجيل تعويض 🔄</span>
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Footer */}
+              <div
+                style={{
+                  padding: '12px 16px',
+                  borderTop: '1px solid var(--md-sys-color-outline-variant)',
+                  backgroundColor: 'var(--md-sys-color-surface-container)',
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  alignItems: 'center'
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setQuickCoveringTarget(null)}
+                  className="m3-btn m3-btn-tonal"
+                  style={{ fontWeight: 700 }}
+                >
+                  إغلاق
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
+
 
   if (isScreen) {
     return (
