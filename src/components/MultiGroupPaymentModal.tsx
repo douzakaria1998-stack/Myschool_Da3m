@@ -20,7 +20,7 @@ import {
   UserCheck
 } from 'lucide-react';
 import { normalizeArabicName, getBarcodeCandidates } from '../utils/barcodeUtils';
-import { isSummaryRow, isVipGroupId } from '../utils/sessionUtils';
+import { isSummaryRow, isVipGroupId, normalizeSubjectName } from '../utils/sessionUtils';
 import { playSuccessChime } from '../utils/soundUtils';
 import { sanitizePrintTitle } from '../utils/printTitleUtils';
 import { normalizeScannedBarcode } from '../utils/barcodeUtils';
@@ -30,6 +30,8 @@ interface Props {
   isOpen: boolean;
   onClose: () => void;
   initialStudent?: { name: string; barcode?: string; phone?: string };
+  initialSubjectFilter?: string;
+  onPaymentSuccess?: (studentName: string, settledGroupIds: string[]) => void;
 }
 
 interface EnrolledGroupItem {
@@ -60,7 +62,13 @@ function formatTiming(t?: string | number): string {
   return str;
 }
 
-export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent }: Props) {
+export default function MultiGroupPaymentModal({
+  isOpen,
+  onClose,
+  initialStudent,
+  initialSubjectFilter,
+  onPaymentSuccess
+}: Props) {
   const { data, recordMultiGroupPayment } = useApp();
 
   // Search state
@@ -70,6 +78,10 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
     barcode: string;
     phone: string;
   } | null>(null);
+
+  // Filter & Mode states
+  const [activeSubjectFilter, setActiveSubjectFilter] = useState<string>(initialSubjectFilter || '');
+  const [paymentMode, setPaymentMode] = useState<'full' | 'manual'>('full');
 
   // Group payments list
   const [groupItems, setGroupItems] = useState<EnrolledGroupItem[]>([]);
@@ -145,12 +157,14 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
   }, [searchQuery, allUniqueStudents]);
 
   // Select student and build their enrolled groups
-  const handleSelectStudent = (stu: { name: string; barcode: string; phone: string }) => {
+  const handleSelectStudent = (stu: { name: string; barcode: string; phone: string }, subjFilterOverride?: string) => {
     setSelectedStudent(stu);
     setSearchQuery('');
 
     const normName = normalizeArabicName(stu.name);
     const barcodeUpper = (stu.barcode || '').toUpperCase();
+    const effectiveFilter = subjFilterOverride !== undefined ? subjFilterOverride : (activeSubjectFilter || initialSubjectFilter || '');
+    const normFilter = normalizeSubjectName(effectiveFilter);
 
     const items: EnrolledGroupItem[] = [];
 
@@ -183,10 +197,14 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
         const expectedFee = finances.fee;
         const totalPaid = finances.totalReceived;
         const effectiveDebt = finances.debt;
+        const itemSubject = group.subject || groupMeta?.subject || '';
+
+        const matchesSubject = !effectiveFilter || normalizeSubjectName(itemSubject) === normFilter;
+        const shouldSelect = matchesSubject && effectiveDebt > 0;
 
         items.push({
           groupId: gid,
-          subject: group.subject || groupMeta?.subject || '',
+          subject: itemSubject,
           teacherName: group.teacherName || groupMeta?.teacherName || '',
           isVip: isVipGroup,
           day1: group.day1 || groupMeta?.day1,
@@ -194,13 +212,49 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
           totalFee: expectedFee,
           totalReceived: totalPaid,
           currentDebt: effectiveDebt,
-          payingNow: effectiveDebt > 0 ? effectiveDebt : '',
-          isSelected: effectiveDebt > 0
+          payingNow: shouldSelect ? effectiveDebt : '',
+          isSelected: shouldSelect
         });
       }
     });
 
     setGroupItems(items);
+  };
+
+  // Switch active subject filter (or clear to show all subjects)
+  const handleSwitchSubject = (newSubject: string) => {
+    setActiveSubjectFilter(newSubject);
+    const normTarget = normalizeSubjectName(newSubject);
+    setGroupItems((prev) =>
+      prev.map((item) => {
+        const matches = !newSubject || normalizeSubjectName(item.subject) === normTarget;
+        const shouldSelect = Boolean(matches && (item.currentDebt > 0 || item.isNewEnrollment));
+        return {
+          ...item,
+          isSelected: shouldSelect,
+          payingNow: shouldSelect ? (item.currentDebt > 0 ? item.currentDebt : '') : ''
+        };
+      })
+    );
+  };
+
+  // Choose payment mode: Option 1 (Full accumulated debt) vs Option 2 (Manual selection)
+  const handleChooseMode = (mode: 'full' | 'manual') => {
+    setPaymentMode(mode);
+    const normTarget = normalizeSubjectName(activeSubjectFilter);
+    if (mode === 'full') {
+      setGroupItems((prev) =>
+        prev.map((item) => {
+          const matches = !activeSubjectFilter || normalizeSubjectName(item.subject) === normTarget;
+          const shouldSelect = Boolean(matches && (item.currentDebt > 0 || item.isNewEnrollment));
+          return {
+            ...item,
+            isSelected: shouldSelect,
+            payingNow: shouldSelect ? (item.currentDebt > 0 ? item.currentDebt : '') : ''
+          };
+        })
+      );
+    }
   };
 
   // Hardware scanner auto-select
@@ -220,12 +274,19 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
   // Focus search input on open
   useEffect(() => {
     if (isOpen) {
+      const filterToSet = initialSubjectFilter || '';
+      setActiveSubjectFilter(filterToSet);
+      setPaymentMode('full');
+
       if (initialStudent) {
-        handleSelectStudent({
-          name: initialStudent.name,
-          barcode: initialStudent.barcode || '',
-          phone: initialStudent.phone || ''
-        });
+        handleSelectStudent(
+          {
+            name: initialStudent.name,
+            barcode: initialStudent.barcode || '',
+            phone: initialStudent.phone || ''
+          },
+          filterToSet
+        );
       } else {
         setTimeout(() => searchInputRef.current?.focus(), 100);
       }
@@ -235,8 +296,10 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
       setShowPaidGroups(false);
       setSearchQuery('');
       setSuccessMsg('');
+      setActiveSubjectFilter('');
+      setPaymentMode('full');
     }
-  }, [isOpen]);
+  }, [isOpen, initialStudent, initialSubjectFilter]);
 
   if (!isOpen) return null;
 
@@ -346,9 +409,44 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
   );
 
   // Summary calculations
-  const unpaidCount = groupItems.filter((i) => i.currentDebt > 0 || i.isNewEnrollment).length;
-  const paidCount = groupItems.filter((i) => i.currentDebt <= 0 && !i.isNewEnrollment).length;
-  const displayedGroups = groupItems.filter((i) => {
+  const isFilteringSubject = Boolean(activeSubjectFilter && activeSubjectFilter.trim());
+  const activeNormSubj = normalizeSubjectName(activeSubjectFilter);
+
+  // Scoped group items based on subject filter
+  const scopedGroupItems = useMemo(() => {
+    if (!isFilteringSubject) return groupItems;
+    return groupItems.filter((item) => normalizeSubjectName(item.subject) === activeNormSubj);
+  }, [groupItems, isFilteringSubject, activeNormSubj]);
+
+  // Unique subjects enrolled with group count and debt
+  const enrolledSubjects = useMemo(() => {
+    const map = new Map<string, { subject: string; count: number; debt: number }>();
+    groupItems.forEach((item) => {
+      const s = item.subject || 'بدون مادة';
+      const norm = normalizeSubjectName(s);
+      const existing = map.get(norm);
+      const debt = item.currentDebt > 0 ? item.currentDebt : 0;
+      if (existing) {
+        existing.count += 1;
+        existing.debt += debt;
+      } else {
+        map.set(norm, { subject: s, count: 1, debt });
+      }
+    });
+    return Array.from(map.values());
+  }, [groupItems]);
+
+  const allSubjectsTotalDebt = useMemo(() => {
+    return groupItems.reduce((sum, item) => sum + (item.currentDebt > 0 ? item.currentDebt : 0), 0);
+  }, [groupItems]);
+
+  const accumulatedDebtForScope = useMemo(() => {
+    return scopedGroupItems.reduce((sum, item) => sum + (item.currentDebt > 0 ? item.currentDebt : 0), 0);
+  }, [scopedGroupItems]);
+
+  const unpaidCount = scopedGroupItems.filter((i) => i.currentDebt > 0 || i.isNewEnrollment).length;
+  const paidCount = scopedGroupItems.filter((i) => i.currentDebt <= 0 && !i.isNewEnrollment).length;
+  const displayedGroups = scopedGroupItems.filter((i) => {
     if (showPaidGroups) return true;
     return i.currentDebt > 0 || i.isNewEnrollment;
   });
@@ -392,6 +490,13 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
     );
 
     playSuccessChime();
+
+    if (onPaymentSuccess && selectedStudent) {
+      onPaymentSuccess(
+        selectedStudent.name,
+        payingItems.map((item) => item.groupId)
+      );
+    }
 
     if (shouldPrint) {
       // Also include any selected items that had 0 payingNow (already paid) in the receipt
@@ -772,10 +877,14 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
             </div>
             <div>
               <h2 style={{ fontSize: '0.98rem', fontWeight: 900, color: '#0369a1', margin: 0 }}>
-                تسديد جديد (فوج أو عدة أفواج)
+                {isFilteringSubject
+                  ? `تسديد مستحقات مادة (${activeSubjectFilter})`
+                  : 'تسديد شامل لجميع المواد (All Subjects)'}
               </h2>
               <p style={{ fontSize: '0.72rem', color: '#0284c7', margin: '1px 0 0' }}>
-                تسديد مالي لتلميذ في عدة أفواج معاً واستخراج وصل موحد شامل
+                {isFilteringSubject
+                  ? `سداد الديون المتراكمة لمادة ${activeSubjectFilter} أو التبديل للسداد الشامل لجميع المواد`
+                  : 'تسديد مالي لتلميذ عبر جميع المواد والأفواج معاً واستخراج وصل موحد شامل'}
               </p>
             </div>
           </div>
@@ -1027,6 +1136,117 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
                   تغيير التلميذ
                 </button>
               </div>
+
+              {/* TWO DISTINCT OPTIONS PROMPT */}
+              <div style={{ marginBottom: '10px' }}>
+                <div style={{ fontSize: '0.76rem', fontWeight: 800, color: '#334155', marginBottom: '6px' }}>
+                  طريقة التسديد المطلوبة:
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  {/* Option 1: Pay entire accumulated balance in full */}
+                  <button
+                    type="button"
+                    onClick={() => handleChooseMode('full')}
+                    style={{
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      border: `2px solid ${paymentMode === 'full' ? '#15803d' : '#e2e8f0'}`,
+                      backgroundColor: paymentMode === 'full' ? '#f0fdf4' : '#ffffff',
+                      cursor: 'pointer',
+                      textAlign: 'right',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '3px',
+                      boxShadow: paymentMode === 'full' ? '0 2px 6px rgba(21, 128, 61, 0.15)' : 'none',
+                      transition: 'all 0.15s'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ fontWeight: 900, fontSize: '0.84rem', color: paymentMode === 'full' ? '#15803d' : '#1e293b' }}>
+                        ✓ الخيار 1: سداد كامل المبلغ المتراكم
+                      </span>
+                      {paymentMode === 'full' && <CheckCircle2 size={16} color="#15803d" />}
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
+                      سداد كامل الرصيد المتراكم ({accumulatedDebtForScope.toLocaleString()} دج) دفعة واحدة
+                    </div>
+                  </button>
+
+                  {/* Option 2: Manually select specific groups */}
+                  <button
+                    type="button"
+                    onClick={() => handleChooseMode('manual')}
+                    style={{
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      border: `2px solid ${paymentMode === 'manual' ? '#0284c7' : '#e2e8f0'}`,
+                      backgroundColor: paymentMode === 'manual' ? '#f0f9ff' : '#ffffff',
+                      cursor: 'pointer',
+                      textAlign: 'right',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '3px',
+                      boxShadow: paymentMode === 'manual' ? '0 2px 6px rgba(2, 132, 199, 0.15)' : 'none',
+                      transition: 'all 0.15s'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ fontWeight: 900, fontSize: '0.84rem', color: paymentMode === 'manual' ? '#0284c7' : '#1e293b' }}>
+                        ✎ الخيار 2: تحديد أفواج معينة للدفع يدوياً
+                      </span>
+                      {paymentMode === 'manual' && <CheckCircle2 size={16} color="#0284c7" />}
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
+                      تحديد أفواج معينة للدفع وتعديل المبالغ يدوياً لكل فوج
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Subject Scope Pills (Only this subject vs All subjects) */}
+              {(enrolledSubjects.length > 1 || isFilteringSubject) && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#475569' }}>عرض المواد:</span>
+                  <button
+                    type="button"
+                    onClick={() => handleSwitchSubject('')}
+                    style={{
+                      padding: '3px 10px',
+                      borderRadius: '20px',
+                      fontSize: '0.72rem',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      border: !isFilteringSubject ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+                      backgroundColor: !isFilteringSubject ? '#e0f2fe' : '#ffffff',
+                      color: !isFilteringSubject ? '#0369a1' : '#64748b'
+                    }}
+                  >
+                    🌐 جميع المواد (All Subjects) • {allSubjectsTotalDebt.toLocaleString()} دج
+                  </button>
+                  {enrolledSubjects.map((s) => {
+                    const isCurrent = isFilteringSubject && normalizeSubjectName(s.subject) === activeNormSubj;
+                    return (
+                      <button
+                        key={s.subject}
+                        type="button"
+                        onClick={() => handleSwitchSubject(s.subject)}
+                        style={{
+                          padding: '3px 10px',
+                          borderRadius: '20px',
+                          fontSize: '0.72rem',
+                          fontWeight: 800,
+                          cursor: 'pointer',
+                          border: isCurrent ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+                          backgroundColor: isCurrent ? '#e0f2fe' : '#ffffff',
+                          color: isCurrent ? '#0369a1' : '#64748b'
+                        }}
+                      >
+                        {s.subject} • {s.debt.toLocaleString()} دج ({s.count} أفواج)
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
 
               {/* STEP 2: Enrolled Groups & Payment Selection */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
@@ -1407,8 +1627,8 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
                 disabled={isSaving || payingItems.length === 0}
                 className="m3-btn m3-btn-primary"
                 style={{
-                  backgroundColor: '#0284c7',
-                  borderColor: '#0284c7',
+                  backgroundColor: paymentMode === 'full' ? '#15803d' : '#0284c7',
+                  borderColor: paymentMode === 'full' ? '#15803d' : '#0284c7',
                   fontWeight: 900,
                   fontSize: '0.78rem',
                   height: '30px',
@@ -1416,12 +1636,20 @@ export default function MultiGroupPaymentModal({ isOpen, onClose, initialStudent
                   display: 'flex',
                   alignItems: 'center',
                   gap: '6px',
-                  boxShadow: '0 2px 6px rgba(2, 132, 199, 0.25)'
+                  boxShadow: paymentMode === 'full' ? '0 2px 6px rgba(21, 128, 61, 0.25)' : '0 2px 6px rgba(2, 132, 199, 0.25)'
                 }}
-                title="تسجيل دفعة مالية جديدة وطباعة الوصل الموحد"
+                title={
+                  paymentMode === 'full'
+                    ? `سداد كامل المبلغ المتراكم (${totalPaidNow.toLocaleString()} دج) وطباعة الوصل`
+                    : `تسديد الأفواج المحددة (${totalPaidNow.toLocaleString()} دج) وطباعة الوصل`
+                }
               >
                 <Printer size={15} />
-                <span>تسجيل الدفع وطباعة الوصل 🖨️</span>
+                <span>
+                  {paymentMode === 'full'
+                    ? `سداد كامل المبلغ المتراكم (${totalPaidNow.toLocaleString()} دج) وطباعة الوصل 🖨️`
+                    : `تسديد الأفواج المحددة (${totalPaidNow.toLocaleString()} دج) وطباعة الوصل 🖨️`}
+                </span>
               </button>
             </div>
           )}

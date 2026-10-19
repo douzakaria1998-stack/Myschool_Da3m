@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { useApp } from '../context/AppContext';
+import { useApp, calcStudentFinancesPure } from '../context/AppContext';
 import { StudentRecord, GroupSheet, QueuedReceipt, DiscountType, AttendanceStatus, CoveringMatchResult } from '../types';
 import {
   Scan,
@@ -63,6 +63,7 @@ import { recordScanToLog, getScanLog } from '../utils/scanLogger';
 import AddGroupModal from './AddGroupModal';
 import AddStudentModal from './AddStudentModal';
 import CompactGroupSearchSelect from './CompactGroupSearchSelect';
+import MultiGroupPaymentModal from './MultiGroupPaymentModal';
 
 export interface PendingCoverRequest {
   id: string;
@@ -227,6 +228,113 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     }>
   >([]);
   const [debtorCustomAmounts, setDebtorCustomAmounts] = useState<Record<string, string>>({});
+  const [multiPaymentModalConfig, setMultiPaymentModalConfig] = useState<{
+    isOpen: boolean;
+    student?: { name: string; barcode?: string; phone?: string };
+    subjectFilter?: string;
+  } | null>(null);
+
+  // Accurately tracks accumulated debts for a student who is enrolled in multiple groups (same subject or all subjects)
+  const getStudentAccumulatedDebtInfo = useCallback((student: StudentRecord, currentGroupId: string) => {
+    const studentNorm = normalizeArabicName(student.name);
+    const studentBarcodeUpper = (student.barcode || '').trim().toUpperCase();
+    const currentGroup = data.groupData[currentGroupId];
+    const currentGroupMeta = data.groups.find((g) => g.id === currentGroupId);
+    const currentSubj = (currentGroup?.subject || currentGroupMeta?.subject || '').trim();
+    const currentNormSubj = normalizeSubjectName(currentSubj);
+
+    let sameSubjectDebt = 0;
+    let sameSubjectGroupsCount = 0;
+    const sameSubjectGroupIds: string[] = [];
+    let otherSubjectsDebt = 0;
+    let otherSubjectsCount = 0;
+    const otherSubjectsList: { subject: string; debt: number; groupId: string }[] = [];
+
+    Object.entries(data.groupData).forEach(([gid, group]) => {
+      const found = (group.students || []).find(
+        (s) =>
+          !isSummaryRow(s, gid) &&
+          ((studentBarcodeUpper && s.barcode && s.barcode.trim().toUpperCase() === studentBarcodeUpper) ||
+            (studentNorm && normalizeArabicName(s.name) === studentNorm))
+      );
+      if (!found) return;
+
+      const groupMeta = data.groups.find((g) => g.id === gid);
+      const isVipGroup =
+        isVipGroupId(gid) ||
+        gid.toUpperCase().includes('VIP') ||
+        Boolean(group.isVip) ||
+        Boolean(groupMeta?.isVip) ||
+        Boolean(group.type?.includes('10000')) ||
+        Boolean(groupMeta?.type?.includes('10000'));
+      const targetType = group.type || groupMeta?.type || (isVipGroup ? '4-10000' : '4-2500');
+      const finances = calcStudentFinancesPure(
+        found,
+        targetType,
+        data.pricingTiers,
+        { ...group, groupId: gid, isVip: isVipGroup }
+      );
+
+      const debt = finances.debt > 0 ? finances.debt : 0;
+      const grpSubj = (group.subject || groupMeta?.subject || '').trim();
+      const grpNormSubj = normalizeSubjectName(grpSubj);
+
+      if (grpNormSubj === currentNormSubj) {
+        sameSubjectDebt += debt;
+        sameSubjectGroupsCount += 1;
+        sameSubjectGroupIds.push(gid);
+      } else {
+        if (debt > 0) {
+          otherSubjectsDebt += debt;
+          otherSubjectsCount += 1;
+          otherSubjectsList.push({ subject: grpSubj, debt, groupId: gid });
+        }
+      }
+    });
+
+    return {
+      currentSubject: currentSubj,
+      sameSubjectDebt,
+      sameSubjectGroupsCount,
+      sameSubjectGroupIds,
+      otherSubjectsDebt,
+      otherSubjectsCount,
+      otherSubjectsList,
+      totalAllSubjectsDebt: sameSubjectDebt + otherSubjectsDebt
+    };
+  }, [data.groupData, data.groups, data.pricingTiers]);
+
+  const handleMultiPaymentSuccess = useCallback((studentName: string, settledGroupIds: string[]) => {
+    const studentNorm = normalizeArabicName(studentName);
+
+    // Remove settled debtor items from queue
+    setPendingDebtors((prev) =>
+      prev.filter((d) => {
+        const dNorm = normalizeArabicName(d.student.name);
+        if (dNorm === studentNorm && settledGroupIds.includes(d.groupId)) {
+          return false;
+        }
+        return true;
+      })
+    );
+
+    // Update recent scans
+    setRecentScans((prev) =>
+      prev.map((s) => {
+        if (normalizeArabicName(s.studentName) === studentNorm && settledGroupIds.includes(s.groupId)) {
+          return { ...s, status: 'P', debt: 0 };
+        }
+        return s;
+      })
+    );
+
+    setFlashSuccess({
+      name: studentName,
+      statusText: 'تم تسجيل السداد المالي بنجاح ✓',
+      details: `تمت تسوية ${settledGroupIds.length} فوج واستخراج الوصل الموحد`
+    });
+    setTimeout(() => setFlashSuccess(null), 2500);
+  }, []);
 
   // Quick Action Modals from Active Group Cards (+ تلميذ, تحضير يدوي, تعويض)
   const [quickAddStudentGroupId, setQuickAddStudentGroupId] = useState<string | null>(null);
@@ -2615,6 +2723,84 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
           flexDirection: 'column'
         }}
       >
+        {/* ========================================================================= */}
+        {/* GLOBAL ALL-SUBJECTS PAYMENT BUTTON (COMPLETELY OUTSIDE & ABOVE INDIVIDUAL SUBJECT CONTAINERS) */}
+        {/* ========================================================================= */}
+        <div
+          style={{
+            padding: '10px 14px',
+            background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+            borderBottom: '1.5px solid #075985',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '10px',
+            boxShadow: '0 2px 6px rgba(2, 132, 199, 0.2)'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#fff' }}>
+            <div
+              style={{
+                width: '32px',
+                height: '32px',
+                borderRadius: '8px',
+                backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}
+            >
+              <CreditCard size={18} color="#fff" />
+            </div>
+            <div>
+              <div style={{ fontSize: '0.86rem', fontWeight: 900, color: '#fff' }}>
+                تسديد شامل لجميع المواد (All Subjects)
+              </div>
+              <div style={{ fontSize: '0.7rem', color: '#e0f2fe' }}>
+                استرجاع وعرض جميع ديون التلميذ غير المسددة عبر النظام بالكامل وتسديدها معاً
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              const activeStudent = pendingDebtors.length > 0 ? {
+                name: pendingDebtors[0].student.name,
+                barcode: pendingDebtors[0].student.barcode,
+                phone: pendingDebtors[0].student.phone
+              } : undefined;
+
+              setMultiPaymentModalConfig({
+                isOpen: true,
+                student: activeStudent,
+                subjectFilter: undefined // All subjects across entire platform!
+              });
+            }}
+            className="m3-btn"
+            style={{
+              backgroundColor: '#fff',
+              color: '#0369a1',
+              fontWeight: 900,
+              fontSize: '0.76rem',
+              padding: '6px 14px',
+              borderRadius: '8px',
+              border: 'none',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+              flexShrink: 0
+            }}
+            title="تسديد ديون التلميذ لجميع المواد والأفواج معاً واستخراج وصل موحد"
+          >
+            <Layers size={14} />
+            <span>تسديد جميع المواد ↗</span>
+          </button>
+        </div>
+
         {/* Tabs Bar */}
         <div
           style={{
@@ -2964,12 +3150,26 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     {pendingDebtors.map((debtor, idx) => {
+                      const debtInfo = getStudentAccumulatedDebtInfo(debtor.student, debtor.groupId);
+                      const subjectDebt = debtInfo.sameSubjectDebt > 0 ? debtInfo.sameSubjectDebt : debtor.debt;
                       const rawAmt = debtorCustomAmounts[debtor.id];
-                      const currentValStr = rawAmt !== undefined ? rawAmt : String(debtor.debt);
-                      const enteredAmount = rawAmt !== undefined ? (Number(rawAmt) || 0) : debtor.debt;
-                      const isPartial = enteredAmount > 0 && enteredAmount < debtor.debt;
-                      const remainingDebt = Math.max(0, debtor.debt - enteredAmount);
-                      const halfDebt = Math.round(debtor.debt / 2);
+                      const currentValStr = rawAmt !== undefined ? rawAmt : String(subjectDebt);
+                      const enteredAmount = rawAmt !== undefined ? (Number(rawAmt) || 0) : subjectDebt;
+                      const isPartial = enteredAmount > 0 && enteredAmount < subjectDebt;
+                      const remainingDebt = Math.max(0, subjectDebt - enteredAmount);
+                      const halfDebt = Math.round(subjectDebt / 2);
+
+                      const handleOpenPaymentModal = () => {
+                        setMultiPaymentModalConfig({
+                          isOpen: true,
+                          student: {
+                            name: debtor.student.name,
+                            barcode: debtor.student.barcode,
+                            phone: debtor.student.phone
+                          },
+                          subjectFilter: debtInfo.currentSubject
+                        });
+                      };
 
                       return (
                         <div
@@ -2987,7 +3187,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                         >
                           {/* Row 1: Student info and required amount / remaining debt */}
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                               <span
                                 style={{
                                   width: '20px',
@@ -3007,9 +3207,46 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                               <strong style={{ fontSize: '0.92rem', color: '#7f1d1d' }}>
                                 {debtor.student.name}
                               </strong>
-                              <span style={{ fontSize: '0.74rem', color: '#991b1b', backgroundColor: '#fee2e2', padding: '1px 6px', borderRadius: '4px', fontWeight: 700 }}>
-                                المبلغ المطلوب: {debtor.debt.toLocaleString()} دج
+                              {/* ONLY THIS SUBJECT ACCUMULATED DEBT */}
+                              <span style={{ fontSize: '0.74rem', color: '#991b1b', backgroundColor: '#fee2e2', padding: '2px 8px', borderRadius: '4px', fontWeight: 800 }}>
+                                المبلغ المطلوب ({debtInfo.currentSubject || 'هذه المادة'}): {subjectDebt.toLocaleString()} دج
+                                {debtInfo.sameSubjectGroupsCount > 1 ? ` (${debtInfo.sameSubjectGroupsCount} أفواج متراكمة)` : ''}
                               </span>
+
+                              {/* OTHER SUBJECTS BADGE IF PRESENT */}
+                              {debtInfo.otherSubjectsDebt > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setMultiPaymentModalConfig({
+                                      isOpen: true,
+                                      student: {
+                                        name: debtor.student.name,
+                                        barcode: debtor.student.barcode,
+                                        phone: debtor.student.phone
+                                      },
+                                      subjectFilter: undefined // All subjects!
+                                    });
+                                  }}
+                                  style={{
+                                    fontSize: '0.7rem',
+                                    color: '#0369a1',
+                                    backgroundColor: '#e0f2fe',
+                                    border: '1px solid #bae6fd',
+                                    padding: '2px 8px',
+                                    borderRadius: '4px',
+                                    fontWeight: 800,
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px'
+                                  }}
+                                  title="عرض وتسديد جميع ديون المواد الأخرى للتلميذ"
+                                >
+                                  <Layers size={11} />
+                                  <span>+ مواد أخرى: {debtInfo.otherSubjectsDebt.toLocaleString()} دج (All Subjects ↗)</span>
+                                </button>
+                              )}
                             </div>
 
                             {/* Badge if paying partial */}
@@ -3061,12 +3298,10 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                                   onKeyDown={(e) => {
                                     if (e.key === 'Enter') {
                                       e.preventDefault();
-                                      if (enteredAmount > 0) {
-                                        handleSettleDebtorInQueue(debtor, enteredAmount, true);
-                                      }
+                                      handleOpenPaymentModal();
                                     }
                                   }}
-                                  placeholder={String(debtor.debt)}
+                                  placeholder={String(subjectDebt)}
                                   style={{
                                     width: '74px',
                                     fontSize: '0.86rem',
@@ -3078,7 +3313,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                                     textAlign: 'center',
                                     direction: 'ltr'
                                   }}
-                                  title="أدخل المبلغ المستلم واضغط Enter أو زر تسديد"
+                                  title="أدخل المبلغ واضغط Enter أو زر تسديد لفتح نافذة خيارات السداد"
                                 />
                                 <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#64748b' }}>دج</span>
                               </div>
@@ -3110,13 +3345,13 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                               </button>
 
                               {/* Shortcut: Full */}
-                              {enteredAmount !== debtor.debt && (
+                              {enteredAmount !== subjectDebt && (
                                 <button
                                   type="button"
                                   onClick={() =>
                                     setDebtorCustomAmounts((prev) => ({
                                       ...prev,
-                                      [debtor.id]: String(debtor.debt)
+                                      [debtor.id]: String(subjectDebt)
                                     }))
                                   }
                                   className="m3-btn m3-btn-sm"
@@ -3131,66 +3366,41 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                                     borderRadius: '6px',
                                     cursor: 'pointer'
                                   }}
-                                  title={`إعادة تعيين لكامل المبلغ (${debtor.debt.toLocaleString()} دج)`}
+                                  title={`إعادة تعيين لكامل المبلغ (${subjectDebt.toLocaleString()} دج)`}
                                 >
                                   الكل
                                 </button>
                               )}
                             </div>
 
-                            {/* 3 Action Buttons */}
+                            {/* Action Buttons: 1. Pay with Modal options | 2. Cancel attendance (قبول كمدين removed as requested) */}
                             <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
-                              {/* 1. Pay */}
+                              {/* 1. Pay - opens modal prompting full vs manual selection */}
                               <button
                                 type="button"
-                                disabled={enteredAmount <= 0}
-                                onClick={() => handleSettleDebtorInQueue(debtor, enteredAmount, true)}
+                                onClick={handleOpenPaymentModal}
                                 className="m3-btn m3-btn-sm"
                                 style={{
-                                  backgroundColor: enteredAmount > 0 ? '#15803d' : '#94a3b8',
+                                  backgroundColor: '#15803d',
                                   color: '#fff',
                                   fontSize: '0.74rem',
-                                  padding: '3px 8px',
+                                  padding: '3px 10px',
                                   height: '28px',
                                   fontWeight: 800,
                                   display: 'inline-flex',
                                   alignItems: 'center',
-                                  gap: '3px',
+                                  gap: '4px',
                                   borderRadius: '6px',
-                                  cursor: enteredAmount > 0 ? 'pointer' : 'not-allowed',
-                                  boxShadow: enteredAmount > 0 ? '0 1px 2px rgba(21, 128, 61, 0.2)' : 'none'
+                                  cursor: 'pointer',
+                                  boxShadow: '0 1px 2px rgba(21, 128, 61, 0.2)'
                                 }}
-                                title={
-                                  enteredAmount > 0
-                                    ? `تسديد ${enteredAmount.toLocaleString()} دج وطباعة الوصل فوراً`
-                                    : 'أدخل مبلغاً أكبر من 0'
-                                }
+                                title={`تسديد مستحقات ${debtInfo.currentSubject} (${subjectDebt.toLocaleString()} دج) أو تحديد أفواج معينة`}
                               >
-                                <Printer size={12} />
-                                <span>تسديد ({enteredAmount.toLocaleString()}) 🖨️</span>
+                                <Printer size={13} />
+                                <span>تسديد ({subjectDebt.toLocaleString()}) 🖨️</span>
                               </button>
 
-                              {/* 2. Accept without paying (keep attendance) */}
-                              <button
-                                type="button"
-                                onClick={() => handleDismissDebtorFromQueue(debtor.id)}
-                                className="m3-btn m3-btn-sm"
-                                style={{
-                                  backgroundColor: '#fff',
-                                  color: '#334155',
-                                  border: '1px solid #cbd5e1',
-                                  fontSize: '0.72rem',
-                                  padding: '3px 8px',
-                                  height: '28px',
-                                  fontWeight: 800,
-                                  borderRadius: '6px'
-                                }}
-                                title="قبول الدخول كمدين مع تثبيت الحضور"
-                              >
-                                قبول كمدين ✓
-                              </button>
-
-                              {/* 3. Cancel attendance (don't take attendance) */}
+                              {/* 2. Cancel attendance (don't take attendance) */}
                               <button
                                 type="button"
                                 onClick={() => handleCancelDebtorAttendance(debtor)}
@@ -5884,6 +6094,19 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
           </div>
         );
       })()}
+
+      {/* ========================================================================= */}
+      {/* MULTI-GROUP PAYMENT MODAL (SINGLE SUBJECT OR ALL SUBJECTS)                 */}
+      {/* ========================================================================= */}
+      {multiPaymentModalConfig?.isOpen && (
+        <MultiGroupPaymentModal
+          isOpen={multiPaymentModalConfig.isOpen}
+          onClose={() => setMultiPaymentModalConfig(null)}
+          initialStudent={multiPaymentModalConfig.student}
+          initialSubjectFilter={multiPaymentModalConfig.subjectFilter}
+          onPaymentSuccess={handleMultiPaymentSuccess}
+        />
+      )}
     </div>
   );
 
