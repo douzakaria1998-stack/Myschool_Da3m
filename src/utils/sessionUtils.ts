@@ -603,6 +603,35 @@ export function isSummaryRow(
   return false;
 }
 
+/**
+ * Calculates the number of attended sessions for a student.
+ * Counts attendance statuses: 'P', 'C', 'ح', 'M', 'م'
+ * or uses student.totalAttendance if greater/present.
+ */
+export function getAttendedSessionsCount(student: any): number {
+  if (!student) return 0;
+  let countFromAttendance = 0;
+  if (Array.isArray(student.attendance)) {
+    countFromAttendance = student.attendance.filter((a: any) =>
+      ['P', 'C', 'ح', 'M', 'م'].includes(String(a || '').trim().toUpperCase())
+    ).length;
+  }
+  if (typeof student.totalAttendance === 'number') {
+    return Math.max(student.totalAttendance, countFromAttendance);
+  }
+  return countFromAttendance;
+}
+
+/**
+ * Checks if a student is a valid enrolled student who attended MORE than 1 session (> 1).
+ * Excludes summary/footer rows, empty student names, and students who attended 0 or only 1 session.
+ */
+export function isStudentAttendedMoreThanOneSession(student: any, groupId?: string): boolean {
+  if (!student || !student.name || !String(student.name).trim()) return false;
+  if (isSummaryRow(student, groupId)) return false;
+  return getAttendedSessionsCount(student) > 1;
+}
+
 export function getGroupStatus(
   group: GroupMeta,
   groupSheet?: GroupSheet,

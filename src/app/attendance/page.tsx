@@ -58,6 +58,7 @@ import {
   isGroupActive,
   isGroupEnded,
   isSummaryRow,
+  isStudentAttendedMoreThanOneSession,
   formatToYYYYMMDD,
   generateSessionDates,
   getStudentSessionInfo,
@@ -190,6 +191,9 @@ export default function AttendancePage() {
       };
     }
     const realStudents = (group.students || []).filter((s) => !isSummaryRow(s, group.groupId));
+    const eligibleStudents = realStudents.filter((s) =>
+      isStudentAttendedMoreThanOneSession(s, group.groupId)
+    );
     let totalTeacherPay = 0;
     let totalCollected = 0;
     realStudents.forEach((s) => {
@@ -198,7 +202,7 @@ export default function AttendancePage() {
     });
 
     return {
-      totalStudents: realStudents.length,
+      totalStudents: eligibleStudents.length,
       totalTeacherPay,
       totalCollectedInGroups: totalCollected,
       groups: [group]

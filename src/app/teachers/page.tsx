@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { useApp } from '../../context/AppContext';
 import TeacherPaymentModal from '../../components/TeacherPaymentModal';
-import { isSummaryRow } from '../../utils/sessionUtils';
+import { isSummaryRow, isStudentAttendedMoreThanOneSession } from '../../utils/sessionUtils';
 import {
   GraduationCap,
   Search,
@@ -44,7 +44,10 @@ export default function TeachersPage() {
       const gSheet = data.groupData[g.id];
       if (gSheet && gSheet.students) {
         const realStudents = gSheet.students.filter((s) => !isSummaryRow(s, g.id));
-        totalStudents += realStudents.length;
+        const eligibleStudents = realStudents.filter((s) =>
+          isStudentAttendedMoreThanOneSession(s, g.id)
+        );
+        totalStudents += eligibleStudents.length;
         realStudents.forEach((s) => {
           totalTeacherPay += s.teacherPay || 0;
           totalCollectedInGroups += s.totalReceived || 0;

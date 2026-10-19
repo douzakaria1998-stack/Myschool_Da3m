@@ -5,6 +5,7 @@ import { useApp } from '../context/AppContext';
 import { Teacher, GroupSheet, TeacherPaymentRecord } from '../types';
 import { sanitizePrintTitle, getArabicMonthYear } from '../utils/printTitleUtils';
 import { saveReceiptPdfToServer } from '../utils/receiptSaveUtils';
+import { isSummaryRow, isStudentAttendedMoreThanOneSession, getAttendedSessionsCount } from '../utils/sessionUtils';
 import {
   X,
   Printer,
@@ -17,6 +18,16 @@ import {
   Banknote,
   Users
 } from 'lucide-react';
+
+const formatVoucherAmount = (val: number | string | undefined | null) => {
+  const num = typeof val === 'number' ? val : parseFloat(String(val || 0));
+  if (isNaN(num)) return '0,00';
+  const parts = Math.abs(num).toFixed(2).split('.');
+  const intPart = parseInt(parts[0], 10).toLocaleString('en-US');
+  const decPart = parts[1] || '00';
+  const sign = num < 0 ? '-' : '';
+  return `${sign}${intPart},${decPart}`;
+};
 
 interface Props {
   teacher: Teacher;
@@ -84,27 +95,45 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
     const printTime = payment.time || new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' });
 
     const groupsRows = stats.groups
-      .map((g) => {
+      .map((g: any) => {
+        const gId = g.groupId || g.id;
         let groupStudents = 0;
         let groupTeacherPay = 0;
-        const gSheet = data.groupData[g.groupId];
+        const gSheet = data.groupData[gId] || (g.students ? g : undefined);
         if (gSheet && gSheet.students) {
-          groupStudents = gSheet.students.length;
-          gSheet.students.forEach((s) => {
+          const eligibleStudents = gSheet.students.filter((s: any) =>
+            isStudentAttendedMoreThanOneSession(s, gId)
+          );
+          groupStudents = eligibleStudents.length;
+          gSheet.students.forEach((s: any) => {
             groupTeacherPay += s.teacherPay || 0;
           });
         }
         return `
         <tr>
-          <td style="text-align: center; font-weight: bold;">${g.groupId} ${g.isVip ? '★ VIP' : ''}</td>
-          <td>${g.subject}</td>
-          <td>${g.day1 || ''} ${g.time1 || ''}</td>
+          <td style="text-align: center; font-weight: bold;">${gId} ${g.isVip ? '★ VIP' : ''}</td>
+          <td>${g.subject || gSheet?.subject || ''}</td>
+          <td>${g.day1 || gSheet?.day1 || ''} ${g.time1 || gSheet?.time1 || ''}</td>
           <td style="text-align: center;">${groupStudents} تلميذ</td>
-          <td style="text-align: center; font-weight: bold;">${groupTeacherPay.toLocaleString()} دج</td>
+          <td style="text-align: center; font-weight: bold;">${formatVoucherAmount(groupTeacherPay)} دج</td>
         </tr>
       `;
       })
       .join('');
+
+    let totalEligibleVoucherStudents = 0;
+    stats.groups.forEach((g: any) => {
+      const gId = g.groupId || g.id;
+      const gSheet = data.groupData[gId] || (g.students ? g : undefined);
+      if (gSheet && gSheet.students) {
+        totalEligibleVoucherStudents += gSheet.students.filter((s: any) =>
+          isStudentAttendedMoreThanOneSession(s, gId)
+        ).length;
+      }
+    });
+    if (totalEligibleVoucherStudents === 0 && stats.totalStudents > 0) {
+      totalEligibleVoucherStudents = stats.totalStudents;
+    }
 
     const voucherHtml = `
       <!DOCTYPE html>
@@ -266,7 +295,7 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
             <div class="info-item"><span class="info-label">المادة المدرسة:</span> <strong>${teacher.subject || (stats.groups[0]?.subject ?? '')}</strong></div>
             <div class="info-item"><span class="info-label">رقم الهاتف:</span> <span>${teacher.phone || 'غير مسجل'}</span></div>
             <div class="info-item"><span class="info-label">${isGroupOnly ? 'توقيت الفوج:' : 'الأفواج المشرف عليها:'}</span> <strong>${isGroupOnly ? `${stats.groups[0]?.day1 || ''} ${stats.groups[0]?.time1 || ''}` : `${stats.groups.length} فوج`}</strong></div>
-            <div class="info-item"><span class="info-label">${isGroupOnly ? 'تلاميذ الفوج:' : 'إجمالي التلاميذ:'}</span> <strong>${stats.totalStudents} تلميذ</strong></div>
+            <div class="info-item"><span class="info-label">${isGroupOnly ? 'تلاميذ الفوج:' : 'إجمالي التلاميذ:'}</span> <strong>${totalEligibleVoucherStudents} تلميذ</strong></div>
           </div>
 
           <!-- Groups Breakdown Table -->
@@ -290,19 +319,19 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
           <div class="totals-box">
             <div class="totals-row">
               <span>${isGroupOnly ? `إجمالي مستحقات الأستاذ عن فوج (${specificGroupId}):` : 'إجمالي مستحقات الأستاذ المحسوبة عن الأفواج:'}</span>
-              <strong>${stats.totalTeacherPay.toLocaleString()} دج</strong>
+              <strong>${formatVoucherAmount(stats.totalTeacherPay)} دج</strong>
             </div>
             <div class="totals-row">
               <span>${isGroupOnly ? `المبالغ المسددة سابقاً عن فوج (${specificGroupId}):` : 'المبالغ المسددة سابقاً:'}</span>
-              <span>${paidAmount.toLocaleString()} دج</span>
+              <span>${formatVoucherAmount(paidAmount)} دج</span>
             </div>
             <div class="totals-row paid-highlight">
               <span>المبلغ المسدد بموجب هذا الوصل (${payment.paymentMethod || 'نقداً'}):</span>
-              <span>${payment.amount.toLocaleString()} دج</span>
+              <span>${formatVoucherAmount(payment.amount)} دج</span>
             </div>
             <div class="totals-row" style="color: ${currentRemaining > 0 ? '#b91c1c' : '#15803d'}; font-weight: bold;">
               <span>${isGroupOnly ? `الرصيد المتبقي للأستاذ في فوج (${specificGroupId}):` : 'الرصيد المتبقي بذمة المؤسسة للأستاذ:'}</span>
-              <span>${currentRemaining.toLocaleString()} دج ${currentRemaining === 0 ? '(تمت التسوية بالكامل ✓)' : ''}</span>
+              <span>${formatVoucherAmount(currentRemaining)} دج ${currentRemaining === 0 ? '(تمت التسوية بالكامل ✓)' : ''}</span>
             </div>
             ${payment.notes ? `<div style="margin-top: 8px; font-size: 11px; color: #475569; border-top: 1px dashed #cbd5e1; padding-top: 4px;">ملاحظات: ${payment.notes}</div>` : ''}
           </div>
@@ -361,7 +390,7 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
     const newRecord = payTeacher(teacher.id, numAmount, paymentMethod, resolvedNotes, specificGroupId);
     if (newRecord) {
       const nextRemaining = Math.max(0, stats.totalTeacherPay - (paidAmount + numAmount));
-      setSuccessMessage(`تم تسجيل تسديد ${numAmount.toLocaleString()} دج بنجاح للأستاذ${isGroupOnly ? ` عن فوج ${specificGroupId}` : ''}.`);
+      setSuccessMessage(`تم تسجيل تسديد ${formatVoucherAmount(numAmount)} دج بنجاح للأستاذ${isGroupOnly ? ` عن فوج ${specificGroupId}` : ''}.`);
       if (shouldPrint) {
         handlePrintVoucher(newRecord, nextRemaining);
       }
@@ -465,7 +494,7 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
               {isGroupOnly ? `أتعاب الأستاذ لفوج ${specificGroupId}` : 'إجمالي الأتعاب المحسوبة'}
             </div>
             <div style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--md-sys-color-primary)' }}>
-              {stats.totalTeacherPay.toLocaleString()} <span style={{ fontSize: '0.75rem' }}>دج</span>
+              {formatVoucherAmount(stats.totalTeacherPay)} <span style={{ fontSize: '0.75rem' }}>دج</span>
             </div>
           </div>
 
@@ -480,7 +509,7 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
               {isGroupOnly ? `المسدد لفوج ${specificGroupId}` : 'المبالغ المسددة سابقاً'}
             </div>
             <div style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--status-present)' }}>
-              {paidAmount.toLocaleString()} <span style={{ fontSize: '0.75rem' }}>دج</span>
+              {formatVoucherAmount(paidAmount)} <span style={{ fontSize: '0.75rem' }}>دج</span>
             </div>
           </div>
 
@@ -509,7 +538,7 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
                 color: remainingDue > 0 ? 'var(--status-absent)' : 'var(--status-present)'
               }}
             >
-              {remainingDue.toLocaleString()} <span style={{ fontSize: '0.75rem' }}>دج</span>
+              {formatVoucherAmount(remainingDue)} <span style={{ fontSize: '0.75rem' }}>دج</span>
             </div>
           </div>
         </div>
@@ -614,7 +643,7 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
                       className="m3-chip"
                       style={{ cursor: 'pointer', backgroundColor: 'var(--status-present-container)', color: 'var(--status-present)' }}
                     >
-                      كامل المتبقي ({remainingDue.toLocaleString()} دج)
+                      كامل المتبقي ({formatVoucherAmount(remainingDue)} دج)
                     </button>
                     {remainingDue > 10000 && (
                       <button
@@ -623,7 +652,7 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
                         className="m3-chip"
                         style={{ cursor: 'pointer' }}
                       >
-                        نصف المتبقي ({Math.round(remainingDue / 2).toLocaleString()} دج)
+                        نصف المتبقي ({formatVoucherAmount(Math.round(remainingDue / 2))} دج)
                       </button>
                     )}
                     <button
@@ -632,7 +661,7 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
                       className="m3-chip"
                       style={{ cursor: 'pointer' }}
                     >
-                      100,000 دج
+                      {formatVoucherAmount(100000)} دج
                     </button>
                     <button
                       type="button"
@@ -640,7 +669,7 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
                       className="m3-chip"
                       style={{ cursor: 'pointer' }}
                     >
-                      50,000 دج
+                      {formatVoucherAmount(50000)} دج
                     </button>
                     <button
                       type="button"
@@ -648,7 +677,7 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
                       className="m3-chip"
                       style={{ cursor: 'pointer' }}
                     >
-                      20,000 دج
+                      {formatVoucherAmount(20000)} دج
                     </button>
                   </div>
                 )}
@@ -781,7 +810,7 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
                         <div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                             <span style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--md-sys-color-primary)' }}>
-                              {item.amount.toLocaleString()} دج
+                              {formatVoucherAmount(item.amount)} دج
                             </span>
                             <span className="m3-chip" style={{ fontSize: '0.75rem' }}>
                               {item.paymentMethod}
@@ -823,7 +852,7 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
                           <button
                             type="button"
                             onClick={() => {
-                              if (confirm(`هل أنت متأكد من إلغاء دفعة ${item.amount.toLocaleString()} دج؟`)) {
+                              if (confirm(`هل أنت متأكد من إلغاء دفعة ${formatVoucherAmount(item.amount)} دج؟`)) {
                                 deleteTeacherPayment(teacher.id, item.id);
                               }
                             }}
