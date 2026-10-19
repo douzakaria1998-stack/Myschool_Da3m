@@ -40,7 +40,7 @@ import { normalizeArabicName } from '../../utils/barcodeUtils';
 
 export default function GroupsPage() {
   const router = useRouter();
-  const { data, setSelectedGroup, getGroupStats } = useApp();
+  const { data, selectedGroup, setSelectedGroup, getGroupStats } = useApp();
 
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'active' | 'inactive' | 'today' | 'regular' | 'vip'>('all');
