@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useApp } from '../../context/AppContext';
 import { AttendanceStatus, StudentRecord, Teacher } from '../../types';
+import { useRouter } from 'next/navigation';
 import {
   CalendarCheck,
   Search,
@@ -32,7 +33,8 @@ import {
   Banknote,
   AlertTriangle,
   RotateCcw,
-  ArrowLeftRight
+  ArrowLeftRight,
+  ArrowLeft
 } from 'lucide-react';
 import StudentPaymentModal from '../../components/StudentPaymentModal';
 import AddStudentModal from '../../components/AddStudentModal';
@@ -78,8 +80,40 @@ export default function AttendancePage() {
     endSessionAndMarkAbsent
   } = useApp();
 
+  const router = useRouter();
+
   const group = data.groupData[selectedGroup] || Object.values(data.groupData)[0];
   const groupStats = getGroupStats(group?.groupId || selectedGroup);
+
+  const handleGoBack = () => {
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('groups_last_group_id', group?.groupId || selectedGroup);
+    }
+    if (typeof window !== 'undefined' && window.history.length > 1) {
+      router.back();
+    } else {
+      router.push('/groups');
+    }
+  };
+
+  // Confirmation state for marking all present in a session
+  const [confirmMarkAllSession, setConfirmMarkAllSession] = useState<{
+    sessionIndex: number;
+    sessionDate: string;
+    isAllPresent: boolean;
+    studentCount: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!confirmMarkAllSession) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setConfirmMarkAllSession(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [confirmMarkAllSession]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -589,24 +623,33 @@ export default function AttendancePage() {
           padding: '20px 24px',
           backgroundColor: 'var(--md-sys-color-surface-container-low)',
           display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
+          flexDirection: 'column',
           gap: '16px'
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-          <GroupSearchSelect
-            selectedGroupId={group.groupId}
-            onSelectGroup={(newGroupId) => {
-              setSelectedGroup(newGroupId);
-              const selectedG = data.groupData[newGroupId];
-              if (selectedG) setEditableDates(selectedG.sessionDates);
-            }}
-            label="اختر الفوج الدراسي (بحث سريع):"
-            placeholder="ابحث برمز الفوج، المادة، أو الأستاذ..."
-            width="320px"
-          />
+        {/* Row 1: Quick Search & Group info on Right, Back Arrow Button on Left */}
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '16px',
+            width: '100%'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+            <GroupSearchSelect
+              selectedGroupId={group.groupId}
+              onSelectGroup={(newGroupId) => {
+                setSelectedGroup(newGroupId);
+                const selectedG = data.groupData[newGroupId];
+                if (selectedG) setEditableDates(selectedG.sessionDates);
+              }}
+              label="اختر الفوج الدراسي (بحث سريع):"
+              placeholder="ابحث برمز الفوج، المادة، أو الأستاذ..."
+              width="320px"
+            />
 
           <div
             style={{
@@ -776,8 +819,44 @@ export default function AttendancePage() {
           </div>
         </div>
 
-        {/* Action buttons */}
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        {/* Back Button to return to previous page / groups list */}
+        <button
+          type="button"
+          onClick={handleGoBack}
+          className="m3-btn m3-btn-outlined"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '8px 18px',
+            fontSize: '0.9rem',
+            fontWeight: 800,
+            borderRadius: 'var(--md-shape-full)',
+            backgroundColor: '#ffffff',
+            color: 'var(--md-sys-color-primary)',
+            border: '1.5px solid var(--md-sys-color-outline-variant)',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+            whiteSpace: 'nowrap'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = 'var(--md-sys-color-primary-container)';
+            e.currentTarget.style.borderColor = 'var(--md-sys-color-primary)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = '#ffffff';
+            e.currentTarget.style.borderColor = 'var(--md-sys-color-outline-variant)';
+          }}
+          title="الرجوع إلى الصفحة السابقة / قائمة الأفواج"
+        >
+          <ArrowLeft size={18} />
+          <span>العودة</span>
+        </button>
+      </div>
+
+      {/* Action buttons */}
+      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <Link
             href={`/scanner?groupId=${group.groupId}`}
             className="m3-btn m3-btn-sm"
@@ -1568,7 +1647,17 @@ export default function AttendancePage() {
         {todaySessionIndex !== -1 && (
           <button
             type="button"
-            onClick={() => markAllPresent(group.groupId, todaySessionIndex, filteredStudents.map((s) => s.rowId))}
+            onClick={() => {
+              const isAllPresentToday =
+                filteredStudents.length > 0 &&
+                filteredStudents.every((s) => s.attendance[todaySessionIndex] === 'P');
+              setConfirmMarkAllSession({
+                sessionIndex: todaySessionIndex,
+                sessionDate: group.sessionDates[todaySessionIndex] || `حصة ${todaySessionIndex + 1}`,
+                isAllPresent: isAllPresentToday,
+                studentCount: filteredStudents.length
+              });
+            }}
             className="m3-btn m3-btn-filled m3-btn-sm"
             style={{
               display: 'inline-flex',
@@ -1810,7 +1899,12 @@ export default function AttendancePage() {
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          markAllPresent(group.groupId, i, filteredStudents.map((s) => s.rowId));
+                          setConfirmMarkAllSession({
+                            sessionIndex: i,
+                            sessionDate: group.sessionDates[i] || `حصة ${i + 1}`,
+                            isAllPresent,
+                            studentCount: filteredStudents.length
+                          });
                         }}
                         style={{
                           padding: '3px 4px',
@@ -2388,6 +2482,144 @@ export default function AttendancePage() {
           currentGroupId={group.groupId}
           onClose={() => setStudentForGroupChange(null)}
         />
+      )}
+
+      {/* Confirmation Modal for "All Present" action (الكل حاضر) */}
+      {confirmMarkAllSession && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.55)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1200,
+            padding: '16px'
+          }}
+          onClick={() => setConfirmMarkAllSession(null)}
+        >
+          <div
+            style={{
+              backgroundColor: '#ffffff',
+              borderRadius: '20px',
+              maxWidth: '460px',
+              width: '100%',
+              padding: '24px',
+              boxShadow: '0 20px 45px rgba(0, 0, 0, 0.25)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px',
+              direction: 'rtl',
+              animation: 'fadeIn 0.15s ease-out'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div
+                style={{
+                  width: '46px',
+                  height: '46px',
+                  borderRadius: '50%',
+                  backgroundColor: confirmMarkAllSession.isAllPresent ? '#fef3c7' : '#ecfdf5',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0
+                }}
+              >
+                {confirmMarkAllSession.isAllPresent ? (
+                  <AlertTriangle size={24} color="#d97706" />
+                ) : (
+                  <CheckCheck size={26} color="#059669" />
+                )}
+              </div>
+              <div>
+                <h3 style={{ fontSize: '1.15rem', fontWeight: 800, margin: 0, color: 'var(--md-sys-color-on-surface)' }}>
+                  {confirmMarkAllSession.isAllPresent
+                    ? 'تأكيد إلغاء تحديد حضور الجميع'
+                    : 'تأكيد تسجيل حضور جميع التلاميذ'}
+                </h3>
+                <span style={{ fontSize: '0.8rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
+                  فوج {group.groupId} • {confirmMarkAllSession.sessionDate}
+                </span>
+              </div>
+            </div>
+
+            {/* Modal Body / Information */}
+            <div
+              style={{
+                backgroundColor: 'var(--md-sys-color-surface-container-low)',
+                padding: '14px 16px',
+                borderRadius: '12px',
+                border: '1px solid var(--md-sys-color-outline-variant)',
+                fontSize: '0.88rem',
+                lineHeight: 1.6,
+                color: 'var(--md-sys-color-on-surface)'
+              }}
+            >
+              {confirmMarkAllSession.isAllPresent ? (
+                <div>
+                  جميع التلاميذ حاضرون حالياً في <strong>الحصة {confirmMarkAllSession.sessionIndex + 1}</strong> ({confirmMarkAllSession.sessionDate}).
+                  <br />
+                  هل أنت متأكد من <strong>إلغاء تحديد الحضور</strong> لجميع التلاميذ ({confirmMarkAllSession.studentCount} تلميذ) في هذه الحصة؟
+                </div>
+              ) : (
+                <div>
+                  هل أنت متأكد من تسجيل حضور <strong>جميع تلاميذ الفوج ({confirmMarkAllSession.studentCount} تلميذ)</strong> في <strong>الحصة {confirmMarkAllSession.sessionIndex + 1}</strong> ({confirmMarkAllSession.sessionDate})؟
+                  <br />
+                  <span style={{ fontSize: '0.78rem', color: '#059669', fontWeight: 700, display: 'inline-block', marginTop: '6px' }}>
+                    ✓ سيتم تعيين حالة الحضور إلى (P حاضر) لجميع التلاميذ واحتساب مستحقاتهم المالية فوراً.
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Actions */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '4px' }}>
+              <button
+                type="button"
+                onClick={() => setConfirmMarkAllSession(null)}
+                className="m3-btn m3-btn-outlined"
+                style={{
+                  padding: '8px 18px',
+                  fontWeight: 700,
+                  borderRadius: 'var(--md-shape-full)'
+                }}
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const sIdx = confirmMarkAllSession.sessionIndex;
+                  markAllPresent(group.groupId, sIdx, filteredStudents.map((s) => s.rowId));
+                  setConfirmMarkAllSession(null);
+                }}
+                className="m3-btn m3-btn-primary"
+                style={{
+                  padding: '8px 20px',
+                  fontWeight: 800,
+                  borderRadius: 'var(--md-shape-full)',
+                  backgroundColor: confirmMarkAllSession.isAllPresent ? '#d97706' : '#059669',
+                  borderColor: confirmMarkAllSession.isAllPresent ? '#d97706' : '#059669',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <CheckCheck size={16} />
+                <span>
+                  {confirmMarkAllSession.isAllPresent
+                    ? 'نعم، قم بإلغاء التحديد'
+                    : 'نعم، تسجيل حضور الجميع'}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

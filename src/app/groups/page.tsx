@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useApp } from '../../context/AppContext';
 import {
   Users,
@@ -18,7 +19,8 @@ import {
   Coins,
   Edit3,
   RotateCw,
-  User
+  User,
+  ArrowLeft
 } from 'lucide-react';
 import AddGroupModal from '../../components/AddGroupModal';
 import EditGroupModal from '../../components/EditGroupModal';
@@ -37,6 +39,7 @@ import {
 import { normalizeArabicName } from '../../utils/barcodeUtils';
 
 export default function GroupsPage() {
+  const router = useRouter();
   const { data, setSelectedGroup, getGroupStats } = useApp();
 
   const [search, setSearch] = useState('');
@@ -48,6 +51,72 @@ export default function GroupsPage() {
   const [isAddGroupOpen, setIsAddGroupOpen] = useState(false);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [renewingGroupId, setRenewingGroupId] = useState<string | null>(null);
+  const [highlightedGroupId, setHighlightedGroupId] = useState<string | null>(null);
+  const [lastViewedGroupId, setLastViewedGroupId] = useState<string | null>(null);
+
+  const handleGroupsGoBack = () => {
+    if (typeof window !== 'undefined') {
+      const stored = sessionStorage.getItem('groups_last_group_id') || lastViewedGroupId || selectedGroup;
+      if (stored) {
+        const cleanId = stored.trim().toUpperCase();
+        setSelectedGroup(cleanId);
+        router.push(`/attendance?group=${cleanId}`);
+        return;
+      }
+    }
+    if (typeof window !== 'undefined' && window.history.length > 1) {
+      router.back();
+    } else {
+      router.push('/');
+    }
+  };
+
+  // Restore filters and scroll to the last viewed group when returning to groups list
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const savedFilters = sessionStorage.getItem('groups_filter_state');
+    if (savedFilters) {
+      try {
+        const parsed = JSON.parse(savedFilters);
+        if (parsed.search !== undefined) setSearch(parsed.search);
+        if (parsed.filterType) setFilterType(parsed.filterType);
+        if (parsed.selectedLevel) setSelectedLevel(parsed.selectedLevel);
+        if (parsed.selectedDay) setSelectedDay(parsed.selectedDay);
+        if (parsed.selectedTeacher) setSelectedTeacher(parsed.selectedTeacher);
+        if (parsed.selectedSubject) setSelectedSubject(parsed.selectedSubject);
+      } catch (e) {}
+    }
+
+    const lastGroupId = sessionStorage.getItem('groups_last_group_id') || selectedGroup;
+    if (lastGroupId) {
+      const cleanId = lastGroupId.trim().toUpperCase();
+      setLastViewedGroupId(cleanId);
+      const targetGroup = data.groups.find((g) => g.id.toUpperCase() === cleanId);
+      if (targetGroup) {
+        const q = search.toLowerCase();
+        if (
+          q &&
+          !targetGroup.id.toLowerCase().includes(q) &&
+          !targetGroup.subject.toLowerCase().includes(q) &&
+          !targetGroup.teacherName.toLowerCase().includes(q)
+        ) {
+          setSearch('');
+        }
+      }
+
+      const timer = setTimeout(() => {
+        const cardEl = document.getElementById(`group-card-${cleanId}`);
+        if (cardEl) {
+          cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          setHighlightedGroupId(cleanId);
+          setTimeout(() => setHighlightedGroupId(null), 3500);
+        }
+      }, 250);
+
+      return () => clearTimeout(timer);
+    }
+  }, []);
 
   const todayDayName = getTodayArabicDayName();
   const todayGroupsCount = data.groups.filter((g) => isGroupToday(g, data.groupData[g.id])).length;
@@ -188,7 +257,44 @@ export default function GroupsPage() {
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button
+            type="button"
+            onClick={handleGroupsGoBack}
+            className="m3-btn m3-btn-outlined"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontWeight: 800,
+              padding: '8px 16px',
+              borderRadius: 'var(--md-shape-full)',
+              backgroundColor: '#ffffff',
+              color: 'var(--md-sys-color-primary)',
+              border: '1.5px solid var(--md-sys-color-outline-variant)',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              whiteSpace: 'nowrap'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'var(--md-sys-color-primary-container)';
+              e.currentTarget.style.borderColor = 'var(--md-sys-color-primary)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = '#ffffff';
+              e.currentTarget.style.borderColor = 'var(--md-sys-color-outline-variant)';
+            }}
+            title={
+              lastViewedGroupId
+                ? `الرجوع مباشرة إلى كشف الفوج (${lastViewedGroupId})`
+                : 'الرجوع إلى كشف الفوج السابق'
+            }
+          >
+            <ArrowLeft size={18} />
+            <span>{lastViewedGroupId ? `العودة للفوج (${lastViewedGroupId})` : 'العودة'}</span>
+          </button>
+
           <button
             onClick={() => setIsAddGroupOpen(true)}
             className="m3-btn m3-btn-primary"
@@ -553,10 +659,12 @@ export default function GroupsPage() {
           const groupSheet = data.groupData[group.id];
           const isToday = isGroupToday(group, groupSheet);
           const statusInfo = getGroupStatus(group, groupSheet, data.pricingTiers);
+          const isHighlighted = highlightedGroupId === group.id.toUpperCase();
 
           return (
             <div
               key={group.id}
+              id={`group-card-${group.id.toUpperCase()}`}
               className="m3-card"
               style={{
                 padding: '16px',
@@ -565,13 +673,20 @@ export default function GroupsPage() {
                 flexDirection: 'column',
                 gap: '10px',
                 opacity: statusInfo.status === 'inactive' ? 0.94 : 1,
-                border: isToday
+                border: isHighlighted
+                  ? '2.5px solid var(--md-sys-color-primary)'
+                  : isToday
                   ? '2px solid var(--md-sys-color-primary)'
                   : group.isVip
                   ? '2px solid var(--status-vip)'
                   : statusInfo.status === 'inactive'
                   ? '1px dashed var(--md-sys-color-outline-variant)'
-                  : '1px solid var(--md-sys-color-outline-variant)'
+                  : '1px solid var(--md-sys-color-outline-variant)',
+                boxShadow: isHighlighted
+                  ? '0 0 0 4px rgba(79, 70, 229, 0.25), 0 8px 24px rgba(0,0,0,0.12)'
+                  : undefined,
+                transform: isHighlighted ? 'scale(1.02)' : undefined,
+                transition: 'all 0.3s ease'
               }}
             >
               {/* Header Row: Group ID + Status on right, Edit on left (strictly one line) */}
@@ -895,7 +1010,23 @@ export default function GroupsPage() {
               <div style={{ display: 'flex', gap: '8px' }}>
                 <Link
                   href={`/attendance?group=${group.id}`}
-                  onClick={() => setSelectedGroup(group.id)}
+                  onClick={() => {
+                    setSelectedGroup(group.id);
+                    if (typeof window !== 'undefined') {
+                      sessionStorage.setItem('groups_last_group_id', group.id);
+                      sessionStorage.setItem(
+                        'groups_filter_state',
+                        JSON.stringify({
+                          search,
+                          filterType,
+                          selectedLevel,
+                          selectedDay,
+                          selectedTeacher,
+                          selectedSubject
+                        })
+                      );
+                    }
+                  }}
                   className="m3-btn m3-btn-primary m3-btn-sm"
                   style={{ flex: 1, textDecoration: 'none' }}
                 >
