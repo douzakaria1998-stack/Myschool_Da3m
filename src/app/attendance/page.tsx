@@ -50,6 +50,7 @@ import TeacherPaymentModal from '../../components/TeacherPaymentModal';
 import ChangeStudentGroupModal from '../../components/ChangeStudentGroupModal';
 import { collectTodayAndHourlyPayments } from '../../utils/paymentLogger';
 import { normalizeScannedBarcode, normalizeArabicName } from '../../utils/barcodeUtils';
+import { rankStudents } from '../../utils/studentSearch';
 import {
   isSessionDateToday,
   isGroupToday,
@@ -256,18 +257,16 @@ export default function AttendancePage() {
     }
   }, [group?.groupId, group?.sessionDates]);
 
-  if (!group) {
-    return <div>لم يتم العثور على الفوج المطلوب.</div>;
-  }
-
   const realStudents = React.useMemo(() => {
+    if (!group) return [];
     return (group.students || []).filter((s) => !isSummaryRow(s, group.groupId));
-  }, [group.students, group.groupId]);
+  }, [group?.students, group?.groupId]);
 
-  const todaySessionIndex = group.sessionDates.findIndex((d) => isSessionDateToday(formatToYYYYMMDD(d) || d));
+  const todaySessionIndex = (group?.sessionDates || []).findIndex((d) => isSessionDateToday(formatToYYYYMMDD(d) || d));
 
   // Dynamic Session Attendance Stats Selector (defaults to today or latest session with attendance)
   const [selectedSessionStatsIndex, setSelectedSessionStatsIndex] = useState<number>(() => {
+    if (!group) return 0;
     return todaySessionIndex !== -1 ? todaySessionIndex : getDefaultSessionIndex(group, new Date());
   });
 
@@ -281,37 +280,21 @@ export default function AttendancePage() {
   }, [group?.groupId, group?.sessionDates]);
 
   // Filter students (supports Name, Student ID / Barcode, Phone)
-  const filteredStudents = realStudents.filter((s) => {
-    const rawQ = searchQuery.trim();
-    if (!rawQ) {
-      if (filterDebt === 'debt') return s.debt > 0;
-      if (filterDebt === 'paid') return s.debt === 0 && s.fee > 0;
-      if (filterDebt === 'exempt') return s.discount === '0';
-      return true;
-    }
-
-    const q = rawQ.toLowerCase();
-    const normalizedScan = normalizeScannedBarcode(rawQ).toLowerCase();
-    const normalizedDigits = q.replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString());
-    const cleanDigits = normalizedDigits.replace(/\D/g, '');
-
-    const barcode = (s.barcode || '').toLowerCase();
-    const matchesId =
-      (barcode && (barcode.includes(q) || barcode.includes(normalizedScan) || barcode.includes(normalizedDigits))) ||
-      (cleanDigits.length >= 2 && barcode.replace(/\D/g, '').includes(cleanDigits)) ||
-      (cleanDigits.length > 0 && String(s.rowId) === cleanDigits);
-
-    const matchesSearch =
-      matchesId ||
-      s.name.toLowerCase().includes(q) ||
-      (s.phone && (s.phone.includes(q) || s.phone.includes(cleanDigits)));
-
-    if (!matchesSearch) return false;
+  // Results are ranked by relevance so the searched student always appears at the top.
+  const debtFilteredStudents = realStudents.filter((s) => {
     if (filterDebt === 'debt') return s.debt > 0;
     if (filterDebt === 'paid') return s.debt === 0 && s.fee > 0;
     if (filterDebt === 'exempt') return s.discount === '0';
     return true;
   });
+  const filteredStudents = searchQuery.trim()
+    ? rankStudents(debtFilteredStudents, searchQuery, (s) => ({
+        name: s.name,
+        phone: s.phone,
+        barcodes: [s.barcode],
+        rowIds: [s.rowId]
+      }))
+    : debtFilteredStudents;
 
   // Calculate live aggregate attendance statistics for the selected session
   const sessionAttendanceStats = React.useMemo(() => {
@@ -337,6 +320,11 @@ export default function AttendancePage() {
     const rate = total > 0 ? Math.round((present / total) * 100) : 0;
     return { present, absent, makeup, unmarked, total, rate };
   }, [group, selectedSessionStatsIndex, filteredStudents, realStudents]);
+
+  // IMPORTANT: keep this early return AFTER every hook call (Rules of Hooks).
+  if (!group) {
+    return <div>لم يتم العثور على الفوج المطلوب.</div>;
+  }
 
 
   // Save session dates

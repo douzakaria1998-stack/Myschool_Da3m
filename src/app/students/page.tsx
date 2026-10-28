@@ -31,6 +31,7 @@ import GroupBadgesModal from '../../components/GroupBadgesModal';
 import MultiGroupPaymentModal from '../../components/MultiGroupPaymentModal';
 import { normalizeArabicName, normalizeScannedBarcode } from '../../utils/barcodeUtils';
 import { isSummaryRow } from '../../utils/sessionUtils';
+import { rankStudents } from '../../utils/studentSearch';
 
 export interface GroupEnrollment {
   groupId: string;
@@ -227,78 +228,37 @@ export default function StudentsPage() {
   const vipList = allStudents.filter((item) => item.groups.some((g) => g.isVip));
 
   // Filtered students (supports searching by Name, Student ID / Barcode, Phone, Group, Subject, Teacher)
+  // Results are ranked by relevance so the searched student always appears at the top.
   const filteredStudents = useMemo(() => {
-    const rawQ = search.trim();
-    if (!rawQ) {
-      return allStudents.filter((item) => {
-        const matchesGroup =
-          selectedGroupFilter === 'all' ||
-          item.groups.some((g) => g.groupId === selectedGroupFilter);
-        if (!matchesGroup) return false;
-        if (filterType === 'debt') return item.balance < 0;
-        if (filterType === 'paid') return item.balance >= 0;
-        if (filterType === 'multi') return item.groups.length > 1;
-        if (filterType === 'vip') return item.groups.some((g) => g.isVip);
-        return true;
-      });
-    }
-
-    const q = rawQ.toLowerCase();
-    const normalizedScan = normalizeScannedBarcode(rawQ).toLowerCase();
-    // Normalize Arabic-Indic digits (٠-٩) to 0-9
-    const normalizedDigits = q.replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString());
-    const cleanDigits = normalizedDigits.replace(/\D/g, '');
-
-    return allStudents.filter((item) => {
-      // Gather all associated barcodes / IDs for this student
-      const barcodes = [
-        item.barcode,
-        item.primaryStudentRecord.barcode,
-        ...item.groups.map((g) => g.student.barcode)
-      ].filter(Boolean) as string[];
-
-      // Match Student ID / Barcode: full string, normalized scan, alphanumeric, or numeric ID sequence
-      const matchesId =
-        barcodes.some((b) => {
-          const bLower = b.toLowerCase();
-          if (
-            bLower.includes(q) ||
-            bLower.includes(normalizedScan) ||
-            bLower.includes(normalizedDigits)
-          ) {
-            return true;
-          }
-          if (cleanDigits.length >= 2 && b.replace(/\D/g, '').includes(cleanDigits)) return true;
-          return false;
-        }) ||
-        (cleanDigits.length > 0 &&
-          (String(item.rowId) === cleanDigits ||
-            String(item.primaryStudentRecord.rowId) === cleanDigits ||
-            item.groups.some((g) => String(g.student.rowId) === cleanDigits)));
-
-      const matchesSearch =
-        matchesId ||
-        item.name.toLowerCase().includes(q) ||
-        (item.phone && (item.phone.includes(q) || item.phone.includes(cleanDigits))) ||
-        item.groups.some(
-          (g) =>
-            g.groupId.toLowerCase().includes(q) ||
-            g.subject.toLowerCase().includes(q) ||
-            g.teacherName.toLowerCase().includes(q)
-        );
-
+    const baseList = allStudents.filter((item) => {
       const matchesGroup =
         selectedGroupFilter === 'all' ||
         item.groups.some((g) => g.groupId === selectedGroupFilter);
-
-      if (!matchesSearch || !matchesGroup) return false;
-
+      if (!matchesGroup) return false;
       if (filterType === 'debt') return item.balance < 0;
       if (filterType === 'paid') return item.balance >= 0;
       if (filterType === 'multi') return item.groups.length > 1;
       if (filterType === 'vip') return item.groups.some((g) => g.isVip);
       return true;
     });
+
+    if (!search.trim()) return baseList;
+
+    return rankStudents(baseList, search, (item) => ({
+      name: item.name,
+      phone: item.phone,
+      barcodes: [
+        item.barcode,
+        item.primaryStudentRecord.barcode,
+        ...item.groups.map((g) => g.student.barcode)
+      ],
+      rowIds: [
+        item.rowId,
+        item.primaryStudentRecord.rowId,
+        ...item.groups.map((g) => g.student.rowId)
+      ],
+      extra: item.groups.flatMap((g) => [g.groupId, g.subject, g.teacherName])
+    }));
   }, [allStudents, search, selectedGroupFilter, filterType]);
 
   // Pagination

@@ -301,8 +301,6 @@ export default function MultiGroupPaymentModal({
     }
   }, [isOpen, initialStudent, initialSubjectFilter]);
 
-  if (!isOpen) return null;
-
   // Toggle group selection
   const handleToggleGroup = (groupId: string) => {
     setGroupItems((prev) =>
@@ -443,6 +441,9 @@ export default function MultiGroupPaymentModal({
   const accumulatedDebtForScope = useMemo(() => {
     return scopedGroupItems.reduce((sum, item) => sum + (item.currentDebt > 0 ? item.currentDebt : 0), 0);
   }, [scopedGroupItems]);
+
+  // IMPORTANT: keep this early return AFTER every hook call (Rules of Hooks).
+  if (!isOpen) return null;
 
   const unpaidCount = scopedGroupItems.filter((i) => i.currentDebt > 0 || i.isNewEnrollment).length;
   const paidCount = scopedGroupItems.filter((i) => i.currentDebt <= 0 && !i.isNewEnrollment).length;

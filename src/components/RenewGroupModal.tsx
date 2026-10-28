@@ -68,6 +68,23 @@ export default function RenewGroupModal({ sourceGroupId, onClose, onCreated }: P
     return ids;
   });
 
+  // Source group session dates and last session date
+  const sourceDates = useMemo(() => {
+    return (sourceGroup?.sessionDates || []).filter((d) => Boolean(d && typeof d === 'string' && d.trim()));
+  }, [sourceGroup?.sessionDates]);
+
+  const lastSessionDateStr = sourceDates.length > 0 ? sourceDates[sourceDates.length - 1] : null;
+
+  // New cycle first session date - defaults to the next session date after lastSessionDateStr
+  // User rule: "ex if the last session for inactive group was wednesday 16/09/2026, the new group first session should be next wednesday 23/09/2026"
+  const defaultFirstSessionDate = useMemo(() => {
+    const nextDate = getNextSessionDateAfter(lastSessionDateStr, sourceGroup?.day1 || 'السبت', sourceGroup?.day2);
+    return formatToYYYYMMDD(nextDate);
+  }, [lastSessionDateStr, sourceGroup?.day1, sourceGroup?.day2]);
+
+  const [firstSessionDate, setFirstSessionDate] = useState<string>(defaultFirstSessionDate);
+
+  // IMPORTANT: keep this early return AFTER every hook call (Rules of Hooks).
   if (!sourceGroup) return null;
 
   // Validation
@@ -113,22 +130,6 @@ export default function RenewGroupModal({ sourceGroupId, onClose, onCreated }: P
       (s.phone && s.phone.includes(searchQuery));
     return matchesSearch;
   });
-
-  // Source group session dates and last session date
-  const sourceDates = useMemo(() => {
-    return (sourceGroup?.sessionDates || []).filter((d) => Boolean(d && typeof d === 'string' && d.trim()));
-  }, [sourceGroup?.sessionDates]);
-
-  const lastSessionDateStr = sourceDates.length > 0 ? sourceDates[sourceDates.length - 1] : null;
-
-  // New cycle first session date - defaults to the next session date after lastSessionDateStr
-  // User rule: "ex if the last session for inactive group was wednesday 16/09/2026, the new group first session should be next wednesday 23/09/2026"
-  const defaultFirstSessionDate = useMemo(() => {
-    const nextDate = getNextSessionDateAfter(lastSessionDateStr, sourceGroup?.day1 || 'السبت', sourceGroup?.day2);
-    return formatToYYYYMMDD(nextDate);
-  }, [lastSessionDateStr, sourceGroup?.day1, sourceGroup?.day2]);
-
-  const [firstSessionDate, setFirstSessionDate] = useState<string>(defaultFirstSessionDate);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

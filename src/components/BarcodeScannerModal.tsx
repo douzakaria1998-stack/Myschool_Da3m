@@ -74,6 +74,7 @@ export interface PendingCoverRequest {
   sessionIdx: number;
   time: string;
   coveringMatch?: CoveringMatchResult;
+  addedAt?: number;
 }
 
 interface Props {
@@ -102,6 +103,84 @@ const saveDismissedGroupIds = (ids: string[]) => {
     localStorage.setItem(getDismissedStorageKey(), JSON.stringify(ids));
   } catch (err) {
     console.error('Failed to save dismissed group ids', err);
+  }
+};
+
+// =========================================================================
+// WAITING QUEUE STORAGE ENGINE (PERSISTS ACROSS REFRESH, EXPIRES AFTER 120 MIN)
+// =========================================================================
+const WAITING_QUEUE_STORAGE_KEY = 'da3m_scanner_waiting_queue_v2';
+const WAITING_LIST_TTL_MS = 120 * 60 * 1000; // 120 minutes (2 hours)
+
+const loadWaitingQueueFromStorage = () => {
+  if (typeof window === 'undefined') {
+    return { debtors: [], coverRequests: [], customAmounts: {}, recentScans: [] };
+  }
+  try {
+    const raw = localStorage.getItem(WAITING_QUEUE_STORAGE_KEY);
+    if (!raw) return { debtors: [], coverRequests: [], customAmounts: {}, recentScans: [] };
+    const parsed = JSON.parse(raw);
+    const now = Date.now();
+    const fallbackTime = parsed.savedAt || now;
+
+    // Filter out items older than 120 minutes (7200 seconds)
+    const debtors = (parsed.pendingDebtors || []).filter((d: any) => {
+      const itemTime = d.addedAt || fallbackTime;
+      return now - itemTime < WAITING_LIST_TTL_MS;
+    });
+
+    const coverRequests = (parsed.pendingCoverRequests || []).filter((c: any) => {
+      const itemTime = c.addedAt || fallbackTime;
+      return now - itemTime < WAITING_LIST_TTL_MS;
+    });
+
+    const recentScans = (parsed.recentScans || []).filter((s: any) => {
+      const itemTime = s.addedAt || fallbackTime;
+      return now - itemTime < WAITING_LIST_TTL_MS;
+    });
+
+    const validDebtorIds = new Set(debtors.map((d: any) => d.id));
+    const customAmounts: Record<string, string> = {};
+    if (parsed.debtorCustomAmounts) {
+      Object.entries(parsed.debtorCustomAmounts).forEach(([k, v]) => {
+        if (validDebtorIds.has(k) && typeof v === 'string') {
+          customAmounts[k] = v;
+        }
+      });
+    }
+
+    return { debtors, coverRequests, customAmounts, recentScans };
+  } catch (err) {
+    console.error('Failed to load waiting queue from storage', err);
+    return { debtors: [], coverRequests: [], customAmounts: {}, recentScans: [] };
+  }
+};
+
+const saveWaitingQueueToStorage = (
+  debtors: any[],
+  coverRequests: any[],
+  customAmounts: Record<string, string>,
+  scans: any[]
+) => {
+  if (typeof window === 'undefined') return;
+  try {
+    const now = Date.now();
+    const validDebtors = debtors.filter((d) => !d.addedAt || now - d.addedAt < WAITING_LIST_TTL_MS);
+    const validCoverReqs = coverRequests.filter((c) => !c.addedAt || now - c.addedAt < WAITING_LIST_TTL_MS);
+    const validScans = scans.filter((s) => !s.addedAt || now - s.addedAt < WAITING_LIST_TTL_MS);
+
+    localStorage.setItem(
+      WAITING_QUEUE_STORAGE_KEY,
+      JSON.stringify({
+        savedAt: now,
+        pendingDebtors: validDebtors,
+        pendingCoverRequests: validCoverReqs,
+        debtorCustomAmounts: customAmounts,
+        recentScans: validScans
+      })
+    );
+  } catch (err) {
+    console.error('Failed to save waiting queue to storage', err);
   }
 };
 
@@ -204,12 +283,14 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       status: 'P' | 'M' | 'C' | 'DEBT' | 'COVER_REQ';
       debt?: number;
       time: string;
+      addedAt?: number;
     }>
   >([]);
 
   // =========================================================================
   // LIVE ACTION / NOTIFICATION QUEUE (ON THE LEFT SIDE)
   // All scanner notifications (covering requests, unpaid students) appear here!
+  // PERSISTS ACROSS REFRESH, EXPIRES AUTOMATICALLY AFTER 120 MINUTES
   // =========================================================================
   const [pendingCoverRequests, setPendingCoverRequests] = useState<PendingCoverRequest[]>([]);
   const [confirmActionModal, setConfirmActionModal] = useState<{
@@ -225,6 +306,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       sessionIdx: number;
       debt: number;
       time: string;
+      addedAt?: number;
     }>
   >([]);
   const [debtorCustomAmounts, setDebtorCustomAmounts] = useState<Record<string, string>>({});
@@ -234,31 +316,65 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     subjectFilter?: string;
   } | null>(null);
 
-  // Accurately tracks accumulated debts for a student who is enrolled in multiple groups (same subject or all subjects)
-  const getStudentAccumulatedDebtInfo = useCallback((student: StudentRecord, currentGroupId: string) => {
-    const studentNorm = normalizeArabicName(student.name);
-    const studentBarcodeUpper = (student.barcode || '').trim().toUpperCase();
-    const currentGroup = data.groupData[currentGroupId];
-    const currentGroupMeta = data.groups.find((g) => g.id === currentGroupId);
-    const currentSubj = (currentGroup?.subject || currentGroupMeta?.subject || '').trim();
-    const currentNormSubj = normalizeSubjectName(currentSubj);
+  const hasHydratedQueueRef = useRef(false);
 
-    let sameSubjectDebt = 0;
-    let sameSubjectGroupsCount = 0;
-    const sameSubjectGroupIds: string[] = [];
-    let otherSubjectsDebt = 0;
-    let otherSubjectsCount = 0;
-    const otherSubjectsList: { subject: string; debt: number; groupId: string }[] = [];
+  // Restore waiting queue from localStorage on mount (preserves data across page refresh for 120 min)
+  useEffect(() => {
+    const queue = loadWaitingQueueFromStorage();
+    if (queue.debtors.length > 0) setPendingDebtors(queue.debtors);
+    if (queue.coverRequests.length > 0) setPendingCoverRequests(queue.coverRequests);
+    if (Object.keys(queue.customAmounts).length > 0) setDebtorCustomAmounts(queue.customAmounts);
+    if (queue.recentScans.length > 0) setRecentScans(queue.recentScans);
+    hasHydratedQueueRef.current = true;
+  }, []);
+
+  // Save waiting queue to localStorage on any state change
+  useEffect(() => {
+    if (!hasHydratedQueueRef.current) return;
+    saveWaitingQueueToStorage(pendingDebtors, pendingCoverRequests, debtorCustomAmounts, recentScans);
+  }, [pendingDebtors, pendingCoverRequests, debtorCustomAmounts, recentScans]);
+
+  // Periodic expiration cleaner: automatically purges entries older than 120 minutes (2 hours)
+  useEffect(() => {
+    const cleanupInterval = setInterval(() => {
+      const now = Date.now();
+      setPendingDebtors((prev) => {
+        const filtered = prev.filter((d) => !d.addedAt || now - d.addedAt < WAITING_LIST_TTL_MS);
+        return filtered.length === prev.length ? prev : filtered;
+      });
+      setPendingCoverRequests((prev) => {
+        const filtered = prev.filter((c) => !c.addedAt || now - c.addedAt < WAITING_LIST_TTL_MS);
+        return filtered.length === prev.length ? prev : filtered;
+      });
+      setRecentScans((prev) => {
+        const filtered = prev.filter((s) => !s.addedAt || now - s.addedAt < WAITING_LIST_TTL_MS);
+        return filtered.length === prev.length ? prev : filtered;
+      });
+    }, 60000); // Check every minute
+    return () => clearInterval(cleanupInterval);
+  }, []);
+
+  // Pre-indexed map of student debts across all groups: O(1) instant lookup!
+  // Prevents UI freezes and keystroke drops when waiting list has 25+ students
+  const studentDebtsIndex = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        subjects: Map<string, { subject: string; debt: number; groupIds: string[] }>;
+        totalDebt: number;
+      }
+    >();
+
+    const getOrCreate = (key: string) => {
+      let entry = map.get(key);
+      if (!entry) {
+        entry = { subjects: new Map(), totalDebt: 0 };
+        map.set(key, entry);
+      }
+      return entry;
+    };
 
     Object.entries(data.groupData).forEach(([gid, group]) => {
-      const found = (group.students || []).find(
-        (s) =>
-          !isSummaryRow(s, gid) &&
-          ((studentBarcodeUpper && s.barcode && s.barcode.trim().toUpperCase() === studentBarcodeUpper) ||
-            (studentNorm && normalizeArabicName(s.name) === studentNorm))
-      );
-      if (!found) return;
-
       const groupMeta = data.groups.find((g) => g.id === gid);
       const isVipGroup =
         isVipGroupId(gid) ||
@@ -268,41 +384,113 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
         Boolean(group.type?.includes('10000')) ||
         Boolean(groupMeta?.type?.includes('10000'));
       const targetType = group.type || groupMeta?.type || (isVipGroup ? '4-10000' : '4-2500');
-      const finances = calcStudentFinancesPure(
-        found,
-        targetType,
-        data.pricingTiers,
-        { ...group, groupId: gid, isVip: isVipGroup }
-      );
-
-      const debt = finances.debt > 0 ? finances.debt : 0;
       const grpSubj = (group.subject || groupMeta?.subject || '').trim();
       const grpNormSubj = normalizeSubjectName(grpSubj);
 
-      if (grpNormSubj === currentNormSubj) {
-        sameSubjectDebt += debt;
-        sameSubjectGroupsCount += 1;
-        sameSubjectGroupIds.push(gid);
-      } else {
-        if (debt > 0) {
-          otherSubjectsDebt += debt;
-          otherSubjectsCount += 1;
-          otherSubjectsList.push({ subject: grpSubj, debt, groupId: gid });
-        }
-      }
+      (group.students || []).forEach((s) => {
+        if (isSummaryRow(s, gid) || !s.name?.trim()) return;
+
+        const normName = normalizeArabicName(s.name);
+        const barcodeUpper = (s.barcode || '').trim().toUpperCase();
+
+        const finances = calcStudentFinancesPure(
+          s,
+          targetType,
+          data.pricingTiers,
+          { ...group, groupId: gid, isVip: isVipGroup }
+        );
+
+        const debt = finances.debt > 0 ? finances.debt : 0;
+
+        const keys: string[] = [];
+        if (normName) keys.push(normName);
+        if (barcodeUpper) keys.push(barcodeUpper);
+        const serial = barcodeUpper.match(/(2[67]\d{6})/)?.[1];
+        if (serial) keys.push(serial);
+
+        keys.forEach((key) => {
+          const entry = getOrCreate(key);
+          let subjEntry = entry.subjects.get(grpNormSubj);
+          if (!subjEntry) {
+            subjEntry = { subject: grpSubj, debt: 0, groupIds: [] };
+            entry.subjects.set(grpNormSubj, subjEntry);
+          }
+          if (!subjEntry.groupIds.includes(gid)) {
+            subjEntry.groupIds.push(gid);
+            subjEntry.debt += debt;
+            entry.totalDebt += debt;
+          }
+        });
+      });
     });
 
-    return {
-      currentSubject: currentSubj,
-      sameSubjectDebt,
-      sameSubjectGroupsCount,
-      sameSubjectGroupIds,
-      otherSubjectsDebt,
-      otherSubjectsCount,
-      otherSubjectsList,
-      totalAllSubjectsDebt: sameSubjectDebt + otherSubjectsDebt
-    };
+    return map;
   }, [data.groupData, data.groups, data.pricingTiers]);
+
+  // Accurately tracks accumulated debts for a student using O(1) pre-computed index
+  const getStudentAccumulatedDebtInfo = useCallback(
+    (student: StudentRecord, currentGroupId: string) => {
+      const studentNorm = normalizeArabicName(student.name);
+      const studentBarcodeUpper = (student.barcode || '').trim().toUpperCase();
+      const currentGroup = data.groupData[currentGroupId];
+      const currentGroupMeta = data.groups.find((g) => g.id === currentGroupId);
+      const currentSubj = (currentGroup?.subject || currentGroupMeta?.subject || '').trim();
+      const currentNormSubj = normalizeSubjectName(currentSubj);
+
+      const serial = studentBarcodeUpper.match(/(2[67]\d{6})/)?.[1];
+
+      const entry =
+        (studentBarcodeUpper ? studentDebtsIndex.get(studentBarcodeUpper) : null) ||
+        (serial ? studentDebtsIndex.get(serial) : null) ||
+        (studentNorm ? studentDebtsIndex.get(studentNorm) : null);
+
+      if (!entry) {
+        return {
+          currentSubject: currentSubj,
+          sameSubjectDebt: student.debt > 0 ? student.debt : 0,
+          sameSubjectGroupsCount: 1,
+          sameSubjectGroupIds: [currentGroupId],
+          otherSubjectsDebt: 0,
+          otherSubjectsCount: 0,
+          otherSubjectsList: [],
+          totalAllSubjectsDebt: student.debt > 0 ? student.debt : 0
+        };
+      }
+
+      const sameSubjEntry = entry.subjects.get(currentNormSubj);
+      const sameSubjectDebt = sameSubjEntry ? sameSubjEntry.debt : (student.debt > 0 ? student.debt : 0);
+      const sameSubjectGroupsCount = sameSubjEntry ? sameSubjEntry.groupIds.length : 1;
+      const sameSubjectGroupIds = sameSubjEntry ? sameSubjEntry.groupIds : [currentGroupId];
+
+      let otherSubjectsDebt = 0;
+      let otherSubjectsCount = 0;
+      const otherSubjectsList: { subject: string; debt: number; groupId: string }[] = [];
+
+      entry.subjects.forEach((subjData, normSubj) => {
+        if (normSubj !== currentNormSubj && subjData.debt > 0) {
+          otherSubjectsDebt += subjData.debt;
+          otherSubjectsCount += 1;
+          otherSubjectsList.push({
+            subject: subjData.subject,
+            debt: subjData.debt,
+            groupId: subjData.groupIds[0] || ''
+          });
+        }
+      });
+
+      return {
+        currentSubject: currentSubj,
+        sameSubjectDebt,
+        sameSubjectGroupsCount,
+        sameSubjectGroupIds,
+        otherSubjectsDebt,
+        otherSubjectsCount,
+        otherSubjectsList,
+        totalAllSubjectsDebt: sameSubjectDebt + otherSubjectsDebt
+      };
+    },
+    [data.groupData, data.groups, studentDebtsIndex]
+  );
 
   const handleMultiPaymentSuccess = useCallback((studentName: string, settledGroupIds: string[]) => {
     const studentNorm = normalizeArabicName(studentName);
@@ -670,11 +858,17 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     const candidates = getBarcodeCandidates(cleanRaw);
     if (candidates.length === 0) return null;
 
+    const isBarcodeQuery =
+      /^(?:STU|BAC|SEC|BEM|لاشؤ|لاضؤ|ستو|سفع)/i.test(cleanRaw) ||
+      /(?:2[67]\d{6})/i.test(cleanRaw) ||
+      /^(?:STU[-_]?)?\d{6,10}$/i.test(cleanRaw);
+
     const doesStudentMatch = (s: StudentRecord, gid: string): boolean => {
       if (isSummaryRow(s, gid)) return false;
 
       const sBarcodeUpper = (s.barcode || '').trim().toUpperCase();
       const sBarcodeAlpha = sBarcodeUpper.replace(/[^A-Z0-9]/g, '');
+      const sSerial = sBarcodeUpper.match(/(2[67]\d{6})/)?.[1];
       const sIdUpper = `${gid}-${s.rowId}`.toUpperCase();
       const sId2 = `${gid}-${String(s.rowId).padStart(2, '0')}`.toUpperCase();
       const sId3 = `${gid}-${String(s.rowId).padStart(3, '0')}`.toUpperCase();
@@ -687,12 +881,20 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
         const candUpper = cand.trim().toUpperCase();
         const candAlpha = candUpper.replace(/[^A-Z0-9]/g, '');
         const candDigits = cand.replace(/[^0-9]/g, '');
+        const candSerial = candUpper.match(/(2[67]\d{6})/)?.[1];
         const candNorm = normalizeArabicName(cand);
 
+        // 1. Direct barcode match
         if (sBarcodeUpper && (candUpper === sBarcodeUpper || (sBarcodeAlpha && candAlpha === sBarcodeAlpha))) {
           return true;
         }
 
+        // 1b. 8-digit student serial match (e.g. 27000101 vs STU-27000101 across layouts)
+        if (sSerial && candSerial && sSerial === candSerial) {
+          return true;
+        }
+
+        // 2. Group ID barcode match (e.g. BAC01-1)
         if (
           candUpper === sIdUpper ||
           candUpper === sId2 ||
@@ -702,16 +904,26 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
           return true;
         }
 
-        if (sPhoneClean && candDigits && candDigits.length >= 8 && (candDigits === sPhoneClean || sPhoneClean.endsWith(candDigits))) {
+        // If this is a barcode/card scan, NEVER match by name or phone!
+        if (isBarcodeQuery) {
+          continue;
+        }
+
+        // 3. Phone match (only when query has >= 8 digits)
+        if (sPhoneClean && candDigits.length >= 8 && (candDigits === sPhoneClean || sPhoneClean.endsWith(candDigits))) {
           return true;
         }
 
-        if (sNameNorm && (candNorm === sNameNorm || sNameNorm.includes(candNorm) || candNorm.includes(sNameNorm))) {
-          return true;
+        // 4. Name match (only for manual search and when typed query is >= 3 characters)
+        if (sNameNorm && candNorm.length >= 3) {
+          if (sNameNorm === candNorm || sNameNorm.startsWith(candNorm) || sNameNorm.includes(candNorm)) {
+            return true;
+          }
         }
       }
 
-      if (/^\d{1,3}$/.test(cleanRaw) && gid === targetGroupId && sRowStr === cleanRaw) {
+      // 5. Short manual row number entry (1-3 digits only) in the active group (when NOT a barcode)
+      if (!isBarcodeQuery && /^\d{1,3}$/.test(cleanRaw) && gid === targetGroupId && sRowStr === cleanRaw) {
         return true;
       }
 
@@ -829,20 +1041,21 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
           isScannerActiveRef.current ||
           burstChars.toUpperCase().startsWith('STU') ||
           normalizedBurst.toUpperCase().startsWith('STU') ||
-          (burstChars.length >= 4 && avgInterval < 75) ||
-          Boolean(findStudentByCode(burstChars)) ||
-          Boolean(findStudentByCode(normalizedBurst));
+          (burstChars.length >= 4 && avgInterval < 85);
 
         if (isFocusedOnScanner) {
           e.preventDefault();
           scannerBurstRef.current = [];
           isScannerActiveRef.current = false;
-          handleBarcodeSubmit(undefined, normalizedBurst || burstChars);
+          const inputVal = (scannerInputRef.current?.value || '').trim();
+          const cleanInputVal = normalizeScannedBarcode(inputVal) || inputVal;
+          const codeToSubmit = cleanInputVal || normalizedBurst || burstChars;
+          handleBarcodeSubmit(undefined, codeToSubmit);
           return;
         }
 
         // Hardware scanner typed while admin was focused elsewhere in the operations panel!
-        if (isHardwareBurst && burstChars.length >= 2) {
+        if (isHardwareBurst && (normalizedBurst.length >= 2 || burstChars.length >= 2)) {
           e.preventDefault();
           e.stopPropagation();
 
@@ -873,7 +1086,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
         return;
       }
 
-      // Reset auto-clear / auto-submit timer (fires ultra-fast in 85ms if no Enter received)
+      // Reset auto-clear / auto-submit timer (fires in 110ms if no Enter received)
       if (scannerResetTimerRef.current) {
         clearTimeout(scannerResetTimerRef.current);
       }
@@ -905,7 +1118,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
         }
         scannerBurstRef.current = [];
         isScannerActiveRef.current = false;
-      }, 85);
+      }, 110);
 
       if (e.key === 'Backspace') {
         if (scannerBurstRef.current.length > 0) {
@@ -917,7 +1130,8 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       // Single printable character
       if (e.key.length === 1) {
         // If burst is empty or there was a long pause, initialize new burst buffer
-        if (burst.length === 0 || interval > 120) {
+        const maxInterval = isScannerActiveRef.current ? 400 : 120;
+        if (burst.length === 0 || interval > maxInterval) {
           burstTargetElRef.current = activeEl;
           preBurstValueRef.current = activeEl?.value || '';
           scannerBurstRef.current = [{ char: e.key, time: now }];
@@ -928,8 +1142,8 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
         // Second or subsequent character in rapid succession
         scannerBurstRef.current.push({ char: e.key, time: now });
 
-        // Hardware scanner speed check: superhuman interval (< 55ms)
-        if (interval < 55) {
+        // Hardware scanner speed check: superhuman interval (< 65ms)
+        if (interval < 65) {
           isScannerActiveRef.current = true;
         }
 
@@ -972,7 +1186,11 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       scanTimeoutRef.current = null;
     }
 
-    const rawInput = (directCode !== undefined ? directCode : barcodeInput).trim();
+    const rawInput = (
+      directCode !== undefined && directCode !== ''
+        ? directCode
+        : scannerInputRef.current?.value || barcodeInput
+    ).trim();
     if (!rawInput) return;
 
     // Clean and normalize the barcode immediately (handles SYTU, interleaved typing, AZERTY layouts, etc.)
@@ -980,6 +1198,9 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
 
     // Display cleaned code in right-hand barcode input box
     setBarcodeInput(rawCode);
+    if (scannerInputRef.current) {
+      scannerInputRef.current.value = '';
+    }
     setTimeout(() => {
       setBarcodeInput('');
     }, 1800);
@@ -1077,15 +1298,17 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
         ) ||
         result.student;
 
+      const nowTs = Date.now();
       const newCoverReq: PendingCoverRequest = {
-        id: `${Date.now()}-${Math.random()}`,
+        id: `${nowTs}-${Math.random()}`,
         student: sourceStudentRec,
         homeGroupId: matchedSourceGid,
         studentEnrolledGroups: result.studentEnrolledGroups,
         targetActiveGroupId: targetGid,
         sessionIdx: targetSession,
         time: nowStr,
-        coveringMatch
+        coveringMatch,
+        addedAt: nowTs
       };
 
       setPendingCoverRequests((prev) => {
@@ -1116,14 +1339,15 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       // Add to recent scans log on right
       setRecentScans((prev) => [
         {
-          id: `${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+          id: `${nowTs}-${Math.random().toString(36).substr(2, 4)}`,
           studentName: result.student.name,
           groupId: targetGid,
           sessionIndex: targetSession,
           status: 'COVER_REQ',
-          time: nowStr
+          time: nowStr,
+          addedAt: nowTs
         },
-        ...prev.slice(0, 9)
+        ...prev.slice(0, 19)
       ]);
 
       setBarcodeInput('');
@@ -1284,18 +1508,21 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       isCover: !!isCover
     });
 
+    const nowTs = Date.now();
+
     // Add to Live Recent Scans History on the Right
     setRecentScans((prev) => [
       {
-        id: `${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        id: `${nowTs}-${Math.random().toString(36).substr(2, 4)}`,
         studentName: student.name,
         groupId,
         sessionIndex: sessionIdx,
         status: isPaid ? (isCover ? 'M' : 'P') : 'DEBT',
         debt: effectiveDebt,
-        time: nowTimeStr
+        time: nowTimeStr,
+        addedAt: nowTs
       },
-      ...prev.slice(0, 9)
+      ...prev.slice(0, 19)
     ]);
 
     if (isPaid) {
@@ -1326,12 +1553,13 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
         return [
           ...filtered,
           {
-            id: `${Date.now()}-${Math.random()}`,
+            id: `${nowTs}-${Math.random()}`,
             student,
             groupId,
             sessionIdx,
             debt: effectiveDebt,
-            time: nowTimeStr
+            time: nowTimeStr,
+            addedAt: nowTs
           }
         ];
       });
@@ -2563,7 +2791,9 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                       clearTimeout(scanTimeoutRef.current);
                       scanTimeoutRef.current = null;
                     }
-                    handleBarcodeSubmit();
+                    const val = (e.currentTarget.value || barcodeInput || '').trim();
+                    const cleanVal = normalizeScannedBarcode(val) || val;
+                    handleBarcodeSubmit(undefined, cleanVal);
                   }
                 }}
                 placeholder="امسح البطاقة أو اكتب الرمز هنا..."
