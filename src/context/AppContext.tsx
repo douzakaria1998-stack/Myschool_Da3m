@@ -21,6 +21,7 @@ import {
   isSummaryRow,
   formatToYYYYMMDD,
   generateSessionDates,
+  updateGroupScheduleDates,
   isVipGroupId,
   isValidGroupId,
   getNextGroupId,
@@ -116,7 +117,7 @@ interface AppContextType {
     selectedStudentRowIds: number[],
     customGroupFields?: Partial<GroupMeta>
   ) => void;
-  updateGroup: (groupId: string, fields: Partial<GroupMeta>) => void;
+  updateGroup: (groupId: string, fields: Partial<GroupMeta> & { startScheduleFromSession?: number }) => void;
   renameGroup: (oldId: string, newId: string) => boolean;
   deleteGroup: (groupId: string) => void;
   updateGroupFinances: (groupId: string, finances: { studentFee: number; teacherPayPerStudent: number; schoolSharePerStudent: number }) => void;
@@ -3501,18 +3502,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   // Update all info for a group (teacher, subject, schedule, tier, VIP, sessions, finances)
-  const updateGroup = (groupId: string, fields: Partial<GroupMeta>) => {
+  const updateGroup = (groupId: string, fields: Partial<GroupMeta> & { startScheduleFromSession?: number }) => {
     const group = data.groupData[groupId];
     if (!group) return;
 
     const newSessionCount = fields.sessionCount || group.sessionCount || group.sessionDates.length || 8;
     const dayChanged = Boolean(fields.day1 && fields.day1 !== group.day1);
+    const day2Changed = Boolean(fields.day2 !== undefined && fields.day2 !== group.day2);
     let newSessionDates = [...group.sessionDates];
 
-    if (dayChanged) {
-      const effectiveDay = fields.day1 || group.day1 || 'السبت';
-      // When scheduled day changes, regenerate session dates aligned with that weekday
-      newSessionDates = generateSessionDates(effectiveDay, newSessionCount, formatToYYYYMMDD(new Date()));
+    if (dayChanged || day2Changed) {
+      const effectiveDay1 = fields.day1 || group.day1 || 'السبت';
+      const effectiveDay2 = fields.day2 !== undefined ? fields.day2 : group.day2;
+      // When study days change, preserve completed/past sessions historically and only update upcoming sessions
+      newSessionDates = updateGroupScheduleDates({
+        currentDates: group.sessionDates,
+        totalSessions: newSessionCount,
+        newDay1: effectiveDay1,
+        newDay2: effectiveDay2,
+        students: group.students,
+        explicitStartIndex: fields.startScheduleFromSession
+      });
     } else if (newSessionCount !== newSessionDates.length) {
       if (newSessionCount > newSessionDates.length) {
         const lastDate = newSessionDates[newSessionDates.length - 1];
@@ -3571,11 +3581,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     updatedGroup.students = recalculatedStudents;
 
     const currentData = dataRef.current || data;
+    const { startScheduleFromSession: _, ...groupMetaFields } = fields;
     const updatedGroupsMeta = currentData.groups.map((g) => {
       if (g.id === groupId) {
         const next: GroupMeta = {
           ...g,
-          ...fields,
+          ...groupMetaFields,
           sessionCount: newSessionCount
         };
         if ('status' in fields) {

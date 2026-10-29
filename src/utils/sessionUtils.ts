@@ -324,6 +324,150 @@ export function recalculateSubsequentDates(
 }
 
 /**
+ * Calculates updated session dates when a group's schedule (day1 / day2) or session count is modified,
+ * preserving all completed/past session dates historically, and only recalculating upcoming uncompleted sessions.
+ */
+export function updateGroupScheduleDates(params: {
+  currentDates: string[];
+  totalSessions: number;
+  newDay1: string;
+  newDay2?: string;
+  students?: StudentRecord[];
+  explicitStartIndex?: number;
+}): string[] {
+  const { currentDates, totalSessions, newDay1, newDay2, students, explicitStartIndex } = params;
+
+  let startIndex: number;
+
+  if (typeof explicitStartIndex === 'number' && explicitStartIndex >= 0 && explicitStartIndex <= totalSessions) {
+    startIndex = explicitStartIndex;
+  } else {
+    // Check attendance records to see how many sessions have been studied
+    const realStudents = (students || []).filter((s) => !isSummaryRow(s));
+    const attendedSessions = getGroupCurrentSession(realStudents, currentDates.length);
+
+    // Check past dates
+    const todayMidnight = new Date();
+    todayMidnight.setHours(0, 0, 0, 0);
+
+    let pastDatesCount = 0;
+    for (let i = 0; i < currentDates.length; i++) {
+      const dStr = currentDates[i];
+      if (dStr && /^\d{4}\/\d{2}\/\d{2}$/.test(formatToYYYYMMDD(dStr))) {
+        const d = new Date(formatToYYYYMMDD(dStr).replace(/\//g, '-'));
+        if (!isNaN(d.getTime()) && d.getTime() < todayMidnight.getTime()) {
+          pastDatesCount = i + 1;
+        } else {
+          break;
+        }
+      } else {
+        break;
+      }
+    }
+
+    startIndex = Math.max(attendedSessions, pastDatesCount);
+  }
+
+  startIndex = Math.max(0, Math.min(startIndex, totalSessions));
+
+  // If all sessions are already completed, keep existing dates (or expand if totalSessions increased)
+  if (startIndex >= totalSessions) {
+    const result = currentDates.slice(0, totalSessions);
+    while (result.length < totalSessions) {
+      result.push(`حصة ${result.length + 1}`);
+    }
+    return result;
+  }
+
+  // If no sessions have been completed yet (brand new group), generate from upcoming date
+  if (startIndex === 0) {
+    return generateSessionDates(newDay1, totalSessions, undefined, newDay2);
+  }
+
+  // Preserved sessions (0 .. startIndex - 1)
+  const result: string[] = [];
+  for (let i = 0; i < startIndex; i++) {
+    result.push(currentDates[i] || `حصة ${i + 1}`);
+  }
+
+  // Resolve study weekdays (0 = Sunday .. 6 = Saturday)
+  const weekdays: number[] = [];
+  const w1 = getDayOfWeekFromArabic(newDay1);
+  if (w1 !== -1) weekdays.push(w1);
+  const w2 = getDayOfWeekFromArabic(newDay2 || '');
+  if (w2 !== -1 && w2 !== w1) weekdays.push(w2);
+  if (weekdays.length === 0) weekdays.push(6); // default Saturday
+
+  // Determine starting anchor for session `startIndex`
+  const lastCompletedDateStr = currentDates[startIndex - 1];
+  let minAllowedDate = new Date();
+  minAllowedDate.setHours(0, 0, 0, 0);
+
+  let lastCompletedDate: Date | null = null;
+  if (lastCompletedDateStr) {
+    const lastFormatted = formatToYYYYMMDD(lastCompletedDateStr);
+    if (lastFormatted) {
+      const parsed = new Date(lastFormatted.replace(/\//g, '-'));
+      if (!isNaN(parsed.getTime())) {
+        parsed.setHours(0, 0, 0, 0);
+        lastCompletedDate = parsed;
+      }
+    }
+  }
+
+  let candidate = new Date(minAllowedDate);
+  if (lastCompletedDate && lastCompletedDate.getTime() >= candidate.getTime()) {
+    candidate = new Date(lastCompletedDate);
+    candidate.setDate(candidate.getDate() + 1);
+  }
+
+  // Find the first date on or after candidate that falls on one of the study weekdays
+  let firstUpcomingDate: Date | null = null;
+  for (let step = 0; step < 7; step++) {
+    const testDate = new Date(candidate);
+    testDate.setDate(testDate.getDate() + step);
+    if (weekdays.includes(testDate.getDay())) {
+      if (!lastCompletedDate || testDate.getTime() > lastCompletedDate.getTime()) {
+        firstUpcomingDate = testDate;
+        break;
+      }
+    }
+  }
+
+  if (!firstUpcomingDate) {
+    firstUpcomingDate = new Date(candidate);
+  }
+
+  result.push(formatToYYYYMMDD(firstUpcomingDate));
+
+  // Generate remaining sessions (startIndex + 1 .. totalSessions - 1)
+  let curDate = new Date(firstUpcomingDate);
+  for (let i = startIndex + 1; i < totalSessions; i++) {
+    if (weekdays.length === 1) {
+      curDate = new Date(curDate);
+      curDate.setDate(curDate.getDate() + 7);
+    } else {
+      let nextDate = new Date(curDate);
+      let found = false;
+      for (let step = 1; step <= 7; step++) {
+        nextDate.setDate(nextDate.getDate() + 1);
+        if (weekdays.includes(nextDate.getDay())) {
+          curDate = nextDate;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        curDate.setDate(curDate.getDate() + 7);
+      }
+    }
+    result.push(formatToYYYYMMDD(curDate));
+  }
+
+  return result;
+}
+
+/**
  * Helper to check if a session date string corresponds to today's date
  */
 export function isSessionDateToday(dateStr: string, today: Date = new Date()): boolean {

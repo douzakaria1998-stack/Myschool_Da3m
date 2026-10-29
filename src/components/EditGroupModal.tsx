@@ -4,7 +4,17 @@ import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { X, Edit3, Coins, CheckCircle, AlertTriangle, Trash2, Calendar, Clock, GraduationCap, UserPlus } from 'lucide-react';
 import { GroupMeta, EducationalLevel } from '../types';
-import { formatGroupTime, getGroupStatus, isValidGroupId, getGroupLevelFromId, EDUCATIONAL_LEVELS, generateNextTeacherId } from '../utils/sessionUtils';
+import {
+  formatGroupTime,
+  getGroupStatus,
+  isValidGroupId,
+  getGroupLevelFromId,
+  EDUCATIONAL_LEVELS,
+  generateNextTeacherId,
+  getGroupCurrentSession,
+  isSummaryRow,
+  formatToYYYYMMDD
+} from '../utils/sessionUtils';
 
 interface Props {
   groupId: string;
@@ -22,6 +32,33 @@ export default function EditGroupModal({ groupId, onClose }: Props) {
   const initialTeacherPay = group?.teacherPayPerStudent ?? groupMeta?.teacherPayPerStudent ?? tier?.teacherRate ?? (group?.type?.includes('10000') ? 7500 : 1500);
   const initialSchoolShare = group?.schoolSharePerStudent ?? groupMeta?.schoolSharePerStudent ?? tier?.schoolRate ?? (initialFee - initialTeacherPay);
   const initialSessions = group?.sessionCount || groupMeta?.sessionCount || group?.sessionDates?.length || 8;
+  const initialDay1 = group?.day1 || groupMeta?.day1 || 'السبت';
+  const initialDay2 = group?.day2 || groupMeta?.day2 || '';
+
+  // Determine completed sessions count so we don't wipe them when schedule days change
+  const realStudents = (group?.students || []).filter((s) => !isSummaryRow(s, groupId));
+  const attendedCount = getGroupCurrentSession(realStudents, group?.sessionDates?.length || 4);
+  const pastDatesCount = (() => {
+    const todayMidnight = new Date();
+    todayMidnight.setHours(0, 0, 0, 0);
+    let count = 0;
+    const dates = group?.sessionDates || [];
+    for (let i = 0; i < dates.length; i++) {
+      const dStr = dates[i];
+      if (dStr && /^\d{4}\/\d{2}\/\d{2}$/.test(formatToYYYYMMDD(dStr))) {
+        const d = new Date(formatToYYYYMMDD(dStr).replace(/\//g, '-'));
+        if (!isNaN(d.getTime()) && d.getTime() < todayMidnight.getTime()) {
+          count = i + 1;
+        } else {
+          break;
+        }
+      } else {
+        break;
+      }
+    }
+    return count;
+  })();
+  const completedSessions = Math.max(attendedCount, pastDatesCount);
 
   const initialTeacher = group?.teacherName || groupMeta?.teacherName || '';
   const [level, setLevel] = useState<EducationalLevel>(() => groupMeta?.level || (group as any)?.level || getGroupLevelFromId(groupId));
@@ -32,10 +69,14 @@ export default function EditGroupModal({ groupId, onClose }: Props) {
   });
   const [teacherSaveSuccess, setTeacherSaveSuccess] = useState(false);
   const [subject, setSubject] = useState(group?.subject || groupMeta?.subject || 'رياضيات');
-  const [day1, setDay1] = useState(group?.day1 || groupMeta?.day1 || 'السبت');
+  const [day1, setDay1] = useState(initialDay1);
   const [time1, setTime1] = useState(formatGroupTime(group?.time1 || groupMeta?.time1) || '08:00');
-  const [day2, setDay2] = useState(group?.day2 || groupMeta?.day2 || '');
+  const [day2, setDay2] = useState(initialDay2);
   const [time2, setTime2] = useState(formatGroupTime(group?.time2 || groupMeta?.time2) || '');
+  const [startScheduleFromSession, setStartScheduleFromSession] = useState<number>(() => {
+    const nextSessionNum = completedSessions + 1;
+    return Math.min(nextSessionNum, initialSessions);
+  });
   const [type, setType] = useState(group?.type || groupMeta?.type || '4-2500');
   const [isVip, setIsVip] = useState(Boolean(group?.isVip ?? groupMeta?.isVip));
   const [sessionCount, setSessionCount] = useState<number>(initialSessions);
@@ -153,7 +194,12 @@ export default function EditGroupModal({ groupId, onClose }: Props) {
       });
     }
 
-    const updatedFields: Partial<GroupMeta> = {
+    const isScheduleChanged = day1 !== initialDay1 || day2 !== initialDay2;
+    const explicitStartIdx = isScheduleChanged && completedSessions > 0
+      ? startScheduleFromSession - 1 // convert 1-indexed to 0-indexed
+      : undefined;
+
+    const updatedFields: Partial<GroupMeta> & { startScheduleFromSession?: number } = {
       level,
       teacherId: effectiveTeacherId,
       teacherName: cleanTeacherName || 'أستاذ المادة',
@@ -168,7 +214,8 @@ export default function EditGroupModal({ groupId, onClose }: Props) {
       studentFee: Number(studentFee) || 0,
       teacherPayPerStudent: Number(teacherPay) || 0,
       schoolSharePerStudent: Number(schoolShare) || 0,
-      status: manualStatus === 'auto' ? undefined : manualStatus
+      status: manualStatus === 'auto' ? undefined : manualStatus,
+      startScheduleFromSession: explicitStartIdx
     };
 
     // Apply updates to the group first
@@ -564,6 +611,44 @@ export default function EditGroupModal({ groupId, onClose }: Props) {
               />
             </div>
           </div>
+
+          {/* Schedule Change Notice: Preserving Completed Sessions */}
+          {completedSessions > 0 && (day1 !== initialDay1 || day2 !== initialDay2) && (
+            <div
+              style={{
+                backgroundColor: '#eff6ff',
+                border: '1.5px solid #93c5fd',
+                borderRadius: 'var(--md-shape-sm)',
+                padding: '12px 14px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#1d4ed8', fontWeight: 700, fontSize: '0.85rem' }}>
+                <Calendar size={16} />
+                <span>الحفاظ على تواريخ الحصص السابقة المكتملة ({completedSessions} حصص):</span>
+              </div>
+              <p style={{ margin: 0, fontSize: '0.78rem', color: '#1e3a8a', lineHeight: 1.4 }}>
+                الفوج أتمّ دراسة <strong>{completedSessions}</strong> حصص سابقة (حصة 1 إلى {completedSessions}). سيتم الاحتفاظ بتواريخ الحصص المكتملة دون أي تغيير، وتطبيق اليوم الجديد ({day1}{day2 ? ` و ${day2}` : ''}) فقط ابتداءً من الحصة {startScheduleFromSession}.
+              </p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#1e40af' }}>تطبيق التعديل ابتداءً من:</span>
+                <select
+                  value={startScheduleFromSession}
+                  onChange={(e) => setStartScheduleFromSession(Number(e.target.value))}
+                  className="m3-input"
+                  style={{ padding: '3px 8px', fontSize: '0.8rem', height: '32px', width: 'auto', fontWeight: 700 }}
+                >
+                  {Array.from({ length: sessionCount }, (_, i) => i + 1).map((num) => (
+                    <option key={num} value={num}>
+                      حصة {num} {num <= completedSessions ? '(مكتملة سابقاً)' : (num === completedSessions + 1 ? '⚡ (الحصة القادمة - مستحسن)' : '')}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
 
           {/* Pricing tier & VIP */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
