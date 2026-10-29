@@ -296,6 +296,8 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
   const [confirmActionModal, setConfirmActionModal] = useState<{
     type: 'cover' | 'transfer';
     req: PendingCoverRequest;
+    selectedTargetGroupId?: string;
+    selectedSourceGroupId?: string;
   } | null>(null);
 
   const [pendingDebtors, setPendingDebtors] = useState<
@@ -1267,8 +1269,25 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     // =========================================================================
     if (matchingActive.length === 0) {
       const nowStr = new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' });
-      const targetGid = currentActiveGroups[0]?.groupId || primaryGid;
-      const targetSession = currentActiveGroups[0]?.sessionIndex ?? activeSessionIdx;
+
+      // Intelligent default selection among current active groups:
+      // If student is enrolled in a group matching the subject of one of the active groups, prioritize that active group!
+      let bestActiveGroup = currentActiveGroups[0];
+      const subjectMatchAg = currentActiveGroups.find((ag) => {
+        const agSheet = data.groupData[ag.groupId];
+        if (!agSheet) return false;
+        const agSubjNorm = normalizeSubjectName(agSheet.subject);
+        return result.studentEnrolledGroups.some((enrolledGid) => {
+          const enrolledSheet = data.groupData[enrolledGid];
+          return enrolledSheet && normalizeSubjectName(enrolledSheet.subject) === agSubjNorm;
+        });
+      });
+      if (subjectMatchAg) {
+        bestActiveGroup = subjectMatchAg;
+      }
+
+      const targetGid = bestActiveGroup?.groupId || primaryGid;
+      const targetSession = bestActiveGroup?.sessionIndex ?? activeSessionIdx;
 
       // Execute Covering & Group Selection Priority:
       // Priority 1: Subject -> Active Group -> Session Number
@@ -1678,48 +1697,85 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
   // HANDLERS FOR LIVE ACTION QUEUE (LEFT PANEL)
   // ==========================================
 
+  // Switch target active group directly on a pending request
+  const handleChangeRequestTargetGroup = (reqId: string, newTargetGid: string) => {
+    setPendingCoverRequests((prev) =>
+      prev.map((req) => {
+        if (req.id !== reqId) return req;
+        const targetAg = activeGroups.find((ag) => ag.groupId === newTargetGid);
+        const newSessionIdx = targetAg ? targetAg.sessionIndex : (activeGroups[0]?.sessionIndex ?? 0);
+        const newMatch = findCoveringMatch(
+          req.student,
+          newTargetGid,
+          newSessionIdx,
+          data.groups,
+          data.groupData
+        );
+        const newSourceGid = newMatch?.matchedGroup?.groupId || req.studentEnrolledGroups[0] || req.homeGroupId;
+        return {
+          ...req,
+          targetActiveGroupId: newTargetGid,
+          sessionIdx: newSessionIdx,
+          homeGroupId: newSourceGid,
+          coveringMatch: newMatch
+        };
+      })
+    );
+  };
+
   // Choice 1: Temporary Covering (stays in original group, credited with 'C')
-  const handleAcceptTemporaryCover = (req: PendingCoverRequest) => {
-    const { student, targetActiveGroupId, sessionIdx } = req;
-    const sourceGid = req.coveringMatch?.matchedGroup?.groupId || req.homeGroupId;
-    const sourceSessionIdx = req.coveringMatch?.matchedSessionIdx ?? sessionIdx;
+  const handleAcceptTemporaryCover = (
+    req: PendingCoverRequest,
+    targetGid?: string,
+    targetSession?: number,
+    sourceGid?: string
+  ) => {
+    const finalTargetGid = targetGid || req.targetActiveGroupId;
+    const targetAg = activeGroups.find((ag) => ag.groupId === finalTargetGid);
+    const sessionIdx = targetSession ?? targetAg?.sessionIndex ?? req.sessionIdx;
+
+    const finalSourceGid = sourceGid || req.coveringMatch?.matchedGroup?.groupId || req.homeGroupId;
+    const sourceSessionIdx =
+      req.coveringMatch?.matchedGroup?.groupId === finalSourceGid && typeof req.coveringMatch?.matchedSessionIdx === 'number'
+        ? req.coveringMatch.matchedSessionIdx
+        : sessionIdx;
 
     // Resolve student record directly in sourceGid to be 100% certain of the correct rowId and identity
-    const sourceGroup = data.groupData[sourceGid];
+    const sourceGroup = data.groupData[finalSourceGid];
     const targetStudentInSourceGroup =
-      req.coveringMatch?.matchedStudent ||
+      (req.coveringMatch?.matchedGroup?.groupId === finalSourceGid ? req.coveringMatch?.matchedStudent : undefined) ||
       sourceGroup?.students.find(
         (s) =>
-          !isSummaryRow(s, sourceGid) &&
-          ((student.barcode && s.barcode && s.barcode.trim().toUpperCase() === student.barcode.trim().toUpperCase()) ||
-            normalizeArabicName(s.name) === normalizeArabicName(student.name))
+          !isSummaryRow(s, finalSourceGid) &&
+          ((req.student.barcode && s.barcode && s.barcode.trim().toUpperCase() === req.student.barcode.trim().toUpperCase()) ||
+            normalizeArabicName(s.name) === normalizeArabicName(req.student.name))
       ) ||
-      student;
+      req.student;
 
     recordCoverAttendance(
-      targetActiveGroupId,
-      sourceGid,
+      finalTargetGid,
+      finalSourceGid,
       targetStudentInSourceGroup.rowId,
       sessionIdx,
       undefined,
       sourceSessionIdx,
-      { name: student.name, barcode: student.barcode }
+      { name: req.student.name, barcode: req.student.barcode }
     );
     playSuccessChime();
 
     // Update status in recent scans
     setRecentScans((prev) =>
       prev.map((s) =>
-        s.studentName === student.name && s.groupId === targetActiveGroupId
-          ? { ...s, status: 'P' }
+        s.studentName === req.student.name && (s.groupId === req.targetActiveGroupId || s.groupId === finalTargetGid)
+          ? { ...s, groupId: finalTargetGid, sessionIndex: sessionIdx, status: 'P' }
           : s
       )
     );
 
     setFlashSuccess({
-      name: student.name,
-      statusText: `تم تسجيل حضور التلميذ كـ (حاضر P) في فوجه الأصلي (${sourceGid} - الحصة ${sourceSessionIdx + 1}) ✓`,
-      details: `حضر اليوم مع فوج ${targetActiveGroupId} (دون كتابة اسمه في الفوج)`
+      name: req.student.name,
+      statusText: `تم تسجيل حضور التلميذ كـ (حاضر P) في فوجه الأصلي (${finalSourceGid} - الحصة ${sourceSessionIdx + 1}) ✓`,
+      details: `حضر اليوم مع فوج ${finalTargetGid} (دون كتابة اسمه في الفوج)`
     });
 
     setPendingCoverRequests((prev) => prev.filter((r) => r.id !== req.id));
@@ -1727,35 +1783,44 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
   };
 
   // Choice 2: Permanent Transfer (transfers student to active group, preserves old as CH, new as N)
-  const handleAcceptPermanentTransfer = (req: PendingCoverRequest) => {
-    const { student, homeGroupId, targetActiveGroupId, sessionIdx } = req;
+  const handleAcceptPermanentTransfer = (
+    req: PendingCoverRequest,
+    targetGid?: string,
+    targetSession?: number,
+    sourceGid?: string
+  ) => {
+    const finalTargetGid = targetGid || req.targetActiveGroupId;
+    const targetAg = activeGroups.find((ag) => ag.groupId === finalTargetGid);
+    const finalSessionIdx = targetSession ?? targetAg?.sessionIndex ?? req.sessionIdx;
 
-    // Resolve student record directly in homeGroupId
-    const homeGroup = data.groupData[homeGroupId];
+    const finalSourceGid = sourceGid || req.coveringMatch?.matchedGroup?.groupId || req.homeGroupId;
+
+    // Resolve student record directly in finalSourceGid
+    const homeGroup = data.groupData[finalSourceGid];
     const targetStudentInHomeGroup =
-      req.coveringMatch?.matchedStudent ||
+      (req.coveringMatch?.matchedGroup?.groupId === finalSourceGid ? req.coveringMatch?.matchedStudent : undefined) ||
       homeGroup?.students.find(
         (s) =>
-          !isSummaryRow(s, homeGroupId) &&
-          ((student.barcode && s.barcode && s.barcode.trim().toUpperCase() === student.barcode.trim().toUpperCase()) ||
-            normalizeArabicName(s.name) === normalizeArabicName(student.name))
+          !isSummaryRow(s, finalSourceGid) &&
+          ((req.student.barcode && s.barcode && s.barcode.trim().toUpperCase() === req.student.barcode.trim().toUpperCase()) ||
+            normalizeArabicName(s.name) === normalizeArabicName(req.student.name))
       ) ||
-      student;
+      req.student;
 
     const ok = transferStudent(
-      homeGroupId,
-      targetActiveGroupId,
+      finalSourceGid,
+      finalTargetGid,
       targetStudentInHomeGroup.rowId,
-      sessionIdx,
-      { name: student.name, barcode: student.barcode }
+      finalSessionIdx,
+      { name: req.student.name, barcode: req.student.barcode }
     );
     if (ok) {
       recordScanToLog({
-        groupId: targetActiveGroupId,
-        sessionIndex: sessionIdx,
+        groupId: finalTargetGid,
+        sessionIndex: finalSessionIdx,
         studentRowId: targetStudentInHomeGroup.rowId,
-        studentName: student.name,
-        barcode: student.barcode || '',
+        studentName: req.student.name,
+        barcode: req.student.barcode || '',
         dateStr: new Date().toISOString().split('T')[0],
         timeStr: new Date().toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit' }),
         status: 'P'
@@ -1764,16 +1829,16 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
 
       setRecentScans((prev) =>
         prev.map((s) =>
-          s.studentName === student.name && s.groupId === targetActiveGroupId
-            ? { ...s, status: 'P' }
+          s.studentName === req.student.name && (s.groupId === req.targetActiveGroupId || s.groupId === finalTargetGid)
+            ? { ...s, groupId: finalTargetGid, sessionIndex: finalSessionIdx, status: 'P' }
             : s
         )
       );
 
       setFlashSuccess({
-        name: student.name,
-        statusText: `تم تحويل التلميذ نهائياً إلى فوج ${targetActiveGroupId} ✓`,
-        details: `حُفظت بيانات ${homeGroupId} السابقة وسُجل كـ (N) في الحصة ${sessionIdx + 1}`
+        name: req.student.name,
+        statusText: `تم تحويل التلميذ نهائياً إلى فوج ${finalTargetGid} ✓`,
+        details: `حُفظت بيانات ${finalSourceGid} السابقة وسُجل كـ (N) في الحصة ${finalSessionIdx + 1}`
       });
 
       setPendingCoverRequests((prev) => prev.filter((r) => r.id !== req.id));
@@ -1784,12 +1849,20 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
   };
 
   // Choice 3: Enroll as New Student (N) in this group
-  const handleAcceptNewStudentCover = (req: PendingCoverRequest) => {
-    const { student, targetActiveGroupId, sessionIdx } = req;
-    const targetGroup = data.groupData[targetActiveGroupId];
+  const handleAcceptNewStudentCover = (
+    req: PendingCoverRequest,
+    targetGid?: string,
+    targetSession?: number
+  ) => {
+    const finalTargetGid = targetGid || req.targetActiveGroupId;
+    const targetAg = activeGroups.find((ag) => ag.groupId === finalTargetGid);
+    const sessionIdx = targetSession ?? targetAg?.sessionIndex ?? req.sessionIdx;
+
+    const { student } = req;
+    const targetGroup = data.groupData[finalTargetGid];
     if (!targetGroup) return;
 
-    const newStudent = addStudent(targetActiveGroupId, {
+    const newStudent = addStudent(finalTargetGid, {
       name: student.name,
       phone: student.phone,
       discount: student.discount,
@@ -1797,20 +1870,20 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     });
 
     if (newStudent) {
-      updateAttendance(targetActiveGroupId, newStudent.rowId, sessionIdx, 'N');
+      updateAttendance(finalTargetGid, newStudent.rowId, sessionIdx, 'N');
       playSuccessChime();
 
       setRecentScans((prev) =>
         prev.map((s) =>
-          s.studentName === student.name && s.groupId === targetActiveGroupId
-            ? { ...s, status: 'P' }
+          s.studentName === student.name && (s.groupId === req.targetActiveGroupId || s.groupId === finalTargetGid)
+            ? { ...s, groupId: finalTargetGid, sessionIndex: sessionIdx, status: 'P' }
             : s
         )
       );
 
       setFlashSuccess({
         name: student.name,
-        statusText: `تم تسجيل التلميذ كـ (تلميذ جديد N) في فوج ${targetActiveGroupId} ✓`,
+        statusText: `تم تسجيل التلميذ كـ (تلميذ جديد N) في فوج ${finalTargetGid} ✓`,
         details: `مادة ${targetGroup.subject} • الحصة ${sessionIdx + 1}`
       });
 
@@ -3225,9 +3298,42 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                             <span style={{ fontSize: '0.72rem', color: '#78350f', backgroundColor: '#fde68a', padding: '1px 6px', borderRadius: '4px', fontWeight: 700 }}>
                               الأصل: {match?.matchedGroup?.groupId || req.homeGroupId}
                             </span>
-                            <span style={{ fontSize: '0.72rem', color: '#4338ca', fontWeight: 700 }}>
-                              ➔ يحضر في: {req.targetActiveGroupId} (ح {req.sessionIdx + 1})
-                            </span>
+                            {activeGroups.length > 1 ? (
+                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                <span style={{ fontSize: '0.72rem', color: '#4338ca', fontWeight: 800 }}>
+                                  ➔ يحضر في:
+                                </span>
+                                <select
+                                  value={req.targetActiveGroupId}
+                                  onChange={(e) => handleChangeRequestTargetGroup(req.id, e.target.value)}
+                                  style={{
+                                    fontSize: '0.74rem',
+                                    fontWeight: 800,
+                                    padding: '1px 6px',
+                                    height: '24px',
+                                    borderRadius: '5px',
+                                    border: '1.5px solid #6366f1',
+                                    backgroundColor: '#ffffff',
+                                    color: '#4338ca',
+                                    cursor: 'pointer'
+                                  }}
+                                  title="تغيير الفوج النشط المستهدف لهذا التلميذ على الشاشة"
+                                >
+                                  {activeGroups.map((ag) => {
+                                    const g = data.groupData[ag.groupId];
+                                    return (
+                                      <option key={ag.groupId} value={ag.groupId}>
+                                        فوج {ag.groupId} ({g?.subject || ''}) - ح {ag.sessionIndex + 1}
+                                      </option>
+                                    );
+                                  })}
+                                </select>
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: '0.72rem', color: '#4338ca', fontWeight: 700 }}>
+                                ➔ يحضر في: {req.targetActiveGroupId} (ح {req.sessionIdx + 1})
+                              </span>
+                            )}
                           </div>
                         </div>
 
@@ -3253,7 +3359,14 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                           {canCover && (
                             <button
                               type="button"
-                              onClick={() => setConfirmActionModal({ type: 'cover', req })}
+                              onClick={() =>
+                                setConfirmActionModal({
+                                  type: 'cover',
+                                  req,
+                                  selectedTargetGroupId: req.targetActiveGroupId,
+                                  selectedSourceGroupId: match?.matchedGroup?.groupId || req.homeGroupId || req.studentEnrolledGroups[0]
+                                })
+                              }
                               className="m3-btn m3-btn-sm"
                               style={{
                                 backgroundColor: '#d97706',
@@ -3293,7 +3406,14 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
                           {/* Always Show Change Student Group option */}
                           <button
                             type="button"
-                            onClick={() => setConfirmActionModal({ type: 'transfer', req })}
+                            onClick={() =>
+                              setConfirmActionModal({
+                                type: 'transfer',
+                                req,
+                                selectedTargetGroupId: req.targetActiveGroupId,
+                                selectedSourceGroupId: match?.matchedGroup?.groupId || req.homeGroupId || req.studentEnrolledGroups[0]
+                              })
+                            }
                             className="m3-btn m3-btn-sm"
                             style={{
                               backgroundColor: '#4f46e5',
@@ -4684,116 +4804,365 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       {/* ========================================================================= */}
       {/* MODAL: CONFIRM COVER OR MOVE FOR SCANNER REQUEST                          */}
       {/* ========================================================================= */}
-      {confirmActionModal && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(0,0,0,0.6)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 250
-          }}
-          onClick={() => setConfirmActionModal(null)}
-        >
+      {confirmActionModal && (() => {
+        const req = confirmActionModal.req;
+        const currentTargetGid =
+          (confirmActionModal.selectedTargetGroupId && activeGroups.some((ag) => ag.groupId === confirmActionModal.selectedTargetGroupId))
+            ? confirmActionModal.selectedTargetGroupId
+            : (req.targetActiveGroupId && activeGroups.some((ag) => ag.groupId === req.targetActiveGroupId))
+            ? req.targetActiveGroupId
+            : (activeGroups[0]?.groupId || req.targetActiveGroupId);
+
+        const currentSourceGid =
+          confirmActionModal.selectedSourceGroupId ||
+          req.coveringMatch?.matchedGroup?.groupId ||
+          req.homeGroupId ||
+          req.studentEnrolledGroups[0] ||
+          '';
+
+        const targetAg = activeGroups.find((ag) => ag.groupId === currentTargetGid);
+        const targetSessionIdx = targetAg ? targetAg.sessionIndex : req.sessionIdx;
+        const targetGroupSheet = data.groupData[currentTargetGid];
+        const targetGroupMeta = data.groups.find((g) => g.id === currentTargetGid);
+        const targetSubject = targetGroupSheet?.subject || targetGroupMeta?.subject || '';
+        const targetTeacher = targetGroupSheet?.teacherName || targetGroupMeta?.teacherName || '';
+
+        const sourceGroupSheet = data.groupData[currentSourceGid];
+        const sourceSubject = sourceGroupSheet?.subject || '';
+
+        const liveCoverMatch =
+          confirmActionModal.type === 'cover'
+            ? findCoveringMatch(req.student, currentTargetGid, targetSessionIdx, data.groups, data.groupData)
+            : null;
+
+        return (
           <div
             style={{
-              backgroundColor: '#fff',
-              padding: '24px',
-              borderRadius: 'var(--md-shape-xl)',
-              maxWidth: '480px',
-              width: '92%',
-              boxShadow: 'var(--md-elevation-5)',
-              direction: 'rtl',
-              border: confirmActionModal.type === 'cover' ? '2px solid #f59e0b' : '2px solid #6366f1'
+              position: 'fixed',
+              inset: 0,
+              backgroundColor: 'rgba(0,0,0,0.6)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 250,
+              padding: '16px'
             }}
-            onClick={(e) => e.stopPropagation()}
+            onClick={() => setConfirmActionModal(null)}
           >
-            {confirmActionModal.type === 'cover' ? (
-              <>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#b45309', marginBottom: '12px' }}>
-                  <Sparkles size={22} color="#f59e0b" />
-                  <h3 style={{ fontSize: '1.15rem', fontWeight: 900, margin: 0 }}>
-                    تأكيد تسجيل حصة تعويض 🔄
-                  </h3>
-                </div>
-
-                <div style={{ fontSize: '0.9rem', color: '#334155', lineHeight: 1.6, marginBottom: '16px' }}>
-                  هل تريد تسجيل حصة تعويض للتلميذ <strong style={{ color: '#b45309' }}>{confirmActionModal.req.student.name}</strong>؟
-                  <div style={{ marginTop: '10px', backgroundColor: '#fffbeb', padding: '10px 12px', borderRadius: '8px', border: '1px solid #fde68a', fontSize: '0.82rem', color: '#78350f' }}>
-                    <div>• <strong>الفوج الأصلي:</strong> فوج {confirmActionModal.req.coveringMatch?.matchedGroup?.groupId || confirmActionModal.req.homeGroupId} (تسجيل الحصة كحضور معوض <strong>C</strong>)</div>
-                    <div style={{ marginTop: '4px' }}>• <strong>فوج التعويض اليوم:</strong> فوج {confirmActionModal.req.targetActiveGroupId} (يحضر التلميذ الحصة <strong>دون إضافة اسمه</strong> لقائمة الفوج)</div>
+            <div
+              style={{
+                backgroundColor: '#fff',
+                padding: '24px',
+                borderRadius: 'var(--md-shape-xl, 16px)',
+                maxWidth: '540px',
+                width: '100%',
+                maxHeight: '92vh',
+                overflowY: 'auto',
+                boxShadow: 'var(--md-elevation-5, 0 10px 30px rgba(0,0,0,0.2))',
+                direction: 'rtl',
+                border: confirmActionModal.type === 'cover' ? '2px solid #f59e0b' : '2px solid #6366f1'
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {confirmActionModal.type === 'cover' ? (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#b45309', marginBottom: '12px' }}>
+                    <Sparkles size={22} color="#f59e0b" />
+                    <h3 style={{ fontSize: '1.15rem', fontWeight: 900, margin: 0 }}>
+                      تأكيد تسجيل حصة تعويض 🔄
+                    </h3>
                   </div>
-                </div>
 
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                  <button
-                    type="button"
-                    onClick={() => setConfirmActionModal(null)}
-                    className="m3-btn m3-btn-text"
-                    style={{ fontSize: '0.84rem' }}
-                  >
-                    تراجع
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleAcceptTemporaryCover(confirmActionModal.req);
-                      setConfirmActionModal(null);
-                    }}
-                    className="m3-btn m3-btn-primary"
-                    style={{ backgroundColor: '#f59e0b', borderColor: '#f59e0b', fontWeight: 800, fontSize: '0.84rem' }}
-                  >
-                    تأكيد التعويض ✓
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#4338ca', marginBottom: '12px' }}>
-                  <ArrowLeftRight size={22} color="#4f46e5" />
-                  <h3 style={{ fontSize: '1.15rem', fontWeight: 900, margin: 0 }}>
-                    تأكيد النقل النهائي للتلميذ 🔀
-                  </h3>
-                </div>
-
-                <div style={{ fontSize: '0.9rem', color: '#334155', lineHeight: 1.6, marginBottom: '16px' }}>
-                  هل تريد تحويل التلميذ <strong style={{ color: '#4338ca' }}>{confirmActionModal.req.student.name}</strong> بشكل نهائي؟
-                  <div style={{ marginTop: '10px', backgroundColor: '#eef2ff', padding: '10px 12px', borderRadius: '8px', border: '1px solid #c7d2fe', fontSize: '0.82rem', color: '#3730a3' }}>
-                    <div>• تغيير الفوج سيحافظ على سجل الحضور والمدفوعات السابق للتلميذ.</div>
-                    <div style={{ marginTop: '4px' }}>• الحصص المتبقية في الفوج القديم (فوج {confirmActionModal.req.homeGroupId}) ستُسجل كـ <strong>CH</strong>.</div>
-                    <div style={{ marginTop: '4px' }}>• سيسجل في الحصة {confirmActionModal.req.sessionIdx + 1} في فوج {confirmActionModal.req.targetActiveGroupId} كـ (تلميذ جديد <strong>N</strong>).</div>
-                    <div style={{ marginTop: '4px' }}>• يتم تحويل الرصيد المالي المتبقي تلقائياً دون تكرار احتساب ما تم دفعه.</div>
+                  <div style={{ fontSize: '0.9rem', color: '#334155', lineHeight: 1.6, marginBottom: '14px' }}>
+                    تسجيل حصة تعويض للتلميذ <strong style={{ color: '#b45309' }}>{req.student.name}</strong>
                   </div>
-                </div>
 
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                  <button
-                    type="button"
-                    onClick={() => setConfirmActionModal(null)}
-                    className="m3-btn m3-btn-text"
-                    style={{ fontSize: '0.84rem' }}
-                  >
-                    تراجع
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleAcceptPermanentTransfer(confirmActionModal.req);
-                      setConfirmActionModal(null);
-                    }}
-                    className="m3-btn m3-btn-primary"
-                    style={{ backgroundColor: '#4f46e5', borderColor: '#4f46e5', fontWeight: 800, fontSize: '0.84rem' }}
-                  >
-                    تأكيد النقل النهائي ✓
-                  </button>
-                </div>
-              </>
-            )}
+                  {/* Active Groups Selection on Screen */}
+                  <div style={{ marginBottom: '14px' }}>
+                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 800, color: '#1e293b', marginBottom: '6px' }}>
+                      اختر فوج التعويض اليوم (من بين الأفواج النشطة على هذه الشاشة):
+                    </label>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      {activeGroups.map((ag) => {
+                        const isSelected = ag.groupId === currentTargetGid;
+                        const gSheet = data.groupData[ag.groupId];
+                        const gMeta = data.groups.find((g) => g.id === ag.groupId);
+                        const subj = gSheet?.subject || gMeta?.subject || '';
+                        const teacher = gSheet?.teacherName || gMeta?.teacherName || '';
+                        return (
+                          <div
+                            key={ag.groupId}
+                            onClick={() =>
+                              setConfirmActionModal((prev) =>
+                                prev ? { ...prev, selectedTargetGroupId: ag.groupId } : null
+                              )
+                            }
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '8px 12px',
+                              borderRadius: '8px',
+                              border: isSelected ? '2px solid #f59e0b' : '1px solid #e2e8f0',
+                              backgroundColor: isSelected ? '#fffbeb' : '#ffffff',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <div
+                                style={{
+                                  width: '16px',
+                                  height: '16px',
+                                  borderRadius: '50%',
+                                  border: isSelected ? '5px solid #f59e0b' : '2px solid #94a3b8',
+                                  backgroundColor: '#fff'
+                                }}
+                              />
+                              <div>
+                                <strong style={{ fontSize: '0.88rem', color: isSelected ? '#92400e' : '#1e293b' }}>
+                                  فوج {ag.groupId}
+                                </strong>
+                                <span style={{ marginRight: '6px', fontSize: '0.74rem', backgroundColor: '#fef3c7', color: '#92400e', padding: '1px 6px', borderRadius: '4px', fontWeight: 800 }}>
+                                  {subj}
+                                </span>
+                                {teacher && <span style={{ fontSize: '0.74rem', color: '#64748b', marginRight: '6px' }}>({teacher})</span>}
+                              </div>
+                            </div>
+                            <span style={{ fontSize: '0.75rem', fontWeight: 800, color: '#b45309' }}>
+                              الحصة {ag.sessionIndex + 1}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {liveCoverMatch && (
+                    <div
+                      style={{
+                        fontSize: '0.78rem',
+                        fontWeight: 700,
+                        padding: '8px 10px',
+                        borderRadius: '6px',
+                        marginBottom: '14px',
+                        backgroundColor: liveCoverMatch.canCover ? '#fef3c7' : '#fee2e2',
+                        color: liveCoverMatch.canCover ? '#92400e' : '#b91c1c',
+                        border: `1px solid ${liveCoverMatch.canCover ? '#fde68a' : '#fca5a5'}`
+                      }}
+                    >
+                      {liveCoverMatch.message}
+                    </div>
+                  )}
+
+                  <div style={{ backgroundColor: '#fffbeb', padding: '10px 12px', borderRadius: '8px', border: '1px solid #fde68a', fontSize: '0.82rem', color: '#78350f', marginBottom: '16px' }}>
+                    <div>• <strong>الفوج الأصلي:</strong> فوج {liveCoverMatch?.matchedGroup?.groupId || currentSourceGid} (تسجيل الحصة كحضور معوض <strong>C</strong>)</div>
+                    <div style={{ marginTop: '4px' }}>• <strong>فوج التعويض اليوم:</strong> فوج {currentTargetGid} (يحضر التلميذ الحصة <strong>دون إضافة اسمه</strong> لقائمة الفوج)</div>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmActionModal(null)}
+                      className="m3-btn m3-btn-text"
+                      style={{ fontSize: '0.84rem' }}
+                    >
+                      تراجع
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleAcceptTemporaryCover(req, currentTargetGid, targetSessionIdx, currentSourceGid);
+                        setConfirmActionModal(null);
+                      }}
+                      className="m3-btn m3-btn-primary"
+                      style={{ backgroundColor: '#f59e0b', borderColor: '#f59e0b', fontWeight: 800, fontSize: '0.84rem' }}
+                    >
+                      تأكيد التعويض في فوج {currentTargetGid} ✓
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#4338ca', marginBottom: '8px' }}>
+                    <ArrowLeftRight size={22} color="#4f46e5" />
+                    <h3 style={{ fontSize: '1.15rem', fontWeight: 900, margin: 0 }}>
+                      تحويل التلميذ إلى فوج نشط (نقل دائم) 🔀
+                    </h3>
+                  </div>
+
+                  <div style={{ fontSize: '0.9rem', color: '#334155', marginBottom: '12px' }}>
+                    تحويل التلميذ <strong style={{ color: '#4338ca' }}>{req.student.name}</strong> بشكل نهائي من فوجه الحالي.
+                  </div>
+
+                  {/* Origin Group (Source) */}
+                  <div style={{ marginBottom: '12px', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 12px' }}>
+                    <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 800, color: '#64748b', marginBottom: '4px' }}>
+                      الفوج الأصلي المراد النقل منه:
+                    </label>
+                    {req.studentEnrolledGroups && req.studentEnrolledGroups.length > 1 ? (
+                      <select
+                        value={currentSourceGid}
+                        onChange={(e) =>
+                          setConfirmActionModal((prev) =>
+                            prev ? { ...prev, selectedSourceGroupId: e.target.value } : null
+                          )
+                        }
+                        className="m3-input"
+                        style={{
+                          width: '100%',
+                          height: '32px',
+                          fontSize: '0.82rem',
+                          fontWeight: 700,
+                          borderRadius: '6px',
+                          borderColor: '#cbd5e1'
+                        }}
+                      >
+                        {req.studentEnrolledGroups.map((gid) => {
+                          const g = data.groupData[gid];
+                          return (
+                            <option key={gid} value={gid}>
+                              فوج {gid} ({g?.subject || ''})
+                            </option>
+                          );
+                        })}
+                      </select>
+                    ) : (
+                      <div style={{ fontSize: '0.84rem', fontWeight: 800, color: '#1e293b' }}>
+                        فوج {currentSourceGid} {sourceSubject ? `(${sourceSubject})` : ''}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Active Group Selection (Target) */}
+                  <div style={{ marginBottom: '14px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                      <label style={{ fontSize: '0.82rem', fontWeight: 800, color: '#1e293b' }}>
+                        اختر الفوج الجديد (من الأفواج النشطة في هذه الشاشة):
+                      </label>
+                      <span style={{ fontSize: '0.7rem', backgroundColor: '#e0e7ff', color: '#4338ca', padding: '2px 8px', borderRadius: '12px', fontWeight: 800 }}>
+                        {activeGroups.length} أفواج نشطة
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      {activeGroups.map((ag) => {
+                        const isSelected = ag.groupId === currentTargetGid;
+                        const gSheet = data.groupData[ag.groupId];
+                        const gMeta = data.groups.find((g) => g.id === ag.groupId);
+                        const subj = gSheet?.subject || gMeta?.subject || '';
+                        const teacher = gSheet?.teacherName || gMeta?.teacherName || '';
+                        return (
+                          <div
+                            key={ag.groupId}
+                            onClick={() =>
+                              setConfirmActionModal((prev) =>
+                                prev ? { ...prev, selectedTargetGroupId: ag.groupId } : null
+                              )
+                            }
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '10px 12px',
+                              borderRadius: '8px',
+                              border: isSelected ? '2px solid #4f46e5' : '1px solid #cbd5e1',
+                              backgroundColor: isSelected ? '#eef2ff' : '#ffffff',
+                              cursor: 'pointer',
+                              boxShadow: isSelected ? '0 2px 6px rgba(79, 70, 229, 0.12)' : 'none',
+                              transition: 'all 0.15s ease'
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <div
+                                style={{
+                                  width: '18px',
+                                  height: '18px',
+                                  borderRadius: '50%',
+                                  border: isSelected ? '5px solid #4f46e5' : '2px solid #94a3b8',
+                                  backgroundColor: '#fff'
+                                }}
+                              />
+                              <div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <strong style={{ fontSize: '0.9rem', color: isSelected ? '#3730a3' : '#1e293b' }}>
+                                    فوج {ag.groupId}
+                                  </strong>
+                                  <span
+                                    style={{
+                                      fontSize: '0.72rem',
+                                      padding: '1px 6px',
+                                      borderRadius: '4px',
+                                      fontWeight: 800,
+                                      backgroundColor: isSelected ? '#c7d2fe' : '#f1f5f9',
+                                      color: isSelected ? '#312e81' : '#475569'
+                                    }}
+                                  >
+                                    {subj}
+                                  </span>
+                                </div>
+                                {teacher && (
+                                  <div style={{ fontSize: '0.74rem', color: '#64748b', marginTop: '2px' }}>
+                                    الأستاذ: {teacher}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            <span
+                              style={{
+                                fontSize: '0.74rem',
+                                fontWeight: 800,
+                                padding: '2px 8px',
+                                borderRadius: '6px',
+                                backgroundColor: isSelected ? '#4f46e5' : '#f8fafc',
+                                color: isSelected ? '#ffffff' : '#64748b',
+                                border: isSelected ? 'none' : '1px solid #e2e8f0'
+                              }}
+                            >
+                              الحصة {ag.sessionIndex + 1}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Summary Box */}
+                  <div style={{ backgroundColor: '#eef2ff', padding: '10px 12px', borderRadius: '8px', border: '1px solid #c7d2fe', fontSize: '0.8rem', color: '#3730a3', lineHeight: 1.6, marginBottom: '16px' }}>
+                    <div style={{ fontWeight: 800, color: '#312e81', marginBottom: '2px' }}>
+                      ملخص التحويل النهائي:
+                    </div>
+                    <div>• <strong>الفوج السابق ({currentSourceGid}):</strong> الحصص المتبقية ستُسجل كـ <strong>CH</strong> مع الاحتفاظ بكافة المدفوعات السابقة.</div>
+                    <div>• <strong>الفوج الجديد ({currentTargetGid}):</strong> سيبدأ التلميذ في <strong>الحصة {targetSessionIdx + 1}</strong> كـ (تلميذ جديد <strong>N</strong>) ويُحسب حاضراً اليوم.</div>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmActionModal(null)}
+                      className="m3-btn m3-btn-text"
+                      style={{ fontSize: '0.84rem' }}
+                    >
+                      تراجع
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleAcceptPermanentTransfer(req, currentTargetGid, targetSessionIdx, currentSourceGid);
+                        setConfirmActionModal(null);
+                      }}
+                      className="m3-btn m3-btn-primary"
+                      style={{ backgroundColor: '#4f46e5', borderColor: '#4f46e5', fontWeight: 800, fontSize: '0.85rem', padding: '6px 16px' }}
+                    >
+                      تأكيد النقل إلى فوج {currentTargetGid} ✓
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ========================================================================= */}
       {/* MODAL: CONFIRM REMOVE ACTIVE GROUP FROM SCANNER STATION                   */}
