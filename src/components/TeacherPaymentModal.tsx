@@ -173,21 +173,21 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
         });
 
         sessionHeaders.push(`
-          <th style="text-align: center; padding: 4px 6px;">
-            <div style="font-size: 10.5px; font-weight: bold; color: #1e293b;">الحصة ${sIdx + 1}</div>
-            ${dateStr ? `<div style="font-size: 8.5px; font-weight: normal; color: #64748b; margin-top: 1px;">${dateStr}</div>` : ''}
+          <th style="text-align: center; padding: 3px 4px;">
+            <div style="font-size: 9.5px; font-weight: bold; color: #1e293b;">الحصة ${sIdx + 1}</div>
+            ${dateStr ? `<div style="font-size: 7.5px; font-weight: normal; color: #64748b; margin-top: 1px;">${dateStr}</div>` : ''}
           </th>
         `);
 
         sessionCounts.push(`
-          <td style="text-align: center; padding: 5px 6px; background: #fff;">
-            <div style="font-size: 12px; font-weight: 800; color: #00639b;">${attendedStudents.length} <span style="font-size: 9.5px; font-weight: normal; color: #475569;">تلميذ</span></div>
+          <td style="text-align: center; padding: 4px 4px; background: #fff;">
+            <div style="font-size: 11px; font-weight: 800; color: #00639b;">${attendedStudents.length} <span style="font-size: 8.5px; font-weight: normal; color: #475569;">تلميذ</span></div>
           </td>
         `);
       }
 
       sessionAttendanceHtml = `
-        <div style="font-weight: bold; font-size: 10px; margin-bottom: 3px; color: #1e293b;">
+        <div style="font-weight: bold; font-size: 9px; margin-bottom: 2px; color: #1e293b;">
           ${isGroupOnly ? `بيان حضور الحصص المحتسبة في أتعاب الأستاذ (فوج ${specificGroupId}):` : 'بيان حضور الحصص المحتسبة في أتعاب الأستاذ:'}
         </div>
         <table style="margin-bottom: 4px;">
@@ -239,7 +239,7 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
       const maxSessions = Math.max(...groupDataList.map((gd) => gd.sessionCount), 4);
 
       const headerCells = Array.from({ length: maxSessions })
-        .map((_, sIdx) => `<th style="text-align: center; padding: 4px 6px;">الحصة ${sIdx + 1}</th>`)
+        .map((_, sIdx) => `<th style="text-align: center; padding: 3px 4px;">الحصة ${sIdx + 1}</th>`)
         .join('');
 
       const bodyRows = groupDataList
@@ -248,8 +248,8 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
             .map((_, sIdx) => {
               if (sIdx < gd.sessionCount) {
                 return `
-                  <td style="text-align: center; padding: 4px 6px;">
-                    <strong style="color: #00639b; font-size: 11px;">${gd.counts[sIdx]}</strong> <span style="font-size: 9.5px;">تلميذ</span>
+                  <td style="text-align: center; padding: 3px 4px;">
+                    <strong style="color: #00639b; font-size: 10px;">${gd.counts[sIdx]}</strong> <span style="font-size: 8.5px;">تلميذ</span>
                   </td>
                 `;
               }
@@ -269,14 +269,14 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
         .join('');
 
       sessionAttendanceHtml = `
-        <div style="font-weight: bold; font-size: 10px; margin-bottom: 3px;">بيان حضور الحصص المحتسبة في أتعاب الأستاذ لكل فوج:</div>
+        <div style="font-weight: bold; font-size: 9px; margin-bottom: 2px;">بيان حضور الحصص المحتسبة في أتعاب الأستاذ لكل فوج:</div>
         <table style="margin-bottom: 4px;">
           <thead>
             <tr>
-              <th style="width: 75px; text-align: center;">رمز الفوج</th>
+              <th style="width: 65px; text-align: center;">رمز الفوج</th>
               <th>المادة</th>
               ${headerCells}
-              <th style="width: 90px; text-align: center;">إجمالي التلاميذ</th>
+              <th style="width: 80px; text-align: center;">إجمالي التلاميذ</th>
             </tr>
           </thead>
           <tbody>
@@ -290,33 +290,33 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
       <div class="voucher-copy">
         <!-- Header -->
         <div class="header-container">
-          <div style="display: flex; align-items: center; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 6px;">
             <img src="${window.location.origin}/logo.svg" alt="شعار المؤسسة" class="center-logo" />
             <div>
-              <h1 style="margin: 0; font-size: 13px; font-weight: 900; color: #0f172a;">${data.centerName}</h1>
-              <p style="margin: 1px 0 0 0; font-size: 9px; color: #475569;">
-                ${data.cycle} | الموسم الدراسي: ${data.academicYear}
+              <h1 style="margin: 0; font-size: 11.5px; font-weight: 900; color: #0f172a;">${data.centerName}</h1>
+              <p style="margin: 1px 0 0 0; font-size: 8px; color: #475569;">
+                ${data.cycle} | الموسم: ${data.academicYear}
               </p>
             </div>
           </div>
           <div style="text-align: center;">
             <span class="copy-badge ${isManagement ? 'badge-admin' : 'badge-teacher'}">${copyLabel}</span>
           </div>
-          <div style="text-align: left; font-size: 9.5px; line-height: 1.3;">
-            <div>رقم الوصل: <strong style="font-size: 11px; color: #00639b;">#${payment.receiptNo}</strong></div>
-            <div>تاريخ التسديد: <strong>${printDate}</strong></div>
-            <div>توقيت التسديد: <strong>${printTime}</strong></div>
+          <div style="text-align: left; font-size: 8.5px; line-height: 1.25;">
+            <div>رقم الوصل: <strong style="font-size: 10px; color: #00639b;">#${payment.receiptNo}</strong></div>
+            <div>التاريخ: <strong>${printDate}</strong></div>
+            <div>التوقيت: <strong>${printTime}</strong></div>
           </div>
         </div>
 
         <!-- Title -->
         <div class="title-box">
           <div style="display: flex; justify-content: space-between; align-items: center;">
-            <h2 style="margin: 0; font-size: 12.5px; color: #004b75; font-weight: 800;">
-              ${isGroupOnly ? `وصل تسديد أتعاب الأستاذ • فوج ${specificGroupId}` : 'وصل تسديد أتعاب ومستحقات الأستاذ (Teacher Payout Voucher)'}
+            <h2 style="margin: 0; font-size: 11px; color: #004b75; font-weight: 800;">
+              ${isGroupOnly ? `وصل تسديد أتعاب الأستاذ • فوج ${specificGroupId}` : 'وصل تسديد أتعاب ومستحقات الأستاذ (Teacher Voucher)'}
             </h2>
-            <div style="font-size: 9.5px; color: #334155;">
-              ${isGroupOnly ? `إثبات صرف مستحقات التدريس الخاصة بفوج ${specificGroupId} فقط` : 'إثبات صرف مستحقات التدريس بالمركز'}
+            <div style="font-size: 8px; color: #334155;">
+              ${isGroupOnly ? `إثبات صرف مستحقات فوج ${specificGroupId} فقط` : 'إثبات صرف مستحقات التدريس بالمركز'}
             </div>
           </div>
         </div>
@@ -332,17 +332,17 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
         </div>
 
         <!-- Groups Breakdown Table -->
-        <div style="font-weight: bold; font-size: 10px; margin-bottom: 3px; color: #1e293b;">
+        <div style="font-weight: bold; font-size: 9px; margin-bottom: 2px; color: #1e293b;">
           ${isGroupOnly ? `بيان مستحقات فوج ${specificGroupId}:` : 'بيان الأفواج وحصص الأستاذ المحسوبة:'}
         </div>
         <table>
           <thead>
             <tr>
-              <th style="width: 75px; text-align: center;">رمز الفوج</th>
+              <th style="width: 65px; text-align: center;">رمز الفوج</th>
               <th>المادة</th>
               <th>التوقيت والأيام</th>
-              <th style="width: 90px; text-align: center;">عدد التلاميذ</th>
-              <th style="width: 130px; text-align: center;">أتعاب الأستاذ المحسوبة</th>
+              <th style="width: 75px; text-align: center;">عدد التلاميذ</th>
+              <th style="width: 110px; text-align: center;">أتعاب الأستاذ المحسوبة</th>
             </tr>
           </thead>
           <tbody>
@@ -370,7 +370,7 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
             <span>${isGroupOnly ? `الرصيد المتبقي للأستاذ في فوج (${specificGroupId}):` : 'الرصيد المتبقي بذمة المؤسسة للأستاذ:'}</span>
             <span>${formatVoucherAmount(currentRemaining)} دج ${currentRemaining === 0 ? '(تمت التسوية بالكامل ✓)' : ''}</span>
           </div>
-          ${payment.notes ? `<div style="margin-top: 3px; font-size: 9px; color: #475569; border-top: 1px dashed #cbd5e1; padding-top: 2px;">ملاحظات: ${payment.notes}</div>` : ''}
+          ${payment.notes ? `<div style="margin-top: 2px; font-size: 8px; color: #475569; border-top: 1px dashed #cbd5e1; padding-top: 1px;">ملاحظات: ${payment.notes}</div>` : ''}
         </div>
 
         <!-- Signatures -->
@@ -399,8 +399,8 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
           <title>${voucherTitle}</title>
           <style>
             @page {
-              size: A4 portrait;
-              margin: 6mm 10mm;
+              size: A4 landscape;
+              margin: 5mm 8mm;
             }
             * {
               box-sizing: border-box;
@@ -412,13 +412,50 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
               padding: 0;
               direction: rtl;
               text-align: right;
-              font-size: 10px;
-              line-height: 1.35;
+              font-size: 9px;
+              line-height: 1.3;
               background: #fff;
             }
-            .voucher-copy {
-              padding: 2px 4px;
+            .print-page-landscape {
+              display: flex;
+              flex-direction: row;
+              justify-content: space-between;
+              align-items: stretch;
+              width: 100%;
               page-break-inside: avoid;
+            }
+            .voucher-wrapper {
+              flex: 1;
+              min-width: 0;
+              display: flex;
+              flex-direction: column;
+            }
+            .voucher-copy {
+              padding: 0 4px;
+            }
+            .vertical-divider {
+              width: 18px;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: space-between;
+              border-left: 1.5px dashed #94a3b8;
+              margin: 0 6px;
+              padding: 8px 0;
+              color: #64748b;
+            }
+            .cut-scissor {
+              font-size: 13px;
+              background: #fff;
+              padding: 2px 0;
+            }
+            .cut-text-v {
+              writing-mode: vertical-rl;
+              font-size: 8px;
+              color: #64748b;
+              letter-spacing: 2px;
+              background: #fff;
+              padding: 6px 0;
             }
             .header-container {
               display: flex;
@@ -429,17 +466,17 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
               margin-bottom: 4px;
             }
             .center-logo {
-              height: 26px;
+              height: 24px;
               width: auto;
               object-fit: contain;
             }
             .copy-badge {
               display: inline-block;
-              padding: 2px 10px;
-              border-radius: 12px;
-              font-size: 9.5px;
+              padding: 1.5px 8px;
+              border-radius: 10px;
+              font-size: 8.5px;
               font-weight: 800;
-              letter-spacing: 0.3px;
+              letter-spacing: 0.2px;
             }
             .badge-admin {
               background: #e0f2fe;
@@ -454,29 +491,29 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
             .title-box {
               background: #f0f7ff;
               border: 1px solid #cde5ff;
-              padding: 3px 8px;
+              padding: 2.5px 6px;
               border-radius: 4px;
               margin-bottom: 4px;
             }
             .info-grid {
               display: grid;
               grid-template-columns: 1fr 1fr;
-              gap: 2px 8px;
+              gap: 2px 6px;
               background: #f8fafc;
               border: 1px solid #e2e8f0;
               border-radius: 4px;
-              padding: 4px 8px;
+              padding: 3px 6px;
               margin-bottom: 4px;
-              font-size: 9.5px;
+              font-size: 8.5px;
             }
             .info-item {
               display: flex;
-              gap: 6px;
+              gap: 4px;
             }
             .info-label {
               font-weight: bold;
               color: #475569;
-              min-width: 85px;
+              min-width: 65px;
             }
             table {
               width: 100%;
@@ -485,8 +522,8 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
             }
             th, td {
               border: 1px solid #cbd5e1;
-              padding: 3px 6px;
-              font-size: 9.5px;
+              padding: 2.5px 4px;
+              font-size: 8.5px;
             }
             th {
               background: #f1f5f9;
@@ -495,79 +532,68 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
             }
             .totals-box {
               border: 1.5px solid #00639b;
-              border-radius: 5px;
-              padding: 4px 8px;
+              border-radius: 4px;
+              padding: 3px 6px;
               background: #f8fafc;
               margin-bottom: 4px;
             }
             .totals-row {
               display: flex;
               justify-content: space-between;
-              padding: 1.5px 0;
-              font-size: 9.5px;
+              padding: 1px 0;
+              font-size: 8.5px;
             }
             .paid-highlight {
               border-top: 1.5px solid #00639b;
               border-bottom: 1.5px solid #00639b;
               margin: 2px 0;
-              padding: 3px 0;
-              font-size: 11.5px;
+              padding: 2px 0;
+              font-size: 10px;
               font-weight: 900;
               color: #00639b;
             }
             .signatures-box {
               display: flex;
               justify-content: space-between;
-              margin-top: 6px;
-              padding: 0 25px;
+              margin-top: 5px;
+              padding: 0 15px;
             }
             .sig-block {
               text-align: center;
-              width: 170px;
-              font-size: 9.5px;
+              width: 120px;
+              font-size: 8.5px;
             }
             .sig-line {
-              margin-top: 18px;
+              margin-top: 16px;
               border-top: 1px dashed #64748b;
-              font-size: 8.5px;
+              font-size: 7.5px;
               color: #64748b;
-              padding-top: 2px;
+              padding-top: 1.5px;
             }
             .footer-note {
               text-align: center;
-              font-size: 8px;
+              font-size: 7.5px;
               color: #94a3b8;
-              margin-top: 4px;
+              margin-top: 3px;
               border-top: 1px solid #e2e8f0;
-              padding-top: 2px;
-            }
-            .cut-line-container {
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              gap: 10px;
-              border-top: 1.5px dashed #94a3b8;
-              margin: 5px 0;
-              padding-top: 3px;
-              font-size: 9px;
-              color: #64748b;
-            }
-            .cut-scissor {
-              font-size: 12px;
-            }
-            .cut-text {
-              letter-spacing: 0.3px;
+              padding-top: 1.5px;
             }
           </style>
         </head>
         <body>
-          ${renderVoucherCopy('نسخة الإدارة (Center Copy)', true)}
-          <div class="cut-line-container">
-            <span class="cut-scissor">✄</span>
-            <span class="cut-text">قص من هنا (A5) — نسخة الإدارة (أعلاه) / نسخة الأستاذ (أدناه)</span>
-            <span class="cut-scissor">✄</span>
+          <div class="print-page-landscape">
+            <div class="voucher-wrapper">
+              ${renderVoucherCopy('نسخة الإدارة (Center Copy)', true)}
+            </div>
+            <div class="vertical-divider">
+              <span class="cut-scissor">✄</span>
+              <span class="cut-text-v">قص من هنا (A5)</span>
+              <span class="cut-scissor">✄</span>
+            </div>
+            <div class="voucher-wrapper">
+              ${renderVoucherCopy('نسخة الأستاذ (Teacher Copy)', false)}
+            </div>
           </div>
-          ${renderVoucherCopy('نسخة الأستاذ (Teacher Copy)', false)}
         </body>
       </html>
     `;
