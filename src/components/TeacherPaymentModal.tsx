@@ -5,7 +5,13 @@ import { useApp } from '../context/AppContext';
 import { Teacher, GroupSheet, TeacherPaymentRecord } from '../types';
 import { sanitizePrintTitle, getArabicMonthYear } from '../utils/printTitleUtils';
 import { saveReceiptPdfToServer } from '../utils/receiptSaveUtils';
-import { isSummaryRow, isStudentAttendedMoreThanOneSession, getAttendedSessionsCount } from '../utils/sessionUtils';
+import {
+  isSummaryRow,
+  isStudentAttendedMoreThanOneSession,
+  getAttendedSessionsCount,
+  getGroupCycleTotalSessions,
+  formatToYYYYMMDD
+} from '../utils/sessionUtils';
 import {
   X,
   Printer,
@@ -133,6 +139,151 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
     });
     if (totalEligibleVoucherStudents === 0 && stats.totalStudents > 0) {
       totalEligibleVoucherStudents = stats.totalStudents;
+    }
+
+    // Helper to test if a status counts as attended
+    const isAttendedSession = (status: any) => {
+      const clean = String(status || '').trim().toUpperCase();
+      return clean === 'P' || clean === 'C' || clean === 'ح' || clean === 'M' || clean === 'م';
+    };
+
+    // Build Session Attendance Breakdown Table (Count only attended students, exclude absent)
+    let sessionAttendanceHtml = '';
+    if (stats.groups.length === 1) {
+      const g: any = stats.groups[0];
+      const gId = g.groupId || g.id;
+      const gMeta = data.groups.find((gm) => gm.id === gId) || g;
+      const gSheet = data.groupData[gId] || (g.students ? g : undefined);
+      const sessionCount = getGroupCycleTotalSessions(gMeta, gSheet, data.pricingTiers);
+      const sessionDates: string[] = gSheet?.sessionDates || gMeta?.sessionDates || [];
+      const realStudents = (gSheet?.students || []).filter(
+        (s: any) => !isSummaryRow(s, gId) && s.name && String(s.name).trim()
+      );
+
+      const sessionHeaders: string[] = [];
+      const sessionCounts: string[] = [];
+
+      for (let sIdx = 0; sIdx < sessionCount; sIdx++) {
+        const rawDate = sessionDates[sIdx];
+        const dateStr = rawDate ? formatToYYYYMMDD(rawDate) : '';
+        const attendedStudents = realStudents.filter((s: any) => {
+          const isAtt = isAttendedSession(s.attendance?.[sIdx]);
+          if (!isAtt) return false;
+          return isStudentAttendedMoreThanOneSession(s, gId) || (s.teacherPay || 0) > 0;
+        });
+
+        sessionHeaders.push(`
+          <th style="text-align: center; padding: 8px 6px;">
+            <div style="font-size: 13px; font-weight: bold; color: #1e293b;">الحصة ${sIdx + 1}</div>
+            ${dateStr ? `<div style="font-size: 10px; font-weight: normal; color: #64748b; margin-top: 2px;">${dateStr}</div>` : ''}
+          </th>
+        `);
+
+        sessionCounts.push(`
+          <td style="text-align: center; padding: 10px 6px; background: #fff;">
+            <div style="font-size: 15px; font-weight: 800; color: #00639b;">${attendedStudents.length} <span style="font-size: 12px; font-weight: normal; color: #475569;">تلميذ</span></div>
+          </td>
+        `);
+      }
+
+      sessionAttendanceHtml = `
+        <div style="font-weight: bold; margin-bottom: 6px;">
+          ${isGroupOnly ? `بيان حضور الحصص المحتسبة في أتعاب الأستاذ (فوج ${specificGroupId}):` : 'بيان حضور الحصص المحتسبة في أتعاب الأستاذ:'}
+        </div>
+        <table style="margin-bottom: 18px;">
+          <thead>
+            <tr>
+              ${sessionHeaders.join('')}
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              ${sessionCounts.join('')}
+            </tr>
+          </tbody>
+        </table>
+      `;
+    } else if (stats.groups.length > 1) {
+      const groupDataList = stats.groups.map((g: any) => {
+        const gId = g.groupId || g.id;
+        const gMeta = data.groups.find((gm) => gm.id === gId) || g;
+        const gSheet = data.groupData[gId] || (g.students ? g : undefined);
+        const sessionCount = getGroupCycleTotalSessions(gMeta, gSheet, data.pricingTiers);
+        const realStudents = (gSheet?.students || []).filter(
+          (s: any) => !isSummaryRow(s, gId) && s.name && String(s.name).trim()
+        );
+
+        const counts: number[] = [];
+        for (let sIdx = 0; sIdx < sessionCount; sIdx++) {
+          const attended = realStudents.filter((s: any) => {
+            const isAtt = isAttendedSession(s.attendance?.[sIdx]);
+            if (!isAtt) return false;
+            return isStudentAttendedMoreThanOneSession(s, gId) || (s.teacherPay || 0) > 0;
+          });
+          counts.push(attended.length);
+        }
+
+        const eligibleStudentsCount = realStudents.filter((s: any) =>
+          isStudentAttendedMoreThanOneSession(s, gId)
+        ).length;
+
+        return {
+          gId,
+          subject: g.subject || gSheet?.subject || '',
+          sessionCount,
+          counts,
+          eligibleStudentsCount
+        };
+      });
+
+      const maxSessions = Math.max(...groupDataList.map((gd) => gd.sessionCount), 4);
+
+      const headerCells = Array.from({ length: maxSessions })
+        .map((_, sIdx) => `<th style="text-align: center; padding: 7px 6px;">الحصة ${sIdx + 1}</th>`)
+        .join('');
+
+      const bodyRows = groupDataList
+        .map((gd) => {
+          const sessionCells = Array.from({ length: maxSessions })
+            .map((_, sIdx) => {
+              if (sIdx < gd.sessionCount) {
+                return `
+                  <td style="text-align: center; padding: 7px 6px;">
+                    <strong style="color: #00639b; font-size: 13px;">${gd.counts[sIdx]}</strong> <span style="font-size: 11px;">تلميذ</span>
+                  </td>
+                `;
+              }
+              return `<td style="text-align: center; color: #94a3b8;">-</td>`;
+            })
+            .join('');
+
+          return `
+            <tr>
+              <td style="text-align: center; font-weight: bold;">${gd.gId}</td>
+              <td>${gd.subject}</td>
+              ${sessionCells}
+              <td style="text-align: center; font-weight: bold; color: #00639b;">${gd.eligibleStudentsCount} تلميذ</td>
+            </tr>
+          `;
+        })
+        .join('');
+
+      sessionAttendanceHtml = `
+        <div style="font-weight: bold; margin-bottom: 6px;">بيان حضور الحصص المحتسبة في أتعاب الأستاذ لكل فوج:</div>
+        <table style="margin-bottom: 18px;">
+          <thead>
+            <tr>
+              <th style="width: 80px; text-align: center;">رمز الفوج</th>
+              <th>المادة</th>
+              ${headerCells}
+              <th style="width: 100px; text-align: center;">إجمالي التلاميذ</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${bodyRows}
+          </tbody>
+        </table>
+      `;
     }
 
     const voucherHtml = `
@@ -314,6 +465,8 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
               ${groupsRows || '<tr><td colspan="5" style="text-align: center;">لا توجد أفواج مسندة</td></tr>'}
             </tbody>
           </table>
+
+          ${sessionAttendanceHtml}
 
           <!-- Totals Calculation Block -->
           <div class="totals-box">
@@ -731,32 +884,82 @@ export default function TeacherPaymentModal({ teacher, stats, onClose, specificG
                 />
               </div>
 
-              {/* Assigned Groups Mini Breakdown */}
+              {/* Assigned Groups & Session Attendance Breakdown */}
               <div
                 style={{
                   backgroundColor: 'var(--md-sys-color-surface-container-lowest)',
-                  padding: '12px',
+                  padding: '12px 14px',
                   borderRadius: 'var(--md-shape-sm)',
                   border: '1px solid var(--md-sys-color-outline-variant)'
                 }}
               >
-                <div style={{ fontSize: '0.8rem', fontWeight: 700, marginBottom: '6px', color: 'var(--md-sys-color-on-surface-variant)' }}>
-                  الأفواج المسندة للأستاذ ({stats.groups.length} فوج):
+                <div style={{ fontSize: '0.8rem', fontWeight: 700, marginBottom: '8px', color: 'var(--md-sys-color-on-surface-variant)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>{isGroupOnly ? `بيان حضور الحصص (فوج ${specificGroupId}):` : `الأفواج وحضور الحصص (${stats.groups.length} فوج):`}</span>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--status-present)', fontWeight: 600 }}>المحتسب في الأتعاب</span>
                 </div>
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                  {stats.groups.map((g) => (
-                    <span
-                      key={g.groupId}
-                      className="m3-chip"
-                      style={{
-                        fontSize: '0.75rem',
-                        backgroundColor: g.isVip ? 'var(--status-vip-container)' : 'var(--md-sys-color-surface-container)',
-                        color: g.isVip ? 'var(--status-vip)' : 'var(--md-sys-color-on-surface)'
-                      }}
-                    >
-                      {g.groupId} {g.isVip ? '★' : ''} ({g.day1})
-                    </span>
-                  ))}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {stats.groups.map((g: any) => {
+                    const gId = g.groupId || g.id;
+                    const gMeta = data.groups.find((gm) => gm.id === gId) || g;
+                    const gSheet = data.groupData[gId] || (g.students ? g : undefined);
+                    const sessionCount = getGroupCycleTotalSessions(gMeta, gSheet, data.pricingTiers);
+                    const realStudents = (gSheet?.students || []).filter(
+                      (s: any) => !isSummaryRow(s, gId) && s.name && String(s.name).trim()
+                    );
+                    const sessionCounts = Array.from({ length: sessionCount }).map((_, sIdx) => {
+                      return realStudents.filter((s: any) => {
+                        const att = String(s.attendance?.[sIdx] || '').trim().toUpperCase();
+                        const isAtt = att === 'P' || att === 'C' || att === 'ح' || att === 'M' || att === 'م';
+                        if (!isAtt) return false;
+                        return isStudentAttendedMoreThanOneSession(s, gId) || (s.teacherPay || 0) > 0;
+                      }).length;
+                    });
+
+                    return (
+                      <div
+                        key={gId}
+                        style={{
+                          backgroundColor: 'var(--md-sys-color-surface-container-low)',
+                          borderRadius: 'var(--md-shape-xs)',
+                          padding: '8px 10px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '6px'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.78rem' }}>
+                          <span style={{ fontWeight: 700, color: 'var(--md-sys-color-on-surface)' }}>
+                            {gId} {g.isVip ? '★ VIP' : ''} ({g.subject || gSheet?.subject || ''} - {g.day1 || gSheet?.day1 || ''})
+                          </span>
+                          <span style={{ fontSize: '0.72rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
+                            {sessionCount} حصص
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                          {sessionCounts.map((count, sIdx) => (
+                            <span
+                              key={sIdx}
+                              style={{
+                                fontSize: '0.72rem',
+                                padding: '2px 8px',
+                                borderRadius: 'var(--md-shape-full)',
+                                backgroundColor: 'var(--md-sys-color-surface-container-highest)',
+                                color: 'var(--md-sys-color-on-surface)',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}
+                            >
+                              <span style={{ color: 'var(--md-sys-color-outline)' }}>حصة {sIdx + 1}:</span>
+                              <strong style={{ color: count > 0 ? 'var(--status-present)' : 'var(--md-sys-color-outline)' }}>
+                                {count} حاضر
+                              </strong>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
