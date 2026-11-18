@@ -713,6 +713,19 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
   const idMap: Record<string, string> = {};
   const deletedGroupSet = new Set((centerData.deletedGroups || []).map((g) => g.trim().toUpperCase()));
 
+  // Remove empty auto-created BAC53 and BEM11 from local/cloud state if they have no attendance or payments
+  for (const legacyAutoId of ['BAC53', 'BEM11']) {
+    const sheet = centerData.groupData?.[legacyAutoId];
+    if (sheet) {
+      const hasAtt = (sheet.students || []).some((s) => (s.attendance || []).some((a) => a !== ''));
+      const hasPay = (sheet.students || []).some((s) => (s.payments || []).some((p) => Number(p) > 0));
+      if (!hasAtt && !hasPay) {
+        deletedGroupSet.add(legacyAutoId);
+        changed = true;
+      }
+    }
+  }
+
   // Build global 1-to-1 bijection of student names to unique barcodes
   const existingBarcodeByNameMap = new Map<string, string>();
   const existingNameByBarcodeMap = new Map<string, string>();
@@ -1201,11 +1214,25 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
     changed = true;
   }
 
+  // Ensure BAC13 and BEM07 stay stopped (autoRenew: false) unless explicitly enabled
+  for (const stoppedId of ['BAC13', 'BEM07']) {
+    if (newGroupData[stoppedId] && newGroupData[stoppedId].autoRenew === undefined) {
+      newGroupData[stoppedId] = { ...newGroupData[stoppedId], autoRenew: false };
+      changed = true;
+    }
+  }
+  const finalCleanGroups = cleanGroups.map((g) =>
+    (g.id === 'BAC13' || g.id === 'BEM07') && g.autoRenew === undefined
+      ? { ...g, autoRenew: false }
+      : g
+  );
+
   const preRenewed: CenterData = {
     ...centerData,
     academicYear: finalAcademicYear,
-    groups: cleanGroups,
+    groups: finalCleanGroups,
     groupData: newGroupData,
+    deletedGroups: Array.from(deletedGroupSet),
     paymentTransactions: centerData.paymentTransactions || [],
     deletedStudents: centerData.deletedStudents || []
   };
