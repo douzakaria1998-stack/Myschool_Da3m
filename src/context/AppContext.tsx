@@ -499,6 +499,141 @@ function mergeAttendanceSafely(remote: CenterData, local: CenterData): CenterDat
   return merged;
 }
 
+// Auto-renew ended tail groups in each GGID series, carrying over the exact student list
+const autoRenewEndedGroups = (centerData: CenterData): { updated: CenterData; changed: boolean } => {
+  const groups = centerData.groups || [];
+  const groupData = centerData.groupData || {};
+  if (groups.length === 0) return { updated: centerData, changed: false };
+
+  const bySeries = new Map<string, GroupMeta[]>();
+  for (const g of groups) {
+    const sheet = groupData[g.id];
+    const prefix = getSeriesPrefix(g.ggid || sheet?.ggid);
+    if (!prefix) continue;
+    if (!bySeries.has(prefix)) bySeries.set(prefix, []);
+    bySeries.get(prefix)!.push(g);
+  }
+
+  let workingGroups = [...groups];
+  const workingGroupData = { ...groupData };
+  let changed = false;
+
+  for (const [seriesPrefix, seriesGroups] of bySeries.entries()) {
+    // Find the latest group in this series by start date
+    const sorted = [...seriesGroups].sort((a, b) => {
+      const da = (workingGroupData[a.id]?.sessionDates?.[0] || a.sessionDates?.[0] || '').trim();
+      const db = (workingGroupData[b.id]?.sessionDates?.[0] || b.sessionDates?.[0] || '').trim();
+      return da.localeCompare(db);
+    });
+    const tailMeta = sorted[sorted.length - 1];
+    const tailSheet = workingGroupData[tailMeta.id];
+    if (!tailSheet) continue;
+
+    if (!isGroupEnded(tailSheet, tailMeta, centerData.pricingTiers)) continue;
+
+    const genuineStudents = (tailSheet.students || []).filter(
+      (s) => !isSummaryRow(s, tailMeta.id) && s.name && s.name.trim()
+    );
+    if (genuineStudents.length === 0) continue;
+
+    const isVipGroup = Boolean(tailMeta.isVip ?? tailSheet.isVip ?? isVipGroupId(tailMeta.id));
+    const groupLevel = tailMeta.level || tailSheet.level || getGroupLevelFromId(tailMeta.id);
+    const newId = getNextGroupId(isVipGroup, workingGroups, groupLevel);
+    if (workingGroupData[newId]) continue;
+
+    const sessionCount = tailSheet.sessionCount || tailMeta.sessionCount || 4;
+    const effectiveDay1 = tailSheet.day1 || tailMeta.day1 || 'السبت';
+    const effectiveDay2 = tailSheet.day2 || tailMeta.day2;
+    const sourceDates = (tailSheet.sessionDates || []).filter((d) => Boolean(d && typeof d === 'string' && d.trim()));
+    const lastSessionDateStr = sourceDates.length > 0 ? sourceDates[sourceDates.length - 1] : null;
+    const nextDate = getNextSessionDateAfter(lastSessionDateStr, effectiveDay1, effectiveDay2);
+    const startStr = formatToYYYYMMDD(nextDate);
+    const sessionDates = generateSessionDates(effectiveDay1, sessionCount, startStr, effectiveDay2);
+
+    const groupType = tailSheet.type || tailMeta.type || (isVipGroup ? '4-10000' : '4-2500');
+    const studentFee = tailSheet.studentFee ?? tailMeta.studentFee;
+    const teacherPay = tailSheet.teacherPayPerStudent ?? tailMeta.teacherPayPerStudent;
+    const schoolShare = tailSheet.schoolSharePerStudent ?? tailMeta.schoolSharePerStudent;
+
+    const newStudents: StudentRecord[] = genuineStudents.map((s, idx) =>
+      calcStudentFinancesPure(
+        {
+          rowId: idx + 1,
+          name: s.name,
+          phone: s.phone || '',
+          barcode: s.barcode || '',
+          discount: s.discount || '1',
+          attendance: Array(sessionCount).fill(''),
+          payments: Array(sessionCount).fill(''),
+          fee: 0,
+          totalReceived: 0,
+          teacherPay: 0,
+          schoolEarn: 0,
+          debt: 0,
+          totalAttendance: 0
+        },
+        groupType,
+        centerData.pricingTiers,
+        { studentFee, teacherPayPerStudent: teacherPay, schoolSharePerStudent: schoolShare, sessionCount, isVip: isVipGroup, groupId: newId }
+      )
+    );
+
+    const newGgid = buildGgid(seriesPrefix, newId);
+    const newMeta: GroupMeta = {
+      id: newId,
+      ggid: newGgid,
+      level: groupLevel,
+      teacherId: tailMeta.teacherId || '',
+      teacherName: tailSheet.teacherName || tailMeta.teacherName || '',
+      subject: tailSheet.subject || tailMeta.subject || '',
+      day1: effectiveDay1,
+      time1: tailSheet.time1 || tailMeta.time1 || '',
+      day2: effectiveDay2,
+      time2: tailSheet.time2 || tailMeta.time2,
+      type: groupType,
+      isVip: isVipGroup,
+      sessionCount,
+      sessionDates,
+      studentFee,
+      teacherPayPerStudent: teacherPay,
+      schoolSharePerStudent: schoolShare
+    };
+    const newSheet: GroupSheet = {
+      groupId: newId,
+      ggid: newGgid,
+      level: groupLevel,
+      teacherName: newMeta.teacherName,
+      subject: newMeta.subject,
+      day1: effectiveDay1,
+      time1: newMeta.time1,
+      day2: effectiveDay2,
+      time2: newMeta.time2,
+      sessionDates,
+      sessionCount,
+      isVip: isVipGroup,
+      type: groupType,
+      studentFee,
+      teacherPayPerStudent: teacherPay,
+      schoolSharePerStudent: schoolShare,
+      students: newStudents
+    };
+
+    workingGroups = [...workingGroups, newMeta];
+    workingGroupData[newId] = newSheet;
+    changed = true;
+  }
+
+  if (!changed) return { updated: centerData, changed: false };
+  return {
+    updated: {
+      ...centerData,
+      groups: workingGroups,
+      groupData: workingGroupData
+    },
+    changed: true
+  };
+};
+
 const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: boolean } => {
   let changed = false;
   const newGroupData: Record<string, GroupSheet> = {};
@@ -993,15 +1128,20 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
     changed = true;
   }
 
+  const preRenewed: CenterData = {
+    ...centerData,
+    academicYear: finalAcademicYear,
+    groups: cleanGroups,
+    groupData: newGroupData,
+    paymentTransactions: centerData.paymentTransactions || [],
+    deletedStudents: centerData.deletedStudents || []
+  };
+
+  const { updated: finalRenewed, changed: renewChanged } = autoRenewEndedGroups(preRenewed);
+  if (renewChanged) changed = true;
+
   return {
-    cleaned: {
-      ...centerData,
-      academicYear: finalAcademicYear,
-      groups: cleanGroups,
-      groupData: newGroupData,
-      paymentTransactions: centerData.paymentTransactions || [],
-      deletedStudents: centerData.deletedStudents || []
-    },
+    cleaned: finalRenewed,
     changed
   };
 };
@@ -1843,11 +1983,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // Save changes locally and debounce sync to Supabase
   const persistData = (newData: CenterData) => {
     const now = Date.now();
+    const { updated: autoRenewedData } = autoRenewEndedGroups(newData);
     const stampedData: CenterData = {
-      ...newData,
-      paymentTransactions: newData.paymentTransactions || dataRef.current.paymentTransactions || [],
-      deletedStudents: newData.deletedStudents || dataRef.current.deletedStudents || [],
-      deletedGroups: newData.deletedGroups || dataRef.current.deletedGroups || [],
+      ...autoRenewedData,
+      paymentTransactions: autoRenewedData.paymentTransactions || dataRef.current.paymentTransactions || [],
+      deletedStudents: autoRenewedData.deletedStudents || dataRef.current.deletedStudents || [],
+      deletedGroups: autoRenewedData.deletedGroups || dataRef.current.deletedGroups || [],
       _last_modified_at: now,
       _client_id: clientIdRef.current
     } as any;
@@ -3533,6 +3674,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         rowId: idx + 1,
         name: s.name,
         phone: s.phone || '',
+        barcode: s.barcode || '',
         discount: s.discount || '1',
         attendance: Array(sessionCount).fill(''),
         payments: Array(sessionCount).fill(''),

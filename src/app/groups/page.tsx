@@ -20,8 +20,10 @@ import {
   Edit3,
   RotateCw,
   User,
-  ArrowLeft
+  ArrowLeft,
+  Download
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import AddGroupModal from '../../components/AddGroupModal';
 import EditGroupModal from '../../components/EditGroupModal';
 import RenewGroupModal from '../../components/RenewGroupModal';
@@ -34,7 +36,11 @@ import {
   sortGroupsActiveFirstOldToNew,
   getGroupLevelFromId,
   getLevelDisplayName,
-  EDUCATIONAL_LEVELS
+  EDUCATIONAL_LEVELS,
+  getSeriesPrefix,
+  getGroupCurrentSession,
+  getGroupCycleTotalSessions,
+  isSummaryRow
 } from '../../utils/sessionUtils';
 import { normalizeArabicName } from '../../utils/barcodeUtils';
 
@@ -296,6 +302,44 @@ export default function GroupsPage() {
           >
             <ArrowLeft size={18} />
             <span>{lastViewedGroupId ? `العودة للفوج (${lastViewedGroupId})` : 'العودة'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              const rows = data.groups.map((g) => {
+                const sheet = data.groupData[g.id];
+                const ggid = g.ggid || sheet?.ggid || '';
+                const seriesGid = getSeriesPrefix(ggid);
+                const students = (sheet?.students || []).filter((s) => !isSummaryRow(s, g.id));
+                const totalSessions = getGroupCycleTotalSessions(g, sheet, data.pricingTiers);
+                const currentSession = getGroupCurrentSession(students, totalSessions);
+                const dates = (sheet?.sessionDates || g.sessionDates || []).filter(Boolean);
+                return {
+                  GGID: ggid,
+                  GID: seriesGid,
+                  ID: g.id,
+                  'Teacher Name': sheet?.teacherName || g.teacherName || '',
+                  Subject: sheet?.subject || g.subject || '',
+                  'Session Number': currentSession,
+                  'Total Sessions': totalSessions,
+                  'Students Count': students.length,
+                  'Start Date': dates[0] || '',
+                  'End Date': dates[dates.length - 1] || ''
+                };
+              });
+              rows.sort((a, b) => (a.GID || 'ZZZ').localeCompare(b.GID || 'ZZZ') || (a['Start Date'] || '').localeCompare(b['Start Date'] || ''));
+              const ws = XLSX.utils.json_to_sheet(rows);
+              const wb = XLSX.utils.book_new();
+              XLSX.utils.book_append_sheet(wb, ws, 'Groups');
+              XLSX.writeFile(wb, 'groups_series_list.xlsx');
+            }}
+            className="m3-btn m3-btn-outlined"
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', borderColor: '#15803d', color: '#15803d', fontWeight: 700 }}
+            title="تصدير قائمة الأفواج والسلاسل (GID / GGID) إلى ملف Excel"
+          >
+            <Download size={18} />
+            <span>تصدير Excel</span>
           </button>
 
           <button
