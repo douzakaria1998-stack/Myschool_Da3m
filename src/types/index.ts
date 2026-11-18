@@ -86,6 +86,7 @@ export type EducationalLevel = 'BAC' | 'SEC' | 'BEM';
 
 export interface GroupSheet {
   groupId: string;
+  ggid?: string; // Series-linked Group ID (e.g. G01-BAC01, G01-BAC10)
   level?: EducationalLevel; // 'BAC' (بكالوريا) | 'SEC' (ثانوي) | 'BEM' (الرابعة متوسط)
   teacherName: string;
   subject: string;
@@ -127,6 +128,7 @@ export interface Teacher {
 
 export interface GroupMeta {
   id: string;
+  ggid?: string; // Series-linked Group ID (e.g. G01-BAC01, G01-BAC10)
   level?: EducationalLevel; // 'BAC' (بكالوريا) | 'SEC' (ثانوي) | 'BEM' (الرابعة متوسط)
   teacherId: string;
   teacherName: string;

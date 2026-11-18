@@ -34,7 +34,10 @@ import {
   getNextSessionDateAfter,
   getUpcomingSessionDate,
   sortGroupsActiveFirstOldToNew,
-  getDefaultSessionIndex
+  getDefaultSessionIndex,
+  getSeriesPrefix,
+  getNextSeriesPrefix,
+  buildGgid
 } from '../utils/sessionUtils';
 import { normalizeArabicName } from '../utils/barcodeUtils';
 import { recordPaymentTransaction, removePaymentTransactionsForStudent } from '../utils/paymentLogger';
@@ -3411,8 +3414,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         ? groupMeta.sessionDates
         : generateSessionDates(effectiveDay1, sessionCount, groupMeta.customStart, effectiveDay2);
 
+    const currentData = dataRef.current || data;
+    const assignedSeries = getSeriesPrefix(groupMeta.ggid) || getNextSeriesPrefix(currentData.groups);
+    const assignedGgid = groupMeta.ggid || buildGgid(assignedSeries, cleanId);
+
     const newGroupSheet: GroupSheet = {
       groupId: cleanId,
+      ggid: assignedGgid,
       level: groupLevel,
       teacherName: groupMeta.teacherName,
       subject: groupMeta.subject,
@@ -3430,12 +3438,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       students: []
     };
 
-    const currentData = dataRef.current || data;
     const updatedDeletedGroups = (currentData.deletedGroups || []).filter(
       (g) => g.trim().toUpperCase() !== cleanId
     );
 
-    const finalGroupMeta: GroupMeta = { ...groupMeta, id: cleanId, level: groupLevel, sessionCount, sessionDates };
+    const finalGroupMeta: GroupMeta = { ...groupMeta, id: cleanId, ggid: assignedGgid, level: groupLevel, sessionCount, sessionDates };
     const updatedData: CenterData = {
       ...currentData,
       deletedGroups: updatedDeletedGroups,
@@ -3550,8 +3557,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       );
     });
 
+    const sourceSeries =
+      getSeriesPrefix(sourceMeta?.ggid || sourceGroup?.ggid) ||
+      getNextSeriesPrefix(data.groups);
+    const sourceGgid = sourceMeta?.ggid || sourceGroup?.ggid || buildGgid(sourceSeries, sourceGroupId);
+    const newGgid = buildGgid(sourceSeries, cleanNewId);
+
     const newGroupMeta: GroupMeta = {
       id: cleanNewId,
+      ggid: newGgid,
       teacherId: customGroupFields?.teacherId ?? sourceMeta?.teacherId ?? '',
       teacherName: customGroupFields?.teacherName ?? sourceGroup.teacherName,
       subject: customGroupFields?.subject ?? sourceGroup.subject,
@@ -3570,6 +3584,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const newGroupSheet: GroupSheet = {
       groupId: cleanNewId,
+      ggid: newGgid,
       teacherName: newGroupMeta.teacherName,
       subject: newGroupMeta.subject,
       day1: newGroupMeta.day1,
@@ -3591,12 +3606,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       (g) => g.trim().toUpperCase() !== cleanNewId
     );
 
+    const updatedGroupsList = data.groups.map((g) =>
+      g.id === sourceGroupId && !g.ggid ? { ...g, ggid: sourceGgid } : g
+    );
+
     const updatedData: CenterData = {
       ...data,
       deletedGroups: updatedDeletedGroups,
-      groups: [...data.groups, newGroupMeta],
+      groups: [...updatedGroupsList, newGroupMeta],
       groupData: {
         ...data.groupData,
+        [sourceGroupId]: sourceGroup.ggid ? sourceGroup : { ...sourceGroup, ggid: sourceGgid },
         [cleanNewId]: newGroupSheet
       }
     };

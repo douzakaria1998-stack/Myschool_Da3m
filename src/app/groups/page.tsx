@@ -177,8 +177,11 @@ export default function GroupsPage() {
       // 1. Text Search match
       if (search.trim()) {
         const q = search.toLowerCase();
+        const sheetGgid = data.groupData[g.id]?.ggid || '';
         const matchesSearch =
           g.id.toLowerCase().includes(q) ||
+          (g.ggid && g.ggid.toLowerCase().includes(q)) ||
+          (sheetGgid && sheetGgid.toLowerCase().includes(q)) ||
           g.subject.toLowerCase().includes(q) ||
           g.teacherName.toLowerCase().includes(q) ||
           (g.day1 && g.day1.toLowerCase().includes(q)) ||
@@ -696,6 +699,24 @@ export default function GroupsPage() {
                   <span style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--md-sys-color-primary)', whiteSpace: 'nowrap', lineHeight: 1 }}>
                     {group.id}
                   </span>
+                  {(group.ggid || groupSheet?.ggid) && (
+                    <span
+                      className="m3-chip"
+                      style={{
+                        backgroundColor: '#e0f2fe',
+                        color: '#0369a1',
+                        fontWeight: 800,
+                        fontSize: '0.66rem',
+                        padding: '2px 6px',
+                        fontFamily: 'monospace',
+                        whiteSpace: 'nowrap',
+                        border: '1px solid #bae6fd'
+                      }}
+                      title={`معرف السلسلة (GGID): ${group.ggid || groupSheet?.ggid}`}
+                    >
+                      {group.ggid || groupSheet?.ggid}
+                    </span>
+                  )}
 
                   {/* Educational Level Badge */}
                   <span

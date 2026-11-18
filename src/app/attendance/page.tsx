@@ -757,6 +757,23 @@ export default function AttendancePage() {
                 </span>
               )}
               {group.isVip && <span className="m3-chip m3-chip-vip">VIP خاص</span>}
+              {group.ggid && (
+                <span
+                  className="m3-chip"
+                  style={{
+                    backgroundColor: '#e0f2fe',
+                    color: '#0369a1',
+                    fontWeight: 800,
+                    fontSize: '0.75rem',
+                    fontFamily: 'monospace',
+                    padding: '2px 8px',
+                    border: '1px solid #bae6fd'
+                  }}
+                  title={`معرف السلسلة (GGID): ${group.ggid}`}
+                >
+                  {group.ggid}
+                </span>
+              )}
               <span
                 style={{
                   fontSize: '0.8rem',

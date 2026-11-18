@@ -1628,5 +1628,37 @@ export function findCoveringMatch(
   };
 }
 
+/**
+ * Extracts the series prefix (e.g. 'G01') from a GGID (e.g. 'G01-BAC01')
+ */
+export function getSeriesPrefix(ggid?: string): string {
+  if (!ggid) return '';
+  const match = ggid.trim().toUpperCase().match(/^(G\d+)-/);
+  return match ? match[1] : '';
+}
+
+/**
+ * Generates the next available series prefix (e.g. 'G50') across all existing groups
+ */
+export function getNextSeriesPrefix(groups: { ggid?: string }[]): string {
+  let maxNum = 0;
+  for (const g of groups || []) {
+    const match = (g.ggid || '').trim().toUpperCase().match(/^G(\d+)-/);
+    if (match) {
+      const num = parseInt(match[1], 10);
+      if (!isNaN(num) && num > maxNum) maxNum = num;
+    }
+  }
+  return `G${String(maxNum + 1).padStart(2, '0')}`;
+}
+
+/**
+ * Builds a GGID from a series prefix and a group ID (e.g. 'G01-BAC49')
+ */
+export function buildGgid(seriesPrefix: string, groupId: string): string {
+  return `${seriesPrefix}-${groupId.trim().toUpperCase()}`;
+}
+
+
 
 
