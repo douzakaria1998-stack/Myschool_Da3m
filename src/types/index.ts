@@ -100,6 +100,8 @@ export interface GroupSheet {
   sessionDates: string[]; // N session dates
   sessionCount?: number; // Total sessions in cycle
   status?: 'active' | 'inactive'; // Group status: 'active' or 'inactive' (reached last session)
+  autoRenew?: boolean; // Whether to auto-create next group ID after 48h when ended (default: true)
+  endedAt?: number; // Epoch ms when the group first ended (for 48h auto-renew delay)
   isVip: boolean;
   type: string; // '4-2500', '4-10000', etc.
   studentFee?: number; // Payment amount for each student (المبلغ المطلوب من كل تلميذ)
@@ -143,6 +145,8 @@ export interface GroupMeta {
   type: string;
   isVip: boolean;
   status?: 'active' | 'inactive'; // Group status: 'active' or 'inactive' (reached last session)
+  autoRenew?: boolean; // Whether to auto-create next group ID after 48h when ended (default: true)
+  endedAt?: number; // Epoch ms when the group first ended (for 48h auto-renew delay)
   sessionCount?: number; // Total sessions in cycle (e.g. 4, 8, 10, 12)
   customStart?: string; // Starting session date (YYYY/MM/DD)
   sessionDates?: string[]; // Optional explicit session dates

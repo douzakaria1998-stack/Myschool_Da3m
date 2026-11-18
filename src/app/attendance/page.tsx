@@ -80,7 +80,8 @@ export default function AttendancePage() {
     resetStudentPayment,
     getGroupStats,
     updateSessionDates,
-    endSessionAndMarkAbsent
+    endSessionAndMarkAbsent,
+    updateGroup
   } = useApp();
 
   const router = useRouter();
@@ -832,6 +833,31 @@ export default function AttendancePage() {
                   </button>
                 );
               })()}
+
+              {/* Auto-Renew (Auto-Create New ID after 48h) Status Selector */}
+              <select
+                value={group.autoRenew === false ? 'disabled' : 'enabled'}
+                onChange={(e) => {
+                  const enabled = e.target.value === 'enabled';
+                  updateGroup(group.groupId, { autoRenew: enabled });
+                }}
+                className="m3-input"
+                style={{
+                  width: 'auto',
+                  padding: '3px 10px',
+                  fontSize: '0.76rem',
+                  fontWeight: 800,
+                  borderRadius: 'var(--md-shape-sm)',
+                  cursor: 'pointer',
+                  backgroundColor: group.autoRenew === false ? '#fef2f2' : '#f0fdf4',
+                  color: group.autoRenew === false ? '#b91c1c' : '#15803d',
+                  border: `1px solid ${group.autoRenew === false ? '#fca5a5' : '#86efac'}`
+                }}
+                title="تحديد ما إذا كان الفوج يُنشئ معرفاً جديداً تلقائياً بعد 48 ساعة من انتهاء حصصه"
+              >
+                <option value="enabled">تجديد تلقائي (بعد 48س): مفعل ✓</option>
+                <option value="disabled">تجديد تلقائي: معطل ✕</option>
+              </select>
             </div>
             <p style={{ fontSize: '0.85rem', color: 'var(--md-sys-color-on-surface-variant)' }}>
               المادة: <strong>{group.subject}</strong> | الأستاذ: <strong>{group.teacherName}</strong> | التوقيت:{' '}

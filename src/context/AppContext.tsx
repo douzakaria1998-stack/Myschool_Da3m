@@ -582,12 +582,29 @@ const autoRenewEndedGroups = (centerData: CenterData): { updated: CenterData; ch
     const tailSheet = workingGroupData[tailMeta.id];
     if (!tailSheet) continue;
 
+    // Respect group autoRenew setting (if disabled, never auto-create new ID)
+    if (tailMeta.autoRenew === false || tailSheet.autoRenew === false) continue;
+
     if (!isGroupEnded(tailSheet, tailMeta, centerData.pricingTiers)) continue;
 
     const genuineStudents = (tailSheet.students || []).filter(
       (s) => !isSummaryRow(s, tailMeta.id) && s.name && s.name.trim()
     );
     if (genuineStudents.length === 0) continue;
+
+    // Enforce 48-hour waiting period after the group ends before auto-creating the next ID
+    const FORTY_EIGHT_HOURS_MS = 48 * 60 * 60 * 1000;
+    const nowMs = Date.now();
+    const recordedEndedAt = tailSheet.endedAt ?? tailMeta.endedAt;
+    if (!recordedEndedAt) {
+      workingGroupData[tailMeta.id] = { ...tailSheet, endedAt: nowMs };
+      workingGroups = workingGroups.map((g) => (g.id === tailMeta.id ? { ...g, endedAt: nowMs } : g));
+      changed = true;
+      continue;
+    }
+    if (nowMs - recordedEndedAt < FORTY_EIGHT_HOURS_MS) {
+      continue;
+    }
 
     const isVipGroup = Boolean(tailMeta.isVip ?? tailSheet.isVip ?? isVipGroupId(tailMeta.id));
     const groupLevel = tailMeta.level || tailSheet.level || getGroupLevelFromId(tailMeta.id);
@@ -4011,7 +4028,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       studentFee: fields.studentFee !== undefined ? fields.studentFee : group.studentFee,
       teacherPayPerStudent: fields.teacherPayPerStudent !== undefined ? fields.teacherPayPerStudent : group.teacherPayPerStudent,
       schoolSharePerStudent: fields.schoolSharePerStudent !== undefined ? fields.schoolSharePerStudent : group.schoolSharePerStudent,
-      status: 'status' in fields ? fields.status : group.status
+      status: 'status' in fields ? fields.status : group.status,
+      autoRenew: 'autoRenew' in fields ? fields.autoRenew : group.autoRenew,
+      endedAt: 'endedAt' in fields ? fields.endedAt : group.endedAt
     };
 
     // Recalculate students if financial terms or sessions changed
