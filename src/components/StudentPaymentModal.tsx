@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
-import { StudentRecord, DiscountType } from '../types';
+import { StudentRecord, DiscountType, DiscountDuration } from '../types';
 import { useApp, calcStudentFinancesPure } from '../context/AppContext';
 import { X, Check, Printer, AlertCircle, Receipt, Trash2, RotateCcw, AlertTriangle } from 'lucide-react';
 import { formatToYYYYMMDD } from '../utils/sessionUtils';
@@ -19,6 +19,8 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
   const group = data.groupData[groupId];
 
   const [discount, setDiscount] = useState<DiscountType>(student.discount || '1');
+  const [customDiscountFee, setCustomDiscountFee] = useState<number | undefined>(student.customDiscountFee);
+  const [discountDuration, setDiscountDuration] = useState<DiscountDuration | undefined>(student.discountDuration);
   const [payments, setPayments] = useState<(string | number)[]>(() =>
     (student.payments || []).map((p) => (p !== undefined && p !== null ? p : ''))
   );
@@ -40,13 +42,15 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
       {
         ...student,
         discount,
+        customDiscountFee: discount === 'custom' ? customDiscountFee : undefined,
+        discountDuration,
         payments: payments.map((p) => (p === '' ? '' : Number(p) || 0))
       },
       group?.type || '4-2500',
       data.pricingTiers,
       group
     );
-  }, [student, discount, payments, group, data.pricingTiers]);
+  }, [student, discount, customDiscountFee, discountDuration, payments, group, data.pricingTiers]);
 
   const handlePaymentChange = (index: number, val: string) => {
     const next = [...payments];
@@ -59,16 +63,16 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
 
     if (confirmRemovePaymentTarget.type === 'ALL') {
       const nextPayments = payments.map(() => '');
-      updateStudentFullFinances(groupId, student.rowId, nextPayments, discount);
+      updateStudentFullFinances(groupId, student.rowId, nextPayments, discount, customDiscountFee, discountDuration);
       onClose();
     } else if (confirmRemovePaymentTarget.type === 'SESSION' && confirmRemovePaymentTarget.sessionIdx !== undefined) {
       const nextPayments = [...payments];
       nextPayments[confirmRemovePaymentTarget.sessionIdx] = '';
       setPayments(nextPayments);
-      updateStudentFullFinances(groupId, student.rowId, nextPayments, discount);
+      updateStudentFullFinances(groupId, student.rowId, nextPayments, discount, customDiscountFee, discountDuration);
       setConfirmRemovePaymentTarget(null);
     } else if (confirmRemovePaymentTarget.type === 'SAVE') {
-      updateStudentFullFinances(groupId, student.rowId, payments, discount);
+      updateStudentFullFinances(groupId, student.rowId, payments, discount, customDiscountFee, discountDuration);
       onClose();
     }
   };
@@ -84,7 +88,7 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
     }
 
     // Save payments and discount atomically
-    updateStudentFullFinances(groupId, student.rowId, payments, discount);
+    updateStudentFullFinances(groupId, student.rowId, payments, discount, customDiscountFee, discountDuration);
     onClose();
   };
 
@@ -454,22 +458,110 @@ export default function StudentPaymentModal({ groupId, student, onClose }: Props
           <label style={{ display: 'block', fontWeight: 700, fontSize: '0.9rem', marginBottom: '8px' }}>
             نوع التخفيض أو الإعفاء:
           </label>
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
             {[
               { id: '1', label: 'كامل 100% (تسعيرة عادية)' },
               { id: '0.8', label: 'تخفيض 20% (دفع 80%)' },
               { id: '0', label: 'معفى تماماً (0 دج)' },
+              { id: 'custom', label: 'مبلغ مخصص (تحديد السعر)' },
               { id: 'تعويض', label: 'حصة تعويضية' }
             ].map((opt) => (
               <button
                 key={opt.id}
                 type="button"
-                onClick={() => setDiscount(opt.id)}
+                onClick={() => {
+                  setDiscount(opt.id);
+                  if (opt.id === 'custom' && typeof customDiscountFee !== 'number') {
+                    const base = group?.studentFee || (group?.type === '4-10000' || group?.isVip ? 10000 : 2500);
+                    setCustomDiscountFee(Math.round(base * 0.5));
+                  }
+                  if (opt.id !== '1' && !discountDuration) {
+                    setDiscountDuration('only_this_id');
+                  }
+                }}
                 className={`m3-btn m3-btn-sm ${discount === opt.id ? 'm3-btn-primary' : 'm3-btn-outlined'}`}
               >
                 {opt.label}
               </button>
             ))}
+          </div>
+
+          {/* Custom Course Amount Input + Duration */}
+          <div
+            style={{
+              marginTop: '10px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              flexWrap: 'wrap',
+              backgroundColor: '#f8fafc',
+              border: '1px solid #e2e8f0',
+              borderRadius: '10px',
+              padding: '8px 12px'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '0.8rem', fontWeight: 800, color: '#334155', whiteSpace: 'nowrap' }}>
+                المبلغ المخصص للدورة:
+              </span>
+              <input
+                type="number"
+                min={0}
+                step={50}
+                value={discount === 'custom' ? (customDiscountFee ?? '') : ''}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  setDiscount('custom');
+                  setCustomDiscountFee(raw === '' ? 0 : Math.max(0, Number(raw)));
+                  if (!discountDuration) setDiscountDuration('only_this_id');
+                }}
+                placeholder="اكتب المبلغ (دج)"
+                className="m3-input"
+                style={{
+                  width: '130px',
+                  padding: '5px 8px',
+                  fontSize: '0.88rem',
+                  fontWeight: 900,
+                  textAlign: 'center',
+                  borderColor: discount === 'custom' ? '#0284c7' : undefined,
+                  color: discount === 'custom' ? '#0369a1' : undefined
+                }}
+              />
+              <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#64748b' }}>دج</span>
+            </div>
+
+            {discount !== '1' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: '1 1 200px' }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: 800, color: '#334155', whiteSpace: 'nowrap' }}>
+                  المدة:
+                </span>
+                <select
+                  value={
+                    typeof discountDuration === 'number'
+                      ? String(discountDuration)
+                      : discountDuration || 'only_this_id'
+                  }
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === 'only_this_id' || val === 'always') {
+                      setDiscountDuration(val);
+                    } else {
+                      setDiscountDuration(Math.max(2, parseInt(val, 10) || 2));
+                    }
+                  }}
+                  className="m3-input"
+                  style={{ flex: 1, padding: '5px 8px', fontSize: '0.8rem', fontWeight: 700 }}
+                >
+                  <option value="only_this_id">هذا الفوج فقط (Only this ID)</option>
+                  <option value="always">دائماً (Always)</option>
+                  {[2, 3, 4, 5, 6, 7, 8, 9, 10, 12].map((num) => (
+                    <option key={num} value={String(num)}>
+                      لمدة {num} دورات
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
         </div>
 

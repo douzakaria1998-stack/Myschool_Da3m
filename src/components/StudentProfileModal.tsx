@@ -1196,13 +1196,34 @@ export default function StudentProfileModal({ student, groupId, onClose }: Props
             </button>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="m3-btn m3-btn-tonal m3-btn-sm"
-          >
-            إغلاق الملف
-          </button>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <button
+              type="button"
+              onClick={() => setIsEditing(true)}
+              className="m3-btn m3-btn-outlined m3-btn-sm"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                color: '#7c3aed',
+                borderColor: '#c4b5fd',
+                backgroundColor: '#f5f3ff',
+                fontWeight: 800
+              }}
+              title="تطبيق أو تعديل التخفيض والمبلغ المخصص للمادة أو عدة مواد"
+            >
+              <Sparkles size={15} />
+              <span>تطبيق تخفيض</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="m3-btn m3-btn-tonal m3-btn-sm"
+            >
+              إغلاق الملف
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1210,7 +1231,7 @@ export default function StudentProfileModal({ student, groupId, onClose }: Props
       {isPaymentModalOpen && (
         <StudentPaymentModal
           groupId={groupId}
-          student={student}
+          student={currentStudent}
           onClose={() => setIsPaymentModalOpen(false)}
         />
       )}

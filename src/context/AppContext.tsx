@@ -83,7 +83,14 @@ interface AppContextType {
   ) => void;
   markAllPresent: (groupId: string, sessionIndex: number, studentRowIds?: number[]) => void;
   updatePayment: (groupId: string, rowId: number, paymentIndex: number, amount: number | string) => void;
-  updateStudentFullFinances: (groupId: string, rowId: number, payments: (number | string)[], discount?: DiscountType) => void;
+  updateStudentFullFinances: (
+    groupId: string,
+    rowId: number,
+    payments: (number | string)[],
+    discount?: DiscountType,
+    customDiscountFee?: number,
+    discountDuration?: DiscountDuration
+  ) => void;
   resetStudentPayment: (groupId: string, rowId: number) => void;
   batchUpdateSessionPayments: (groupId: string, sessionIndex: number, studentPayments: { rowId: number; amount: number | string }[]) => void;
   batchUpdateAllSessionsPayments: (groupId: string, updates: { rowId: number; payments: (number | string)[] }[]) => void;
@@ -2519,7 +2526,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     groupId: string,
     rowId: number,
     payments: (number | string)[],
-    discount?: DiscountType
+    discount?: DiscountType,
+    customDiscountFee?: number,
+    discountDuration?: DiscountDuration
   ) => {
     const currentData = dataRef.current;
     const group = currentData.groupData[groupId];
@@ -2534,7 +2543,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const updated = {
         ...student,
         payments: newPayments,
-        ...(discount !== undefined ? { discount } : {})
+        ...(discount !== undefined
+          ? {
+              discount,
+              customDiscountFee: discount === 'custom' ? customDiscountFee : undefined,
+              discountDuration: discount === '1' ? undefined : discountDuration
+            }
+          : {})
       };
       return calculateStudentFinances(updated, group.type, currentData.pricingTiers, group);
     });
