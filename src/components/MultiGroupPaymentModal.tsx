@@ -829,7 +829,8 @@ export default function MultiGroupPaymentModal({
         alignItems: 'center',
         justifyContent: 'center',
         zIndex: 140,
-        padding: '12px'
+        padding: '16px 12px',
+        overflowY: 'auto'
       }}
       onClick={onClose}
     >
@@ -837,27 +838,30 @@ export default function MultiGroupPaymentModal({
         className="m3-card"
         style={{
           width: '100%',
-          maxWidth: '720px',
-          maxHeight: '88vh',
+          maxWidth: '740px',
+          maxHeight: 'min(92vh, 860px)',
           display: 'flex',
           flexDirection: 'column',
           backgroundColor: 'var(--md-sys-color-surface)',
           borderRadius: 'var(--md-shape-lg)',
           overflow: 'hidden',
           boxShadow: 'var(--md-elevation-5)',
-          animation: 'fadeIn 0.2s ease-out'
+          animation: 'fadeIn 0.2s ease-out',
+          margin: 'auto',
+          minHeight: 0
         }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Modal Header (Compact) */}
         <div
           style={{
-            padding: '8px 16px',
+            padding: '10px 16px',
             borderBottom: '1px solid var(--md-sys-color-outline-variant)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            backgroundColor: '#f0f9ff'
+            backgroundColor: '#f0f9ff',
+            flexShrink: 0
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -900,7 +904,7 @@ export default function MultiGroupPaymentModal({
         </div>
 
         {/* Modal Body */}
-        <div style={{ padding: '8px 14px', overflowY: 'auto', flex: 1 }}>
+        <div style={{ padding: '8px 14px', overflowY: 'auto', flex: '1 1 auto', minHeight: 0, overscrollBehavior: 'contain' }}>
           {successMsg && (
             <div
               style={{
@@ -1569,25 +1573,28 @@ export default function MultiGroupPaymentModal({
         {/* Modal Footer */}
         <div
           style={{
-            padding: '6px 14px',
+            padding: '8px 14px',
             borderTop: '1px solid var(--md-sys-color-outline-variant)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            backgroundColor: '#fafafa'
+            backgroundColor: '#fafafa',
+            flexShrink: 0,
+            gap: '8px',
+            flexWrap: 'wrap'
           }}
         >
           <button
             type="button"
             onClick={onClose}
             className="m3-btn m3-btn-outlined"
-            style={{ fontWeight: 700, height: '30px', fontSize: '0.78rem', padding: '3px 12px' }}
+            style={{ fontWeight: 700, height: '32px', fontSize: '0.78rem', padding: '3px 14px', flexShrink: 0 }}
           >
             إلغاء
           </button>
 
           {selectedStudent && (
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end', flex: '1 1 auto' }}>
               <button
                 type="button"
                 onClick={handlePrintOnly}
@@ -1597,12 +1604,13 @@ export default function MultiGroupPaymentModal({
                   borderColor: '#0284c7',
                   color: '#0284c7',
                   fontWeight: 800,
-                  height: '30px',
+                  height: '32px',
                   fontSize: '0.78rem',
                   padding: '3px 12px',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '5px'
+                  gap: '5px',
+                  whiteSpace: 'nowrap'
                 }}
                 title="طباعة أو إعادة استخراج الوصل الموحد للأفواج المحددة دون تسجيل أي دفع جديد"
               >
@@ -1615,7 +1623,7 @@ export default function MultiGroupPaymentModal({
                 onClick={() => handleSaveAndPrint(false)}
                 disabled={isSaving || payingItems.length === 0}
                 className="m3-btn m3-btn-tonal"
-                style={{ fontWeight: 800, height: '30px', fontSize: '0.78rem', padding: '3px 12px' }}
+                style={{ fontWeight: 800, height: '32px', fontSize: '0.78rem', padding: '3px 12px', whiteSpace: 'nowrap' }}
                 title="حفظ المبالغ المدخلة كدفعات جديدة دون طباعة"
               >
                 <Check size={15} />
@@ -1632,12 +1640,13 @@ export default function MultiGroupPaymentModal({
                   borderColor: paymentMode === 'full' ? '#15803d' : '#0284c7',
                   fontWeight: 900,
                   fontSize: '0.78rem',
-                  height: '30px',
+                  height: '32px',
                   padding: '3px 14px',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '6px',
-                  boxShadow: paymentMode === 'full' ? '0 2px 6px rgba(21, 128, 61, 0.25)' : '0 2px 6px rgba(2, 132, 199, 0.25)'
+                  boxShadow: paymentMode === 'full' ? '0 2px 6px rgba(21, 128, 61, 0.25)' : '0 2px 6px rgba(2, 132, 199, 0.25)',
+                  whiteSpace: 'nowrap'
                 }}
                 title={
                   paymentMode === 'full'
