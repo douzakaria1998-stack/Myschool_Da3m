@@ -1838,7 +1838,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
       setFlashSuccess({
         name: req.student.name,
         statusText: `تم تحويل التلميذ نهائياً إلى فوج ${finalTargetGid} ✓`,
-        details: `حُفظت بيانات ${finalSourceGid} السابقة وسُجل كـ (N) في الحصة ${finalSessionIdx + 1}`
+        details: `حُفظت بيانات ${finalSourceGid} السابقة وسُجل كـ (P) في الحصة ${finalSessionIdx + 1}`
       });
 
       setPendingCoverRequests((prev) => prev.filter((r) => r.id !== req.id));
@@ -1870,7 +1870,7 @@ export default function BarcodeScannerModal({ initialGroupId, onClose, isScreen 
     });
 
     if (newStudent) {
-      updateAttendance(finalTargetGid, newStudent.rowId, sessionIdx, 'N');
+      updateAttendance(finalTargetGid, newStudent.rowId, sessionIdx, 'P');
       playSuccessChime();
 
       setRecentScans((prev) =>

@@ -344,6 +344,12 @@ select {
   border-color: #c4b5fd;
 }
 
+.m3-chip-s {
+  background: #fef3c7;
+  color: #b45309;
+  border-color: #fcd34d;
+}
+
 .m3-chip-n {
   background: #ecfdf5;
   color: #047857;

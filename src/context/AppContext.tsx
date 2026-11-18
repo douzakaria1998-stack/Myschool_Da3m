@@ -257,13 +257,16 @@ export const calcStudentFinancesPure = (
 
   // Calculate session info
   const sessionInfo = getStudentSessionInfo(student.attendance, cycleSessions, totalReceived, groupEnded);
-  const hasTransferredOutOnly =
+  const hasOnlyNonCountedMarks =
     sessionInfo.countedSessions === 0 &&
-    cycleAttendance.some((a) => String(a || '').trim().toUpperCase() === 'CH');
+    cycleAttendance.some((a) => {
+      const c = String(a || '').trim().toUpperCase();
+      return c === 'CH' || c === 'S' || c === 'A' || c === 'غ';
+    });
   const hasPaidEndedZeroAttendance =
     sessionInfo.countedSessions === 0 && totalReceived > 0 && groupEnded;
   const countedSessions =
-    hasTransferredOutOnly || hasPaidEndedZeroAttendance
+    hasOnlyNonCountedMarks || hasPaidEndedZeroAttendance
       ? 0
       : sessionInfo.countedSessions > 0
       ? sessionInfo.countedSessions
@@ -724,9 +727,15 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
       changed = true;
     }
 
-    // Enforce 4 sessions for all students, ensure barcode exists, and recalculate finances
+    // Enforce 4 sessions for all students, convert legacy 'N' -> 'P', ensure barcode exists, and recalculate finances
     let finalStudents: StudentRecord[] = deduplicatedStudents.map((s) => {
-      let att = (s.attendance || []).slice(0, 4);
+      let att = (s.attendance || []).slice(0, 4).map((a) => {
+        if (String(a || '').trim().toUpperCase() === 'N') {
+          changed = true;
+          return 'P' as AttendanceStatus;
+        }
+        return a;
+      });
       while (att.length < 4) att.push('');
       let payments = (s.payments || []).slice(0, 4);
       while (payments.length < 4) payments.push('');
@@ -861,9 +870,12 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
         if (toIdx === -1) continue;
         const toStu = toSheet.students[toIdx];
         const toAtt = toStu.attendance || [];
-        const hasN = toAtt.some((a) => String(a || '').trim().toUpperCase() === 'N');
+        const hasEntry = toAtt.some((a) => {
+          const c = String(a || '').trim().toUpperCase();
+          return c === 'P' || c === 'N';
+        });
         const toHasCH = toAtt.some((a) => String(a || '').trim().toUpperCase() === 'CH');
-        if (hasN && !toHasCH && (toStu.debt || 0) > 0) {
+        if (hasEntry && !toHasCH && (toStu.debt || 0) > 0) {
           candidates.push({
             toGid,
             toSheet,
@@ -889,7 +901,10 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
       const toSessionLen = best.toSheet.sessionDates?.length || best.toSheet.sessionCount || 4;
       const nSessionIdx = Math.max(
         0,
-        (best.toStu.attendance || []).findIndex((a) => String(a || '').trim().toUpperCase() === 'N')
+        (best.toStu.attendance || []).findIndex((a) => {
+          const c = String(a || '').trim().toUpperCase();
+          return c === 'P' || c === 'N';
+        })
       );
       const updatedToPayments: (number | string)[] = [...(best.toStu.payments || [])];
       while (updatedToPayments.length < toSessionLen) updatedToPayments.push('');
@@ -1895,7 +1910,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return calcStudentFinancesPure(student, groupType, pricingTiers, groupFinances);
   };
 
-  // Atomic cycle attendance (P -> A -> M -> '' -> P) with synchronous state updating
+  // Atomic cycle attendance ('' -> P -> A -> CH -> S -> '') with synchronous state updating
   const cycleAttendance = (groupId: string, rowId: number, sessionIndex: number): AttendanceStatus => {
     const currentData = dataRef.current;
     const group = currentData.groupData[groupId];
@@ -1906,13 +1921,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const currentVal = (student.attendance?.[sessionIndex] || '').trim().toUpperCase();
     let next: AttendanceStatus = 'P';
-    if (currentVal === 'P' || currentVal === 'ح') next = 'A';
-    else if (currentVal === 'A' || currentVal === 'غ') next = 'M';
-    else if (currentVal === 'M' || currentVal === 'م') next = 'C';
-    else if (currentVal === 'C') next = 'N';
-    else if (currentVal === 'N') next = 'CH';
-    else if (currentVal === 'CH') next = '';
-    else if (currentVal === '') next = 'P';
+    if (currentVal === '' || currentVal === 'N' || currentVal === 'M' || currentVal === 'C') next = 'P';
+    else if (currentVal === 'P' || currentVal === 'ح') next = 'A';
+    else if (currentVal === 'A' || currentVal === 'غ') next = 'CH';
+    else if (currentVal === 'CH') next = 'S';
+    else if (currentVal === 'S') next = '';
     else next = 'P';
 
     const sessionCount = group.sessionDates?.length || group.sessionCount || 4;
@@ -3249,7 +3262,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (existingInTo) {
       const newAttendance = [...(existingInTo.attendance || [])];
       while (newAttendance.length < toSessionCount) newAttendance.push('');
-      newAttendance[startSessionIdx] = 'N';
+      newAttendance[startSessionIdx] = 'P';
 
       const newPayments = [...(existingInTo.payments || [])];
       while (newPayments.length < toSessionCount) newPayments.push('');
@@ -3279,7 +3292,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const newRowId = Math.max(maxExistingRowId, maxDeletedRowId) + 1;
 
       const initialAttendance: AttendanceStatus[] = Array(toSessionCount).fill('');
-      initialAttendance[startSessionIdx] = 'N';
+      initialAttendance[startSessionIdx] = 'P';
 
       const initialPayments: (number | string)[] = Array(toSessionCount).fill('');
       if (surplusToTransfer > 0) {

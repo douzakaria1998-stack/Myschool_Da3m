@@ -1646,7 +1646,8 @@ export default function AttendancePage() {
         <span style={{ fontWeight: 700 }}>دليل الحضور:</span>
         <span className="m3-chip m3-chip-p">P حاضر</span>
         <span className="m3-chip m3-chip-a">A غائب</span>
-        <span className="m3-chip m3-chip-m">M تعويض</span>
+        <span className="m3-chip m3-chip-ch">CH تغيير فوج</span>
+        <span className="m3-chip m3-chip-s">S معلق</span>
 
         {todaySessionIndex !== -1 && (
           <button
@@ -2029,20 +2030,19 @@ export default function AttendancePage() {
                       let chipClass = '';
                       if (status === 'P') chipClass = 'm3-chip-p';
                       else if (status === 'A') chipClass = 'm3-chip-a';
+                      else if (status === 'CH') chipClass = 'm3-chip-ch';
+                      else if (status === 'S') chipClass = 'm3-chip-s';
                       else if (status === 'M') chipClass = 'm3-chip-m';
                       else if (status === 'C') chipClass = 'm3-chip-c';
-                      else if (status === 'CH') chipClass = 'm3-chip-ch';
                       else if (status === 'N') chipClass = 'm3-chip-n';
 
-                      let cellTitle = 'اضغط لتغيير حالة الحضور (P / A / M / C / N / CH)';
+                      let cellTitle = 'اضغط لتغيير حالة الحضور (P / A / CH / S)';
                       if (status === 'CH') {
-                        cellTitle = 'تغيير فوج (CH) — انتقل التلميذ إلى فوج آخر (غير محتسبة في هذا الفوج)';
-                      } else if (status === 'N') {
-                        cellTitle = 'تلميذ جديد (N) — أول حصة يحضرها التلميذ في هذا الفوج';
-                      } else if (status === 'C') {
-                        cellTitle = 'حصة مغطاة (C) — تم تعويض هذه الحصة في فوج آخر';
-                      } else if (status === 'M') {
-                        cellTitle = 'حصة تعويض (M) — حضور تعويض عن فوج آخر';
+                        cellTitle = 'تغيير فوج (CH) — انتقل التلميذ إلى فوج آخر (غير محتسبة)';
+                      } else if (status === 'S') {
+                        cellTitle = 'حصة معلقة / متوقفة (S) — غير محتسبة على التلميذ ولا الأستاذ';
+                      } else if (status === 'A') {
+                        cellTitle = 'غائب (A) — غير محتسبة على التلميذ ولا الأستاذ';
                       } else if (status === '') {
                         if (!isCounted) {
                           cellTitle = 'حصة غير محتسبة — لم ينضم التلميذ بعد للفوج (اضغط لتسجيل الحضور)';

@@ -273,7 +273,7 @@ export default function ChangeStudentGroupModal({
 
             <div>
               <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: 800, color: '#334155', marginBottom: '4px' }}>
-                يبدأ من الحصة (N):
+                يبدأ من الحصة (P):
               </label>
               <select
                 value={targetSessionIdx}
@@ -283,7 +283,7 @@ export default function ChangeStudentGroupModal({
               >
                 {Array.from({ length: toSessionCount }).map((_, i) => (
                   <option key={i} value={i}>
-                    الحصة {i + 1} (تُسجل كـ N)
+                    الحصة {i + 1} (تُسجل كـ P)
                   </option>
                 ))}
               </select>
@@ -354,7 +354,7 @@ export default function ChangeStudentGroupModal({
                 lineHeight: 1.6
               }}
             >
-              <div>• <strong>الفوج الجديد ({targetGroupId}):</strong> سيبدأ من الحصة {targetSessionIdx + 1} (تُسجل كـ <strong>N</strong>).</div>
+              <div>• <strong>الفوج الجديد ({targetGroupId}):</strong> سيبدأ من الحصة {targetSessionIdx + 1} (تُسجل كـ <strong>P</strong>).</div>
               <div>• <strong>عدد الحصص المستحقة:</strong> {applicableSessionsInNew} حصص (بقيمة {expectedFeeInNew.toLocaleString()} دج){creditToTransfer > 0 ? ` — الرصيد المنقول: ${creditToTransfer.toLocaleString()} دج` : ''}.</div>
               <div style={{ marginTop: '2px', fontWeight: 800, color: expectedDebtInNew > 0 ? '#b91c1c' : '#15803d' }}>
                 • <strong>صافي المطلوب في الفوج الجديد:</strong> {expectedDebtInNew.toLocaleString()} دج
@@ -376,7 +376,7 @@ export default function ChangeStudentGroupModal({
           >
             <ShieldAlert size={18} color="#d97706" style={{ flexShrink: 0, marginTop: '2px' }} />
             <div style={{ fontSize: '0.78rem', color: '#92400e', lineHeight: 1.5, fontWeight: 700 }}>
-              تغيير الفوج يحافظ على سجل الحضور السابق للتلميذ في الفوج القديم، وينقل أي رصيد مدفوع متبقٍ تلقائياً إلى الفوج الجديد. الحصص المتبقية في الفوج القديم ستُسجل كـ <strong>CH</strong>، وأول حصة في الفوج الجديد ستُسجل كـ <strong>N</strong>.
+              تغيير الفوج يحافظ على سجل الحضور السابق للتلميذ في الفوج القديم، وينقل أي رصيد مدفوع متبقٍ تلقائياً إلى الفوج الجديد. الحصص المتبقية في الفوج القديم ستُسجل كـ <strong>CH</strong>، وأول حصة في الفوج الجديد ستُسجل كـ <strong>P</strong>.
             </div>
           </div>
         </div>
@@ -419,7 +419,7 @@ export default function ChangeStudentGroupModal({
             disabled={isSubmitting || !targetGroupId}
           >
             <ArrowLeftRight size={16} />
-            <span>تأكيد نقل التلميذ الآن (CH / N)</span>
+            <span>تأكيد نقل التلميذ الآن (CH / P)</span>
           </button>
         </div>
       </div>
