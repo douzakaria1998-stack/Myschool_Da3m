@@ -1207,13 +1207,31 @@ export function getStudentSessionInfo(
     }
   }
 
+  const isPaid = totalReceived > 0;
+  const isCountablePresent = (status: string | null | undefined): boolean => {
+    const clean = String(status || '').trim().toUpperCase();
+    return clean === 'P' || clean === 'C' || clean === 'M' || clean === 'ح' || clean === 'م';
+  };
+
   const isSessionCounted = (sessionIdx: number): boolean => {
     if (sessionIdx < 0 || sessionIdx >= cycleSessions) return false;
     const st = cycleAtt[sessionIdx];
+    const clean = String(st || '').trim().toUpperCase();
     // Remaining sessions in old group marked CH do NOT count in fees/debt
-    if (st === 'CH') return false;
+    if (clean === 'CH') return false;
+
+    // For paid students:
+    // - Absent sessions ('A', 'غ') NEVER count on the student.
+    // - Once the group has ended, ONLY attended ('P', 'C', 'M', 'ح', 'م') sessions count!
+    if (isPaid) {
+      if (clean === 'A' || clean === 'غ') return false;
+      if (isGroupEnded) {
+        return isCountablePresent(st);
+      }
+    }
+
     if (hasSuspended) {
-      return st === 'P' || st === 'A' || st === 'C' || st === 'N' || st === 'ح' || st === 'غ';
+      return clean === 'P' || clean === 'A' || clean === 'C' || clean === 'N' || clean === 'ح' || clean === 'غ';
     }
     if (firstActiveIndex === -1) return false;
     return sessionIdx >= firstActiveIndex;

@@ -260,11 +260,14 @@ export const calcStudentFinancesPure = (
   const hasTransferredOutOnly =
     sessionInfo.countedSessions === 0 &&
     cycleAttendance.some((a) => String(a || '').trim().toUpperCase() === 'CH');
-  const countedSessions = hasTransferredOutOnly
-    ? 0
-    : sessionInfo.countedSessions > 0
-    ? sessionInfo.countedSessions
-    : cycleSessions;
+  const hasPaidEndedZeroAttendance =
+    sessionInfo.countedSessions === 0 && totalReceived > 0 && groupEnded;
+  const countedSessions =
+    hasTransferredOutOnly || hasPaidEndedZeroAttendance
+      ? 0
+      : sessionInfo.countedSessions > 0
+      ? sessionInfo.countedSessions
+      : cycleSessions;
 
   // Fee calculation based on discount and counted sessions
   let fee = 0;
