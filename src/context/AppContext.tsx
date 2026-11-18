@@ -152,6 +152,27 @@ const UNSYNCED_CHANGES_KEY = 'da3m_has_unsynced_changes_v1';
 const LAST_LOCAL_EDIT_KEY = 'da3m_last_local_edit_time_v1';
 export const SELECTED_GROUP_KEY = 'da3m_selected_group_v1';
 
+// Deduct surplus payment from a student's payments array (from the latest non-zero entries backwards)
+const deductSurplusFromPayments = (
+  payments: (number | string)[] | undefined,
+  amountToDeduct: number,
+  sessionCount: number
+): (number | string)[] => {
+  const result: (number | string)[] = [...(payments || [])];
+  while (result.length < sessionCount) result.push('');
+  let remaining = amountToDeduct;
+  for (let i = result.length - 1; i >= 0 && remaining > 0; i--) {
+    const val = typeof result[i] === 'number' ? (result[i] as number) : parseFloat(String(result[i]));
+    if (!isNaN(val) && val > 0) {
+      const take = Math.min(val, remaining);
+      const left = val - take;
+      result[i] = left > 0 ? left : '';
+      remaining -= take;
+    }
+  }
+  return result;
+};
+
 // Pure helper to recompute student finances according to pricing tier or group custom finances
 export const calcStudentFinancesPure = (
   student: StudentRecord,
@@ -236,7 +257,14 @@ export const calcStudentFinancesPure = (
 
   // Calculate session info
   const sessionInfo = getStudentSessionInfo(student.attendance, cycleSessions, totalReceived, groupEnded);
-  const countedSessions = sessionInfo.countedSessions > 0 ? sessionInfo.countedSessions : cycleSessions;
+  const hasTransferredOutOnly =
+    sessionInfo.countedSessions === 0 &&
+    cycleAttendance.some((a) => String(a || '').trim().toUpperCase() === 'CH');
+  const countedSessions = hasTransferredOutOnly
+    ? 0
+    : sessionInfo.countedSessions > 0
+    ? sessionInfo.countedSessions
+    : cycleSessions;
 
   // Fee calculation based on discount and counted sessions
   let fee = 0;
@@ -799,6 +827,84 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
       type: targetType,
       students: finalStudents
     };
+  }
+
+  // Reconcile already-transferred students: move any leftover surplus in 'CH' groups to their 'N' destination group
+  const tiersForReconcile = centerData.pricingTiers || (initialSeedData as unknown as CenterData).pricingTiers;
+  for (const [fromGid, fromSheet] of Object.entries(newGroupData)) {
+    for (let sIdx = 0; sIdx < fromSheet.students.length; sIdx++) {
+      const oldStu = fromSheet.students[sIdx];
+      if (isSummaryRow(oldStu, fromGid)) continue;
+      const hasCH = (oldStu.attendance || []).some((a) => String(a || '').trim().toUpperCase() === 'CH');
+      if (!hasCH) continue;
+
+      const surplus = Math.max(0, (oldStu.totalReceived || 0) - (oldStu.fee || 0));
+      if (surplus <= 0) continue;
+
+      const stuBarcode = (oldStu.barcode || '').trim().toUpperCase();
+      const stuNormName = normalizeArabicName(oldStu.name || '');
+      const fromNormSubj = normalizeArabicName(fromSheet.subject || '');
+
+      // Find matching destination group where student has 'N' (no 'CH') and unpaid debt > 0
+      const candidates: { toGid: string; toSheet: GroupSheet; toIdx: number; toStu: StudentRecord; sameSubject: boolean }[] = [];
+      for (const [toGid, toSheet] of Object.entries(newGroupData)) {
+        if (toGid === fromGid || toSheet.status === 'inactive') continue;
+        const toIdx = toSheet.students.findIndex(
+          (t) =>
+            !isSummaryRow(t, toGid) &&
+            ((stuBarcode && t.barcode && t.barcode.trim().toUpperCase() === stuBarcode) ||
+              (stuNormName && normalizeArabicName(t.name || '') === stuNormName))
+        );
+        if (toIdx === -1) continue;
+        const toStu = toSheet.students[toIdx];
+        const toAtt = toStu.attendance || [];
+        const hasN = toAtt.some((a) => String(a || '').trim().toUpperCase() === 'N');
+        const toHasCH = toAtt.some((a) => String(a || '').trim().toUpperCase() === 'CH');
+        if (hasN && !toHasCH && (toStu.debt || 0) > 0) {
+          candidates.push({
+            toGid,
+            toSheet,
+            toIdx,
+            toStu,
+            sameSubject: Boolean(fromNormSubj && normalizeArabicName(toSheet.subject || '') === fromNormSubj)
+          });
+        }
+      }
+
+      if (candidates.length === 0) continue;
+      const best = candidates.find((c) => c.sameSubject) || candidates[0];
+
+      const fromSessionLen = fromSheet.sessionDates?.length || fromSheet.sessionCount || 4;
+      const updatedOldPayments = deductSurplusFromPayments(oldStu.payments, surplus, fromSessionLen);
+      fromSheet.students[sIdx] = calcStudentFinancesPure(
+        { ...oldStu, payments: updatedOldPayments },
+        fromSheet.type,
+        tiersForReconcile,
+        fromSheet
+      );
+
+      const toSessionLen = best.toSheet.sessionDates?.length || best.toSheet.sessionCount || 4;
+      const nSessionIdx = Math.max(
+        0,
+        (best.toStu.attendance || []).findIndex((a) => String(a || '').trim().toUpperCase() === 'N')
+      );
+      const updatedToPayments: (number | string)[] = [...(best.toStu.payments || [])];
+      while (updatedToPayments.length < toSessionLen) updatedToPayments.push('');
+      const existingAtN =
+        typeof updatedToPayments[nSessionIdx] === 'number'
+          ? (updatedToPayments[nSessionIdx] as number)
+          : parseFloat(String(updatedToPayments[nSessionIdx])) || 0;
+      updatedToPayments[nSessionIdx] = existingAtN + surplus;
+
+      best.toSheet.students[best.toIdx] = calcStudentFinancesPure(
+        { ...best.toStu, payments: updatedToPayments },
+        best.toSheet.type,
+        tiersForReconcile,
+        best.toSheet
+      );
+
+      changed = true;
+    }
   }
 
   // Deduplicate and sanitize groups array
@@ -3082,14 +3188,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return 'CH';
     });
 
-    // Count actual completed sessions in old group
-    const completedCountInOld = newOldAttendance.filter((st) =>
-      ['P', 'A', 'M', 'C', 'ح', 'غ', 'م'].includes(st)
-    ).length;
+    // Compute fee owed in old group for completed sessions and surplus to transfer
+    const preTransferOldCalc = calculateStudentFinances(
+      {
+        ...originalStudent,
+        attendance: newOldAttendance
+      },
+      fromGroup.type,
+      currentData.pricingTiers,
+      fromGroup
+    );
+    const oldTotalReceived = preTransferOldCalc.totalReceived || 0;
+    const oldFee = preTransferOldCalc.fee || 0;
+    const surplusToTransfer = Math.max(0, oldTotalReceived - oldFee);
 
-    // KEEP 100% OF PAYMENTS IN THE OLD GROUP!
-    // As per user specification: "make sure that the payment of the groups not mearge with each other, if the student has extra session, don'ttake his money from the old group to the new group"
-    const newOldPayments: (number | string)[] = [...(originalStudent.payments || [])];
+    const newOldPayments: (number | string)[] =
+      surplusToTransfer > 0
+        ? deductSurplusFromPayments(originalStudent.payments, surplusToTransfer, fromSessionCount)
+        : [...(originalStudent.payments || [])];
     while (newOldPayments.length < fromSessionCount) newOldPayments.push('');
 
     const updatedOldStudent = calculateStudentFinances(
@@ -3132,9 +3248,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       while (newAttendance.length < toSessionCount) newAttendance.push('');
       newAttendance[startSessionIdx] = 'N';
 
-      // Keep existing payments in toGroup without transferring anything from old group
       const newPayments = [...(existingInTo.payments || [])];
       while (newPayments.length < toSessionCount) newPayments.push('');
+      if (surplusToTransfer > 0) {
+        const existingAtStart =
+          typeof newPayments[startSessionIdx] === 'number'
+            ? (newPayments[startSessionIdx] as number)
+            : parseFloat(String(newPayments[startSessionIdx])) || 0;
+        newPayments[startSessionIdx] = existingAtStart + surplusToTransfer;
+      }
 
       const updatedStudent = calculateStudentFinances(
         { ...existingInTo, attendance: newAttendance, payments: newPayments },
@@ -3156,8 +3278,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const initialAttendance: AttendanceStatus[] = Array(toSessionCount).fill('');
       initialAttendance[startSessionIdx] = 'N';
 
-      // Start with 0 payments in new group - payments never merge across groups
       const initialPayments: (number | string)[] = Array(toSessionCount).fill('');
+      if (surplusToTransfer > 0) {
+        initialPayments[startSessionIdx] = surplusToTransfer;
+      }
 
       const newStudent = calculateStudentFinances(
         {
