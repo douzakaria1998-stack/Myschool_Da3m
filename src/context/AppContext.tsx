@@ -9,6 +9,7 @@ import {
   GroupSheet,
   AttendanceStatus,
   DiscountType,
+  DiscountDuration,
   Teacher,
   TeacherPaymentRecord,
   GroupMeta,
@@ -87,12 +88,19 @@ interface AppContextType {
   batchUpdateSessionPayments: (groupId: string, sessionIndex: number, studentPayments: { rowId: number; amount: number | string }[]) => void;
   batchUpdateAllSessionsPayments: (groupId: string, updates: { rowId: number; payments: (number | string)[] }[]) => void;
   updateDiscount: (groupId: string, rowId: number, discount: DiscountType) => void;
+  applyStudentDiscount: (
+    studentIdentifier: { name: string; barcode?: string },
+    targetGroupIds: string[],
+    discount: DiscountType,
+    customDiscountFee?: number,
+    discountDuration?: DiscountDuration
+  ) => void;
   addStudent: (
     groupId: string,
-    student: { name: string; phone: string; discount?: DiscountType; barcode?: string }
+    student: { name: string; phone: string; discount?: DiscountType; customDiscountFee?: number; discountDuration?: DiscountDuration; barcode?: string }
   ) => StudentRecord | null;
   enrollStudentMultiGroups: (
-    studentInfo: { name: string; phone: string; discount?: DiscountType; barcode?: string },
+    studentInfo: { name: string; phone: string; discount?: DiscountType; customDiscountFee?: number; discountDuration?: DiscountDuration; barcode?: string },
     enrollments: { groupId: string; paymentAmount: number | string }[]
   ) => { groupId: string; rowId: number; fee: number; paid: number; debt: number }[];
   recordMultiGroupPayment: (
@@ -277,10 +285,27 @@ export const calcStudentFinancesPure = (
 
   // Fee calculation based on discount and counted sessions
   let fee = 0;
-  const discountFactor = student.discount === '0' ? 0 : student.discount === '0.8' ? 0.8 : 1;
+  const hasCustomFee =
+    student.discount === 'custom' &&
+    typeof student.customDiscountFee === 'number' &&
+    !isNaN(student.customDiscountFee) &&
+    student.customDiscountFee >= 0;
+
+  const discountFactor =
+    student.discount === '0'
+      ? 0
+      : student.discount === '0.8'
+      ? 0.8
+      : hasCustomFee
+      ? basePrice > 0
+        ? Math.max(0, (student.customDiscountFee as number) / basePrice)
+        : 0
+      : 1;
 
   if (student.discount === '0') {
     fee = 0;
+  } else if (hasCustomFee) {
+    fee = Math.round((countedSessions / cycleSessions) * (student.customDiscountFee as number));
   } else if (student.discount === '0.8') {
     fee = Math.round(countedSessions * perSessionPrice * 0.8);
   } else if (student.discount === 'تعويض') {
@@ -296,12 +321,12 @@ export const calcStudentFinancesPure = (
   const debt = Math.max(0, fee - totalReceived);
 
   // Teacher Payment Rule:
-  // Teacher payment is strictly based on eligible delivered countable sessions ('P', 'C', 'M').
-  // An absent session ('A'), new entry ('N'), or transferred session ('CH') NEVER generates teacher payout!
+  // Teacher payment is strictly based on eligible delivered countable sessions ('P').
+  // An absent session ('A'), suspended ('S'), or transferred session ('CH') NEVER generates teacher payout!
   const teacherPay =
     student.discount === '0'
       ? 0
-      : Math.round(countablePSessions * perSessionTeacherRate * (student.discount === '0.8' ? 0.8 : 1));
+      : Math.round(countablePSessions * perSessionTeacherRate * discountFactor);
 
   // School Revenue Rule:
   // School revenue is strictly based on eligible delivered countable sessions.
@@ -499,6 +524,27 @@ function mergeAttendanceSafely(remote: CenterData, local: CenterData): CenterDat
   return merged;
 }
 
+// Resolve how a student's discount carries over on group renewal
+const getNextRenewalDiscount = (
+  s: StudentRecord
+): { discount: DiscountType; customDiscountFee?: number; discountDuration?: DiscountDuration } => {
+  const dur = s.discountDuration;
+  if (dur === 'only_this_id') {
+    return { discount: '1', customDiscountFee: undefined, discountDuration: undefined };
+  }
+  if (dur === 'always') {
+    return { discount: s.discount || '1', customDiscountFee: s.customDiscountFee, discountDuration: 'always' };
+  }
+  if (typeof dur === 'number') {
+    const nextDur = dur - 1;
+    if (nextDur <= 1) {
+      return { discount: s.discount || '1', customDiscountFee: s.customDiscountFee, discountDuration: 'only_this_id' };
+    }
+    return { discount: s.discount || '1', customDiscountFee: s.customDiscountFee, discountDuration: nextDur };
+  }
+  return { discount: s.discount || '1', customDiscountFee: s.customDiscountFee, discountDuration: undefined };
+};
+
 // Auto-renew ended tail groups in each GGID series, carrying over the exact student list
 const autoRenewEndedGroups = (centerData: CenterData): { updated: CenterData; changed: boolean } => {
   const groups = centerData.groups || [];
@@ -555,14 +601,17 @@ const autoRenewEndedGroups = (centerData: CenterData): { updated: CenterData; ch
     const teacherPay = tailSheet.teacherPayPerStudent ?? tailMeta.teacherPayPerStudent;
     const schoolShare = tailSheet.schoolSharePerStudent ?? tailMeta.schoolSharePerStudent;
 
-    const newStudents: StudentRecord[] = genuineStudents.map((s, idx) =>
-      calcStudentFinancesPure(
+    const newStudents: StudentRecord[] = genuineStudents.map((s, idx) => {
+      const nextDisc = getNextRenewalDiscount(s);
+      return calcStudentFinancesPure(
         {
           rowId: idx + 1,
           name: s.name,
           phone: s.phone || '',
           barcode: s.barcode || '',
-          discount: s.discount || '1',
+          discount: nextDisc.discount,
+          customDiscountFee: nextDisc.customDiscountFee,
+          discountDuration: nextDisc.discountDuration,
           attendance: Array(sessionCount).fill(''),
           payments: Array(sessionCount).fill(''),
           fee: 0,
@@ -575,8 +624,8 @@ const autoRenewEndedGroups = (centerData: CenterData): { updated: CenterData; ch
         groupType,
         centerData.pricingTiers,
         { studentFee, teacherPayPerStudent: teacherPay, schoolSharePerStudent: schoolShare, sessionCount, isVip: isVipGroup, groupId: newId }
-      )
-    );
+      );
+    });
 
     const newGgid = buildGgid(seriesPrefix, newId);
     const newMeta: GroupMeta = {
@@ -2133,6 +2182,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     persistData(updatedData);
   };
 
+
   // Atomically update student attendance and optional payment in one shot
   const recordAttendanceAndPayment = (
     groupId: string,
@@ -2238,6 +2288,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
     persistData(updatedData);
   };
+
 
   // Automated Absence Tracking: End session and automatically mark all unscanned/unattended students as Absent ('A')
   const endSessionAndMarkAbsent = (groupId: string, sessionIndex: number) => {
@@ -2584,6 +2635,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     persistData(updatedData);
   };
 
+
   // Batch update payments for multiple students for a specific session/day
   const batchUpdateSessionPayments = (
     groupId: string,
@@ -2722,6 +2774,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     persistData(updatedData);
   };
 
+
   // Update discount
   const updateDiscount = (groupId: string, rowId: number, discount: DiscountType) => {
     const currentData = dataRef.current;
@@ -2748,10 +2801,70 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     persistData(updatedData);
   };
 
+
+// Apply custom or preset discount + duration across one or more groups for a student
+  const applyStudentDiscount = (
+    studentIdentifier: { name: string; barcode?: string },
+    targetGroupIds: string[],
+    discount: DiscountType,
+    customDiscountFee?: number,
+    discountDuration?: DiscountDuration
+  ) => {
+    const currentData = dataRef.current;
+    const normName = normalizeArabicName(studentIdentifier.name || '');
+    const barcodeUpper = (studentIdentifier.barcode || '').trim().toUpperCase();
+    const targetSet = new Set(targetGroupIds.map((g) => g.trim().toUpperCase()));
+
+    const nextGroupData = { ...currentData.groupData };
+    let anyChanged = false;
+
+    for (const [gid, group] of Object.entries(nextGroupData)) {
+      if (!targetSet.has(gid.toUpperCase())) continue;
+      let groupChanged = false;
+      const updatedStudents = (group.students || []).map((s) => {
+        if (isSummaryRow(s, gid)) return s;
+        const match =
+          (barcodeUpper && s.barcode && s.barcode.trim().toUpperCase() === barcodeUpper) ||
+          (normName && normalizeArabicName(s.name) === normName);
+        if (!match) return s;
+        groupChanged = true;
+        return calculateStudentFinances(
+          {
+            ...s,
+            discount,
+            customDiscountFee: discount === 'custom' ? customDiscountFee : undefined,
+            discountDuration
+          },
+          group.type,
+          currentData.pricingTiers,
+          group
+        );
+      });
+      if (groupChanged) {
+        nextGroupData[gid] = { ...group, students: updatedStudents };
+        anyChanged = true;
+      }
+    }
+
+    if (anyChanged) {
+      persistData({
+        ...currentData,
+        groupData: nextGroupData
+      });
+    }
+  };
+
   // Add new student
   const addStudent = (
     groupId: string,
-    studentInfo: { name: string; phone: string; discount?: DiscountType; barcode?: string }
+    studentInfo: {
+      name: string;
+      phone: string;
+      discount?: DiscountType;
+      customDiscountFee?: number;
+      discountDuration?: DiscountDuration;
+      barcode?: string;
+    }
   ): StudentRecord | null => {
     const currentData = dataRef.current;
     const group = currentData.groupData[groupId];
@@ -2797,6 +2910,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       barcode,
       attendance: Array(sessionCount).fill(''),
       discount: studentInfo.discount || '1',
+      customDiscountFee: studentInfo.customDiscountFee,
+      discountDuration: studentInfo.discountDuration,
       fee: 0,
       payments: Array(sessionCount).fill(''),
       totalReceived: 0,
@@ -2825,7 +2940,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Enroll student in multiple groups with immediate payments
   const enrollStudentMultiGroups = (
-    studentInfo: { name: string; phone: string; discount?: DiscountType; barcode?: string },
+    studentInfo: {
+      name: string;
+      phone: string;
+      discount?: DiscountType;
+      customDiscountFee?: number;
+      discountDuration?: DiscountDuration;
+      barcode?: string;
+    },
     enrollments: { groupId: string; paymentAmount: number | string }[]
   ): { groupId: string; rowId: number; fee: number; paid: number; debt: number }[] => {
     const currentData = dataRef.current;
@@ -2880,6 +3002,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         barcode: resolvedBarcode,
         attendance: Array(sessionCount).fill(''),
         discount: studentInfo.discount || '1',
+        customDiscountFee: studentInfo.customDiscountFee,
+        discountDuration: studentInfo.discountDuration,
         fee: 0,
         payments: initialPayments,
         totalReceived: payNum,
@@ -3153,6 +3277,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     persistData(updatedData);
   };
 
+
   // Delete student globally across all groups or specified groups
   const deleteStudentGlobally = (params: {
     name: string;
@@ -3278,6 +3403,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const updatedData: CenterData = { ...currentData, deletedStudents: [] };
     persistData(updatedData);
   };
+
 
   // Transfer student from one group to another permanently
   // Golden Rule: Preserves historical group and payment data, marks remaining uncompleted sessions as 'CH',
@@ -3534,6 +3660,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     persistData(updatedData);
   };
 
+
   // Add group
   const addGroup = (groupMeta: GroupMeta) => {
     let cleanId = groupMeta.id.trim().toUpperCase();
@@ -3670,12 +3797,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const schoolShare = customGroupFields?.schoolSharePerStudent ?? sourceGroup.schoolSharePerStudent;
 
     const newStudents: StudentRecord[] = selectedStudents.map((s, idx) => {
+      const nextDisc = getNextRenewalDiscount(s);
       const initialRecord: StudentRecord = {
         rowId: idx + 1,
         name: s.name,
         phone: s.phone || '',
         barcode: s.barcode || '',
-        discount: s.discount || '1',
+        discount: nextDisc.discount,
+        customDiscountFee: nextDisc.customDiscountFee,
+        discountDuration: nextDisc.discountDuration,
         attendance: Array(sessionCount).fill(''),
         payments: Array(sessionCount).fill(''),
         fee: 0,
@@ -4068,6 +4198,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     persistData(updatedData);
   };
 
+
   // Update teacher
   const updateTeacher = (id: string, fields: Partial<Teacher>) => {
     const updatedTeachers = data.teachers.map((t) => (t.id === id ? { ...t, ...fields } : t));
@@ -4148,6 +4279,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const updatedData = { ...data, teachers: updatedTeachers };
     persistData(updatedData);
   };
+
 
   // Update pricing tier
   const updatePricingTier = (id: string, fields: Partial<PricingTier>) => {
@@ -4536,6 +4668,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     persistData(updatedData);
   };
 
+
   return (
     <AppContext.Provider
       value={{
@@ -4566,6 +4699,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         batchUpdateSessionPayments,
         batchUpdateAllSessionsPayments,
         updateDiscount,
+        applyStudentDiscount,
         addStudent,
         enrollStudentMultiGroups,
         recordMultiGroupPayment,

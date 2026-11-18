@@ -15,9 +15,10 @@ import {
   Printer,
   IdCard
 } from 'lucide-react';
-import { DiscountType, StudentRecord } from '../types';
+import { DiscountType, DiscountDuration, StudentRecord } from '../types';
 import { isSummaryRow } from '../utils/sessionUtils';
 import StudentBadgeModal from './StudentBadgeModal';
+import DiscountEditorControl from './DiscountEditorControl';
 import { normalizeScannedBarcode } from '../utils/barcodeUtils';
 
 interface Props {
@@ -47,6 +48,8 @@ export default function AddStudentModal({ groupId, onClose }: Props) {
 
   // Discount & Status
   const [discount, setDiscount] = useState<DiscountType>('1');
+  const [customDiscountFee, setCustomDiscountFee] = useState<number | undefined>(undefined);
+  const [discountDuration, setDiscountDuration] = useState<DiscountDuration | undefined>(undefined);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [duplicateWarningStudent, setDuplicateWarningStudent] = useState<{
@@ -145,7 +148,9 @@ export default function AddStudentModal({ groupId, onClose }: Props) {
       const created = addStudent(groupId, {
         name: cleanName,
         phone: phone.trim(),
-        discount
+        discount,
+        customDiscountFee,
+        discountDuration
       });
 
       if (created) {
@@ -169,7 +174,9 @@ export default function AddStudentModal({ groupId, onClose }: Props) {
       const created = addStudent(groupId, {
         name: selectedExistingStudent.name,
         phone: selectedExistingStudent.phone,
-        discount
+        discount,
+        customDiscountFee,
+        discountDuration
       });
 
       if (created) {
@@ -211,7 +218,9 @@ export default function AddStudentModal({ groupId, onClose }: Props) {
       const created = addStudent(groupId, {
         name: cleanName,
         phone: phone.trim(),
-        discount
+        discount,
+        customDiscountFee,
+        discountDuration
       });
 
       setLastSavedStudent(created);
@@ -242,7 +251,9 @@ export default function AddStudentModal({ groupId, onClose }: Props) {
       const created = addStudent(groupId, {
         name: savedName,
         phone: selectedExistingStudent.phone,
-        discount
+        discount,
+        customDiscountFee,
+        discountDuration
       });
 
       setLastSavedStudent(created);
@@ -641,17 +652,17 @@ export default function AddStudentModal({ groupId, onClose }: Props) {
             <label style={{ display: 'block', fontWeight: 600, fontSize: '0.85rem', marginBottom: '6px' }}>
               نوع التسجيل / التخفيض في الفوج
             </label>
-            <select
-              value={discount}
-              onChange={(e) => setDiscount(e.target.value as DiscountType)}
-              className="m3-input"
-              style={{ cursor: 'pointer' }}
-            >
-              <option value="1">تسعيرة عادية 100% ({group?.type === '4-10000' ? '10000 دج' : '2500 دج'})</option>
-              <option value="0.8">تخفيض 20% (دفع 80%)</option>
-              <option value="0">إعفاء كامل (معفى 0 دج)</option>
-              <option value="تعويض">تعويض حصص</option>
-            </select>
+            <DiscountEditorControl
+              discount={discount}
+              customDiscountFee={customDiscountFee}
+              discountDuration={discountDuration}
+              baseGroupPrice={group?.studentFee || (group?.type === '4-10000' || group?.isVip ? 10000 : 2500)}
+              onChange={(next) => {
+                setDiscount(next.discount);
+                setCustomDiscountFee(next.customDiscountFee);
+                setDiscountDuration(next.discountDuration);
+              }}
+            />
           </div>
 
           {/* Error Banner */}

@@ -27,11 +27,12 @@ import {
   ArrowRightLeft,
   RotateCcw
 } from 'lucide-react';
-import { StudentRecord, GroupSheet, DiscountType } from '../types';
+import { StudentRecord, GroupSheet, DiscountType, DiscountDuration } from '../types';
 import Link from 'next/link';
 import StudentPaymentModal from './StudentPaymentModal';
 import ThermalReceiptsModal from './ThermalReceiptsModal';
 import StudentBadgeModal from './StudentBadgeModal';
+import DiscountEditorControl, { formatDiscountLabel } from './DiscountEditorControl';
 import { formatGroupTime, isSummaryRow, isVipGroupId } from '../utils/sessionUtils';
 import { normalizeArabicName } from '../utils/barcodeUtils';
 import { getStudentPaymentAccount } from '../utils/studentAccountUtils';
@@ -59,6 +60,9 @@ export default function StudentProfileModal({ student, groupId, onClose }: Props
   const [editPhone, setEditPhone] = useState(student.phone || '');
   const [editBarcode, setEditBarcode] = useState(student.barcode || '');
   const [editDiscount, setEditDiscount] = useState<DiscountType>(student.discount || '1');
+  const [editCustomDiscountFee, setEditCustomDiscountFee] = useState<number | undefined>(student.customDiscountFee);
+  const [editDiscountDuration, setEditDiscountDuration] = useState<DiscountDuration | undefined>(student.discountDuration);
+  const [discountTargetGroups, setDiscountTargetGroups] = useState<string[]>([groupId]);
   const [syncAllGroups, setSyncAllGroups] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -117,7 +121,10 @@ export default function StudentProfileModal({ student, groupId, onClose }: Props
     setEditPhone(currentStudent.phone || '');
     setEditBarcode(currentStudent.barcode || '');
     setEditDiscount(currentStudent.discount || '1');
-  }, [currentStudent]);
+    setEditCustomDiscountFee(currentStudent.customDiscountFee);
+    setEditDiscountDuration(currentStudent.discountDuration);
+    setDiscountTargetGroups([groupId]);
+  }, [currentStudent, groupId]);
 
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
@@ -127,15 +134,22 @@ export default function StudentProfileModal({ student, groupId, onClose }: Props
     setIsSaving(true);
     const cleanPhone = editPhone.trim();
     const cleanBarcode = editBarcode.trim();
+    const targetSet = new Set(discountTargetGroups);
 
     if (syncAllGroups && allEnrollments.length > 0) {
       allEnrollments.forEach((enrollment) => {
-        const isCurrentGroup = enrollment.groupId === groupId;
+        const applyDiscountHere = targetSet.has(enrollment.groupId);
         updateStudent(enrollment.groupId, enrollment.studentRecord.rowId, {
           name: cleanName,
           phone: cleanPhone,
           barcode: cleanBarcode,
-          ...(isCurrentGroup ? { discount: editDiscount } : {})
+          ...(applyDiscountHere
+            ? {
+                discount: editDiscount,
+                customDiscountFee: editDiscount === 'custom' ? editCustomDiscountFee : undefined,
+                discountDuration: editDiscountDuration
+              }
+            : {})
         });
       });
     } else {
@@ -143,7 +157,9 @@ export default function StudentProfileModal({ student, groupId, onClose }: Props
         name: cleanName,
         phone: cleanPhone,
         barcode: cleanBarcode,
-        discount: editDiscount
+        discount: editDiscount,
+        customDiscountFee: editDiscount === 'custom' ? editCustomDiscountFee : undefined,
+        discountDuration: editDiscountDuration
       });
     }
 
@@ -354,21 +370,81 @@ export default function StudentProfileModal({ student, groupId, onClose }: Props
                 />
               </div>
 
-              <div>
+              <div style={{ gridColumn: '1 / -1' }}>
                 <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, marginBottom: '5px' }}>
-                  نوع التخفيض في هذا الفوج ({groupId})
+                  التخفيض ومدة الصلاحية:
                 </label>
-                <select
-                  value={editDiscount}
-                  onChange={(e) => setEditDiscount(e.target.value as any)}
-                  className="m3-select"
-                  style={{ width: '100%', fontWeight: 700 }}
-                >
-                  <option value="1">عادي - تسديد 100%</option>
-                  <option value="0.8">تخفيض - تسديد 80%</option>
-                  <option value="0">معفى بالكامل - 0%</option>
-                  <option value="تعويض">حصة تعويض</option>
-                </select>
+                <DiscountEditorControl
+                  discount={editDiscount}
+                  customDiscountFee={editCustomDiscountFee}
+                  discountDuration={editDiscountDuration}
+                  baseGroupPrice={group?.studentFee || (group?.type === '4-10000' || group?.isVip ? 10000 : 2500)}
+                  onChange={(next) => {
+                    setEditDiscount(next.discount);
+                    setEditCustomDiscountFee(next.customDiscountFee);
+                    setEditDiscountDuration(next.discountDuration);
+                  }}
+                />
+                {allEnrollments.length > 1 && (
+                  <div style={{ marginTop: '8px', padding: '8px 10px', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                      <span style={{ fontSize: '0.76rem', fontWeight: 800, color: '#334155' }}>
+                        تطبيق هذا التخفيض على المواد / الأفواج التالية:
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setDiscountTargetGroups(
+                            discountTargetGroups.length === allEnrollments.length
+                              ? [groupId]
+                              : allEnrollments.map((e) => e.groupId)
+                          )
+                        }
+                        className="m3-btn-text"
+                        style={{ fontSize: '0.72rem', fontWeight: 700, padding: '1px 6px' }}
+                      >
+                        {discountTargetGroups.length === allEnrollments.length ? 'الفوج الحالي فقط' : 'تحديد الكل'}
+                      </button>
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                      {allEnrollments.map((enr) => {
+                        const checked = discountTargetGroups.includes(enr.groupId);
+                        return (
+                          <label
+                            key={enr.groupId}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              padding: '3px 8px',
+                              borderRadius: '6px',
+                              fontSize: '0.74rem',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              backgroundColor: checked ? '#e0f2fe' : '#ffffff',
+                              border: `1px solid ${checked ? '#0284c7' : '#cbd5e1'}`,
+                              color: checked ? '#0369a1' : '#475569'
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => {
+                                setDiscountTargetGroups((prev) =>
+                                  prev.includes(enr.groupId)
+                                    ? prev.filter((id) => id !== enr.groupId)
+                                    : [...prev, enr.groupId]
+                                );
+                              }}
+                              style={{ accentColor: '#0284c7' }}
+                            />
+                            <span>{enr.groupId} ({enr.groupSheet.subject})</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -635,13 +711,11 @@ export default function StudentProfileModal({ student, groupId, onClose }: Props
                   <div>
                     <span style={{ color: 'var(--md-sys-color-on-surface-variant)', display: 'block' }}>نوع التسجيل:</span>
                     <strong>
-                      {student.discount === '0'
-                        ? 'معفى بالكامل'
-                        : student.discount === '0.8'
-                        ? 'تخفيض 20%'
-                        : student.discount === 'تعويض'
-                        ? 'تعويض'
-                        : 'تسجيل عادي (100%)'}
+                      {formatDiscountLabel(
+                        currentStudent.discount,
+                        currentStudent.customDiscountFee,
+                        currentStudent.discountDuration
+                      )}
                     </strong>
                   </div>
                 </div>

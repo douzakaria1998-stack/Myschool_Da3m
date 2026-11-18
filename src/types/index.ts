@@ -11,7 +11,8 @@ export interface CoveringMatchResult {
   isNewStudent?: boolean;
 }
 
-export type DiscountType = '1' | '0.8' | '0' | 'تعويض' | string;
+export type DiscountType = '1' | '0.8' | '0' | 'تعويض' | 'custom' | string;
+export type DiscountDuration = 'only_this_id' | 'always' | number;
 
 export interface StudentRecord {
   rowId: number;
@@ -19,7 +20,9 @@ export interface StudentRecord {
   phone: string;
   barcode?: string; // Barcode or card serial number
   attendance: AttendanceStatus[]; // dynamic N sessions
-  discount: DiscountType; // '1' (100%), '0.8' (80%), '0' (0%), or 'تعويض'
+  discount: DiscountType; // '1' (100%), '0.8' (80%), '0' (0%), 'custom', or 'تعويض'
+  customDiscountFee?: number; // Custom total cycle fee the student will pay (if discount === 'custom')
+  discountDuration?: DiscountDuration; // 'only_this_id' | 'always' | number (2,3,4,5,6...) cycles remaining
   fee: number; // Total fee required (المجموع)
   payments: (number | string)[]; // dynamic N payment entries (المستلم 1..N)
   totalReceived: number; // Total collected (مجموع المستلم)

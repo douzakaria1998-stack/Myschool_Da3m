@@ -25,6 +25,8 @@ import { playSuccessChime } from '../utils/soundUtils';
 import { sanitizePrintTitle } from '../utils/printTitleUtils';
 import { normalizeScannedBarcode } from '../utils/barcodeUtils';
 import { saveReceiptPdfToServer } from '../utils/receiptSaveUtils';
+import { DiscountType, DiscountDuration } from '../types';
+import DiscountEditorControl, { formatDiscountLabel } from './DiscountEditorControl';
 
 interface Props {
   isOpen: boolean;
@@ -47,6 +49,9 @@ interface EnrolledGroupItem {
   payingNow: number | string;
   isSelected: boolean;
   isNewEnrollment?: boolean;
+  discount?: DiscountType;
+  customDiscountFee?: number;
+  discountDuration?: DiscountDuration;
 }
 
 function formatTiming(t?: string | number): string {
@@ -69,7 +74,15 @@ export default function MultiGroupPaymentModal({
   initialSubjectFilter,
   onPaymentSuccess
 }: Props) {
-  const { data, recordMultiGroupPayment } = useApp();
+  const { data, recordMultiGroupPayment, applyStudentDiscount } = useApp();
+
+  // Inline discount editing state
+  const [editingDiscountGroupId, setEditingDiscountGroupId] = useState<string | null>(null);
+  const [draftDiscount, setDraftDiscount] = useState<{
+    discount: DiscountType;
+    customDiscountFee?: number;
+    discountDuration?: DiscountDuration;
+  }>({ discount: '1' });
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -213,7 +226,10 @@ export default function MultiGroupPaymentModal({
           totalReceived: totalPaid,
           currentDebt: effectiveDebt,
           payingNow: shouldSelect ? effectiveDebt : '',
-          isSelected: shouldSelect
+          isSelected: shouldSelect,
+          discount: found.discount,
+          customDiscountFee: found.customDiscountFee,
+          discountDuration: found.discountDuration
         });
       }
     });
@@ -1414,7 +1430,117 @@ export default function MultiGroupPaymentModal({
                             </button>
                           </div>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (editingDiscountGroupId === item.groupId) {
+                              setEditingDiscountGroupId(null);
+                            } else {
+                              setEditingDiscountGroupId(item.groupId);
+                              setDraftDiscount({
+                                discount: item.discount || '1',
+                                customDiscountFee: item.customDiscountFee,
+                                discountDuration: item.discountDuration || 'only_this_id'
+                              });
+                            }
+                          }}
+                          className="m3-btn m3-btn-outlined"
+                          style={{
+                            fontSize: '0.68rem',
+                            padding: '2px 6px',
+                            height: '24px',
+                            fontWeight: 800,
+                            borderColor: item.discount && item.discount !== '1' ? '#7c3aed' : '#cbd5e1',
+                            color: item.discount && item.discount !== '1' ? '#7c3aed' : '#475569',
+                            backgroundColor: item.discount && item.discount !== '1' ? '#f5f3ff' : 'transparent'
+                          }}
+                          title={
+                            item.discount && item.discount !== '1'
+                              ? formatDiscountLabel(item.discount, item.customDiscountFee, item.discountDuration)
+                              : 'إضافة أو تعديل تخفيض التلميذ'
+                          }
+                        >
+                          {item.discount && item.discount !== '1' ? 'تعديل التخفيض ★' : 'تخفيض'}
+                        </button>
                       </div>
+
+                      {editingDiscountGroupId === item.groupId && selectedStudent && (
+                        <div
+                          style={{
+                            width: '100%',
+                            marginTop: '6px',
+                            padding: '8px 10px',
+                            backgroundColor: '#f5f3ff',
+                            border: '1px solid #ddd6fe',
+                            borderRadius: '8px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '8px'
+                          }}
+                        >
+                          <div style={{ fontSize: '0.74rem', fontWeight: 800, color: '#5b21b6' }}>
+                            تحديد التخفيض ومدة الصلاحية ({item.groupId} - {item.subject}):
+                          </div>
+                          <DiscountEditorControl
+                            compact
+                            discount={draftDiscount.discount}
+                            customDiscountFee={draftDiscount.customDiscountFee}
+                            discountDuration={draftDiscount.discountDuration}
+                            baseGroupPrice={
+                              data.groupData[item.groupId]?.studentFee || (item.isVip ? 10000 : 2500)
+                            }
+                            onChange={setDraftDiscount}
+                          />
+                          <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                            <button
+                              type="button"
+                              onClick={() => setEditingDiscountGroupId(null)}
+                              className="m3-btn m3-btn-text"
+                              style={{ fontSize: '0.72rem', padding: '3px 8px', height: '26px' }}
+                            >
+                              إلغاء
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const targetIds = displayedGroups.filter((g) => g.isSelected).map((g) => g.groupId);
+                                const ids = targetIds.length > 0 ? targetIds : [item.groupId];
+                                applyStudentDiscount(
+                                  { name: selectedStudent.name, barcode: selectedStudent.barcode },
+                                  ids,
+                                  draftDiscount.discount,
+                                  draftDiscount.customDiscountFee,
+                                  draftDiscount.discountDuration
+                                );
+                                setEditingDiscountGroupId(null);
+                                setTimeout(() => handleSelectStudent(selectedStudent), 30);
+                              }}
+                              className="m3-btn m3-btn-tonal"
+                              style={{ fontSize: '0.72rem', padding: '3px 10px', height: '26px', fontWeight: 800 }}
+                            >
+                              تطبيق على كل الأفواج المحددة
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                applyStudentDiscount(
+                                  { name: selectedStudent.name, barcode: selectedStudent.barcode },
+                                  [item.groupId],
+                                  draftDiscount.discount,
+                                  draftDiscount.customDiscountFee,
+                                  draftDiscount.discountDuration
+                                );
+                                setEditingDiscountGroupId(null);
+                                setTimeout(() => handleSelectStudent(selectedStudent), 30);
+                              }}
+                              className="m3-btn m3-btn-primary"
+                              style={{ fontSize: '0.72rem', padding: '3px 10px', height: '26px', fontWeight: 800 }}
+                            >
+                              حفظ لهذا الفوج
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
