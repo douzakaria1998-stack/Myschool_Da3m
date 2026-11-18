@@ -1200,34 +1200,20 @@ export function getStudentSessionInfo(
 
   const isCountablePresent = (status: string | null | undefined): boolean => {
     const clean = String(status || '').trim().toUpperCase();
-    return clean === 'P' || clean === 'C' || clean === 'M' || clean === 'ح' || clean === 'م';
+    return clean === 'P' || clean === 'ح';
   };
 
   let firstActiveIndex = -1;
   for (let i = 0; i < cycleAtt.length; i++) {
-    const clean = String(cycleAtt[i] || '').trim().toUpperCase();
-    if (isCountablePresent(clean) || clean === 'N') {
+    if (isCountablePresent(cycleAtt[i])) {
       firstActiveIndex = i;
       break;
     }
   }
 
-  const isPaid = totalReceived > 0;
-
   const isSessionCounted = (sessionIdx: number): boolean => {
     if (sessionIdx < 0 || sessionIdx >= cycleSessions) return false;
-    const st = cycleAtt[sessionIdx];
-    const clean = String(st || '').trim().toUpperCase();
-    // A, CH, and S sessions are NEVER counted for the student
-    if (clean === 'A' || clean === 'غ' || clean === 'CH' || clean === 'S') return false;
-
-    // For paid students once the group has ended, ONLY attended ('P', 'C', 'M', 'ح', 'م') sessions count!
-    if (isPaid && isGroupEnded) {
-      return isCountablePresent(st);
-    }
-
-    if (firstActiveIndex === -1) return false;
-    return sessionIdx >= firstActiveIndex;
+    return isCountablePresent(cycleAtt[sessionIdx]);
   };
 
   let countedSessions = 0;

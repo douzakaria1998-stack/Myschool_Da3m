@@ -222,12 +222,12 @@ export const calcStudentFinancesPure = (
     return sum + (isNaN(val) ? 0 : val);
   }, 0);
 
-  // Attendance counts - ONLY 'P', 'C', 'ح', 'M', 'م' count as completed attendance!
-  // 'A' (absent), 'N' (new entry), 'CH' (group change) DO NOT count!
+  // Attendance counts - ONLY 'P' ('ح') counts as completed attendance for student & teacher!
+  // Empty '', 'A', 'CH', 'S' DO NOT count!
   const cycleAttendance = (student.attendance || []).slice(0, cycleSessions);
-  const attendedCount = cycleAttendance.filter((a) => a === 'P' || a === 'C' || a === 'ح').length;
-  const makeupCount = cycleAttendance.filter((a) => a === 'M' || a === 'م').length;
-  const countablePSessions = attendedCount + makeupCount;
+  const attendedCount = cycleAttendance.filter((a) => a === 'P' || a === 'ح').length;
+  const makeupCount = 0;
+  const countablePSessions = attendedCount;
   const totalAttendance = countablePSessions;
 
   // Check if group has ended all sessions in its cycle
@@ -727,12 +727,17 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
       changed = true;
     }
 
-    // Enforce 4 sessions for all students, convert legacy 'N' -> 'P', ensure barcode exists, and recalculate finances
+    // Enforce 4 sessions for all students, convert 'N' -> 'P' and 'M'/'C' -> '', ensure barcode exists, and recalculate finances
     let finalStudents: StudentRecord[] = deduplicatedStudents.map((s) => {
       let att = (s.attendance || []).slice(0, 4).map((a) => {
-        if (String(a || '').trim().toUpperCase() === 'N') {
+        const clean = String(a || '').trim().toUpperCase();
+        if (clean === 'N') {
           changed = true;
           return 'P' as AttendanceStatus;
+        }
+        if (clean === 'M' || clean === 'م' || clean === 'C') {
+          changed = true;
+          return '' as AttendanceStatus;
         }
         return a;
       });
