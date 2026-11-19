@@ -1690,7 +1690,6 @@ export default function AttendancePage() {
         <span className="m3-chip m3-chip-p">P حاضر</span>
         <span className="m3-chip m3-chip-a">A غائب</span>
         <span className="m3-chip m3-chip-ch">CH تغيير فوج</span>
-        <span className="m3-chip m3-chip-s">S معلق</span>
 
         {todaySessionIndex !== -1 && (
           <button
@@ -2079,13 +2078,11 @@ export default function AttendancePage() {
                       else if (status === 'C') chipClass = 'm3-chip-c';
                       else if (status === 'N') chipClass = 'm3-chip-n';
 
-                      let cellTitle = 'اضغط لتغيير حالة الحضور (P / A / CH / S)';
+                      let cellTitle = 'اضغط لتغيير حالة الحضور (P / A / CH)';
                       if (status === 'CH') {
                         cellTitle = 'تغيير فوج (CH) — انتقل التلميذ إلى فوج آخر (غير محتسبة)';
-                      } else if (status === 'S') {
-                        cellTitle = 'حصة معلقة / متوقفة (S) — غير محتسبة على التلميذ ولا الأستاذ';
                       } else if (status === 'A') {
-                        cellTitle = 'غائب (A) — غير محتسبة على التلميذ ولا الأستاذ';
+                        cellTitle = 'غائب (A) — غير محتسبة بعد انتهاء الفوج ولا للأستاذ';
                       } else if (status === '') {
                         if (!isCounted) {
                           cellTitle = 'حصة غير محتسبة — لم ينضم التلميذ بعد للفوج (اضغط لتسجيل الحضور)';

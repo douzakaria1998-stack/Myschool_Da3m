@@ -1205,7 +1205,8 @@ export function getStudentSessionInfo(
 
   let firstActiveIndex = -1;
   for (let i = 0; i < cycleAtt.length; i++) {
-    if (isCountablePresent(cycleAtt[i])) {
+    const clean = String(cycleAtt[i] || '').trim().toUpperCase();
+    if (isCountablePresent(clean) || clean === 'A' || clean === 'غ') {
       firstActiveIndex = i;
       break;
     }
@@ -1213,7 +1214,19 @@ export function getStudentSessionInfo(
 
   const isSessionCounted = (sessionIdx: number): boolean => {
     if (sessionIdx < 0 || sessionIdx >= cycleSessions) return false;
-    return isCountablePresent(cycleAtt[sessionIdx]);
+    const st = cycleAtt[sessionIdx];
+    const clean = String(st || '').trim().toUpperCase();
+    // CH and S are never counted
+    if (clean === 'CH' || clean === 'S') return false;
+
+    // After the group finishes (not active): count ONLY attended ('P') sessions!
+    if (isGroupEnded) {
+      return isCountablePresent(st);
+    }
+
+    // While the group is active: count normally from firstActiveIndex through the end of the cycle
+    if (firstActiveIndex === -1) return false;
+    return sessionIdx >= firstActiveIndex;
   };
 
   let countedSessions = 0;

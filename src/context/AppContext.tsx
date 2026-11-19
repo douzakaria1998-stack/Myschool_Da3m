@@ -281,10 +281,10 @@ export const calcStudentFinancesPure = (
       const c = String(a || '').trim().toUpperCase();
       return c === 'CH' || c === 'S' || c === 'A' || c === 'غ';
     });
-  const hasPaidEndedZeroAttendance =
-    sessionInfo.countedSessions === 0 && totalReceived > 0 && groupEnded;
+  const hasEndedZeroAttendance =
+    sessionInfo.countedSessions === 0 && groupEnded;
   const countedSessions =
-    hasOnlyNonCountedMarks || hasPaidEndedZeroAttendance
+    hasOnlyNonCountedMarks || hasEndedZeroAttendance
       ? 0
       : sessionInfo.countedSessions > 0
       ? sessionInfo.countedSessions
@@ -2159,7 +2159,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return calcStudentFinancesPure(student, groupType, pricingTiers, groupFinances);
   };
 
-  // Atomic cycle attendance ('' -> P -> A -> CH -> S -> '') with synchronous state updating
+  // Atomic cycle attendance ('' -> P -> A -> CH -> '') with synchronous state updating
   const cycleAttendance = (groupId: string, rowId: number, sessionIndex: number): AttendanceStatus => {
     const currentData = dataRef.current;
     const group = currentData.groupData[groupId];
@@ -2170,11 +2170,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const currentVal = (student.attendance?.[sessionIndex] || '').trim().toUpperCase();
     let next: AttendanceStatus = 'P';
-    if (currentVal === '' || currentVal === 'N' || currentVal === 'M' || currentVal === 'C') next = 'P';
+    if (currentVal === '' || currentVal === 'N' || currentVal === 'M' || currentVal === 'C' || currentVal === 'S') next = 'P';
     else if (currentVal === 'P' || currentVal === 'ح') next = 'A';
     else if (currentVal === 'A' || currentVal === 'غ') next = 'CH';
-    else if (currentVal === 'CH') next = 'S';
-    else if (currentVal === 'S') next = '';
+    else if (currentVal === 'CH') next = '';
     else next = 'P';
 
     const sessionCount = group.sessionDates?.length || group.sessionCount || 4;
