@@ -703,7 +703,8 @@ export function getGroupCurrentSession(students: StudentRecord[], totalSessions:
       if (typeof val !== 'string') return false;
       const clean = val.trim().toUpperCase();
       if (!clean || clean.includes('مجموع')) return false;
-      return ['P', 'A', 'M', 'S', 'C', 'CH', 'N', 'ح', 'غ', 'م'].includes(clean) || clean.length > 0;
+      // Only actual attended/absent marks (P/A) indicate the group held that session; CH/S do not!
+      return ['P', 'A', 'ح', 'غ'].includes(clean);
     });
     if (hasAtt) {
       maxIdx = i;

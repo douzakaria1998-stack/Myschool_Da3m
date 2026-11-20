@@ -592,9 +592,18 @@ const autoRenewEndedGroups = (centerData: CenterData): { updated: CenterData; ch
     );
     if (genuineStudents.length === 0) continue;
 
-    // Enforce 48-hour waiting period after the group ends before auto-creating the next ID
+    // Enforce 48-hour waiting period after the group ends AND after the last session date
     const FORTY_EIGHT_HOURS_MS = 48 * 60 * 60 * 1000;
     const nowMs = Date.now();
+    const sourceDatesCheck = (tailSheet.sessionDates || []).filter((d) => Boolean(d && typeof d === 'string' && d.trim()));
+    const lastDateForCheck = sourceDatesCheck.length > 0 ? formatToYYYYMMDD(sourceDatesCheck[sourceDatesCheck.length - 1]) : '';
+    if (lastDateForCheck && /^\d{4}\/\d{2}\/\d{2}$/.test(lastDateForCheck)) {
+      const [yy, mm, dd] = lastDateForCheck.split('/').map(Number);
+      const lastSessionNoonMs = new Date(yy, mm - 1, dd, 12, 0, 0).getTime();
+      if (nowMs - lastSessionNoonMs < FORTY_EIGHT_HOURS_MS) {
+        continue;
+      }
+    }
     const recordedEndedAt = tailSheet.endedAt ?? tailMeta.endedAt;
     if (!recordedEndedAt) {
       workingGroupData[tailMeta.id] = { ...tailSheet, endedAt: nowMs };
@@ -713,8 +722,8 @@ const sanitizeData = (centerData: CenterData): { cleaned: CenterData; changed: b
   const idMap: Record<string, string> = {};
   const deletedGroupSet = new Set((centerData.deletedGroups || []).map((g) => g.trim().toUpperCase()));
 
-  // Remove empty auto-created BAC53 and BEM11 from local/cloud state if they have no attendance or payments
-  for (const legacyAutoId of ['BAC53', 'BEM11']) {
+  // Remove empty premature/stopped auto-created groups from local/cloud state if they have no attendance or payments
+  for (const legacyAutoId of ['BAC53', 'BEM11', 'BAC56', 'BAC57', 'BAC61', 'BEM13', 'BEM14']) {
     const sheet = centerData.groupData?.[legacyAutoId];
     if (sheet) {
       const hasAtt = (sheet.students || []).some((s) => (s.attendance || []).some((a) => a !== ''));
